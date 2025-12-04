@@ -1,0 +1,44 @@
+{
+  "name": "@unrift/core",
+  "version": "0.0.0",
+  "description": "",
+  "private": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./*": "./*"
+  },
+  "bin": {
+    "unrift": "./bin/unrift.mjs"
+  },
+  "scripts": {
+    "build": "pnpm run clean && pnpm run compile",
+    "build:tsc": "tsc -p ./tsconfig.build.json && tsc-esm-fix dist --tsconfig ./tsconfig.build.json",
+    "build:esbuild": "pnpm clean && pnpm build:tsc && pnpm --filter @unrift/core exec node ../../build.js",
+    "clean": "rm -rf ./dist",
+    "compile": "tsc -p tsconfig.build.json && tsc-esm-fix dist --tsconfig ./tsconfig.build.json",
+    "prepublishOnly": "pnpm run build",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "test": "node bin/unrift.mjs"
+  },
+  "keywords": [],
+  "author": "elijah kotyluk <elijah@elijahkotyluk.com>",
+  "license": "ISC",
+  "packageManager": "pnpm@10.20.0",
+  "devDependencies": {
+    "chalk": "^5.6.2",
+    "ts-node": "^10.9.2",
+    "tsc-esm-fix": "^3.1.2",
+    "typescript": "^5.9.3"
+  }
+}
