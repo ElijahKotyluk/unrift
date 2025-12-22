@@ -11,7 +11,6 @@
     "packages/*"
   ],
   "scripts": {
-    "build:esbuild": "node build.js",
     "clean": "pnpm run -r clean",
     "clean:all": "npx lerna run clean",
     "build": "pnpm run -r build",
@@ -30,7 +29,7 @@
   "devDependencies": {
     "@eslint/js": "~9.38.0",
     "@types/node": "^24.10.1",
-    "esbuild": "^0.27.0",
+    "devoid": "^0.1.0",
     "eslint": "~9.38.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "~5.5.0",

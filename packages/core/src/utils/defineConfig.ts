@@ -3,6 +3,7 @@ interface UnriftConfigOptions {
   rootDir?: string;
   timeoutMs?: number;
   bail?: boolean;
+  pattern?: string;
   includes?: string[];
   excludes?: string[];
 }

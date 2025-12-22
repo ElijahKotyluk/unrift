@@ -3,35 +3,61 @@ import { TaskStatus, type PromisableFn } from "./types";
 interface TestTask {
   description: string;
   fn: PromisableFn<void>;
-  result?: TestResult;
   run(): Promise<void>;
-}
-
-interface TestResult {
-  status: Extract<TaskStatus, "pass" | "fail" | "skipped" | "todo" | "only">;
-  error?: Error;
-  durationMs?: number;
 }
 
 class Test implements TestTask {
   description: string;
   durationMs: number = 0;
+  error?: Error;
+  hasOnly: boolean;
   fn: PromisableFn<void>;
+  mode: "default" | "skip" | "only";
+
   status: TaskStatus = TaskStatus.Pending;
 
-  error?: Error;
-
-  constructor(description: string, fn: PromisableFn<void>) {
+  constructor(
+    description: string,
+    fn: PromisableFn<void>,
+    mode: "default" | "skip" | "only" = "default",
+  ) {
     this.description = description;
     this.fn = fn;
+    this.mode = mode;
+    this.hasOnly = mode === "only";
   }
 
-  async run() {
+  async run(timeoutMs?: number): Promise<void> {
+    if (this.mode === "skip") {
+      this.status = TaskStatus.Skipped;
+      this.durationMs = 0;
+
+      return;
+    }
+
     const start = performance.now();
+    this.status = TaskStatus.Running;
+
+    const exec = Promise.resolve().then(() => this.fn());
 
     try {
-      this.status = TaskStatus.Running;
-      await this.fn();
+      if (timeoutMs !== undefined) {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+        const timeoutFn = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error(`Test timed out after ${timeoutMs} ms`));
+          }, timeoutMs);
+        });
+
+        try {
+          await Promise.race([exec, timeoutFn]);
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+        }
+      } else {
+        await exec;
+      }
 
       this.status = TaskStatus.Pass;
     } catch (error) {
@@ -43,4 +69,4 @@ class Test implements TestTask {
   }
 }
 
-export { Test, type TestResult, type TestTask, TaskStatus };
+export { Test, TaskStatus };

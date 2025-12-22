@@ -6,42 +6,46 @@ import {
   type TypedArray,
 } from "./helpers";
 
-type Pair = readonly [unknown, unknown];
+type WorkItem = readonly [unknown, unknown];
 
-function deepEqualInternal(
+function looseEqualInternal(
   left: unknown,
   right: unknown,
   leftToRightSeen: WeakMap<object, object>,
+  rightToLeftSeen: WeakMap<object, object>,
 ): boolean {
-  const worklist: Pair[] = [[left, right]];
+  const worklist: WorkItem[] = [[left, right]];
 
   while (worklist.length) {
     const [currentLeft, currentRight] = worklist.pop()!;
 
     if (sameValue(currentLeft, currentRight)) continue;
 
-    // Types must match at this point
     if (typeof currentLeft !== typeof currentRight) return false;
 
-    // Primitive mismatch (we already handled equality above)
+    // At this point, primitives differ (sameValue already handled equality).
     if (isPrimitive(currentLeft) || isPrimitive(currentRight)) return false;
 
-    // Functions, etc. – only ever equal by reference, which we've already checked
     if (!isObjectLike(currentLeft) || !isObjectLike(currentRight)) return false;
 
     const leftObj = currentLeft as object;
     const rightObj = currentRight as object;
 
-    // Cycle detection: require consistent mapping for left-side objects
-    const previouslyMappedRight = leftToRightSeen.get(leftObj);
-    if (previouslyMappedRight !== undefined) {
-      if (previouslyMappedRight !== rightObj) return false;
+    // Cycle / aliasing consistency (bijection-ish)
+    const mappedRight = leftToRightSeen.get(leftObj);
+    if (mappedRight !== undefined) {
+      if (mappedRight !== rightObj) return false;
       continue;
     }
-
+    const mappedLeft = rightToLeftSeen.get(rightObj);
+    if (mappedLeft !== undefined) {
+      if (mappedLeft !== leftObj) return false;
+      continue;
+    }
     leftToRightSeen.set(leftObj, rightObj);
+    rightToLeftSeen.set(rightObj, leftObj);
 
-    // Arrays (prototype-sensitive handled by proto check later, but arrays are special-cased)
+    // Arrays: sparse holes treated as undefined
     const leftIsArray = Array.isArray(currentLeft);
     const rightIsArray = Array.isArray(currentRight);
 
@@ -53,11 +57,16 @@ function deepEqualInternal(
 
       if (leftArr.length !== rightArr.length) return false;
 
-      // NOTE: preserves sparseness by reading indexed values directly.
       for (let index = 0; index < leftArr.length; index++) {
-        worklist.push([leftArr[index], rightArr[index]]);
-      }
+        const leftValue = Object.hasOwn(leftArr, index)
+          ? leftArr[index]
+          : undefined;
+        const rightValue = Object.hasOwn(rightArr, index)
+          ? rightArr[index]
+          : undefined;
 
+        worklist.push([leftValue, rightValue]);
+      }
       continue;
     }
 
@@ -77,7 +86,6 @@ function deepEqualInternal(
       for (let index = 0; index < leftTA.length; index++) {
         if (!sameValue(leftTA[index], rightTA[index])) return false;
       }
-
       continue;
     }
 
@@ -99,7 +107,6 @@ function deepEqualInternal(
       for (let index = 0; index < leftBytes.length; index++) {
         if (leftBytes[index] !== rightBytes[index]) return false;
       }
-
       continue;
     }
 
@@ -119,7 +126,6 @@ function deepEqualInternal(
         if (leftView.getUint8(offset) !== rightView.getUint8(offset))
           return false;
       }
-
       continue;
     }
 
@@ -131,7 +137,6 @@ function deepEqualInternal(
       if (!leftIsDate || !rightIsDate) return false;
       if ((currentLeft as Date).getTime() !== (currentRight as Date).getTime())
         return false;
-
       continue;
     }
 
@@ -147,11 +152,10 @@ function deepEqualInternal(
 
       if (leftRe.source !== rightRe.source) return false;
       if (leftRe.flags !== rightRe.flags) return false;
-
       continue;
     }
 
-    // Set
+    // Set (order-insensitive)
     const leftIsSet = currentLeft instanceof Set;
     const rightIsSet = currentRight instanceof Set;
 
@@ -163,22 +167,28 @@ function deepEqualInternal(
 
       if (leftSet.size !== rightSet.size) return false;
 
-      const unmatchedRightValues = new Set(rightSet);
+      const remainingRight = new Set(rightSet);
 
       outer: for (const leftValue of leftSet) {
-        for (const rightValue of unmatchedRightValues) {
-          if (deepEqualInternal(leftValue, rightValue, leftToRightSeen)) {
-            unmatchedRightValues.delete(rightValue);
+        for (const rightValue of remainingRight) {
+          if (
+            looseEqualInternal(
+              leftValue,
+              rightValue,
+              leftToRightSeen,
+              rightToLeftSeen,
+            )
+          ) {
+            remainingRight.delete(rightValue);
             continue outer;
           }
         }
         return false;
       }
-
       continue;
     }
 
-    // Map
+    // Map (order-insensitive by entries; keys compared via looseEqual)
     const leftIsMap = currentLeft instanceof Map;
     const rightIsMap = currentRight instanceof Map;
 
@@ -190,66 +200,73 @@ function deepEqualInternal(
 
       if (leftMap.size !== rightMap.size) return false;
 
-      const unmatchedRightEntries = new Set(rightMap.entries());
+      const remainingRightEntries = new Set(rightMap.entries());
 
       outer: for (const [leftKey, leftValue] of leftMap.entries()) {
-        for (const candidate of unmatchedRightEntries) {
+        for (const candidate of remainingRightEntries) {
           const [rightKey, rightValue] = candidate;
 
           if (
-            deepEqualInternal(leftKey, rightKey, leftToRightSeen) &&
-            deepEqualInternal(leftValue, rightValue, leftToRightSeen)
+            looseEqualInternal(
+              leftKey,
+              rightKey,
+              leftToRightSeen,
+              rightToLeftSeen,
+            ) &&
+            looseEqualInternal(
+              leftValue,
+              rightValue,
+              leftToRightSeen,
+              rightToLeftSeen,
+            )
           ) {
-            unmatchedRightEntries.delete(candidate);
+            remainingRightEntries.delete(candidate);
+
             continue outer;
           }
         }
         return false;
       }
-
       continue;
     }
 
-    // Fallback: plain objects / custom class instances (prototype-sensitive)
-    const leftProto = Object.getPrototypeOf(currentLeft);
-    const rightProto = Object.getPrototypeOf(currentRight);
-
-    if (leftProto !== rightProto) return false;
-
+    // Fallback: compare by enumerable shape (prototype-insensitive).
+    // Missing ≈ undefined via union-of-keys comparison.
     const leftKeys = Object.keys(currentLeft as Record<string, unknown>);
     const rightKeys = Object.keys(currentRight as Record<string, unknown>);
-
-    if (leftKeys.length !== rightKeys.length) return false;
+    const allKeys = new Set<string>([...leftKeys, ...rightKeys]);
 
     const leftRecord = currentLeft as Record<string, unknown>;
     const rightRecord = currentRight as Record<string, unknown>;
 
-    for (let i = 0; i < leftKeys.length; i++) {
-      const key = leftKeys[i];
+    for (const key of allKeys) {
+      const leftHasKey = Object.hasOwn(leftRecord, key);
+      const rightHasKey = Object.hasOwn(rightRecord, key);
 
-      if (!Object.hasOwn(rightRecord, key)) return false;
+      const leftValue = leftHasKey ? leftRecord[key] : undefined;
+      const rightValue = rightHasKey ? rightRecord[key] : undefined;
 
-      worklist.push([leftRecord[key], rightRecord[key]]);
+      // If one side is missing and the other side is present-but-not-undefined, fail.
+      if (leftHasKey !== rightHasKey) {
+        if (leftValue !== undefined || rightValue !== undefined) return false;
+      }
+
+      worklist.push([leftValue, rightValue]);
     }
   }
 
   return true;
 }
 
-/**
- * Deep structural equality with:
- * - Value semantics for primitives (+ NaN equal, +0/-0 equal)
- * - Structural comparison for Arrays, Maps, Sets, TypedArrays, ArrayBuffer, DataView, Date, RegExp
- * - Prototype-sensitive object comparison
- * - Cycle-safe (handles circular references)
- */
-export function deepEqual<T>(a: T, b: T): boolean {
-  if (sameValue(a, b)) return true;
+export function looseEqual<T>(left: T, right: T): boolean {
+  if (sameValue(left, right)) return true;
+  if (isPrimitive(left) || isPrimitive(right)) return false;
+  if (!isObjectLike(left) || !isObjectLike(right)) return false;
 
-  // Fast-path for primitive inequality
-  if (isPrimitive(a) || isPrimitive(b)) return false;
-
-  if (!isObjectLike(a) || !isObjectLike(b)) return false;
-
-  return deepEqualInternal(a, b, new WeakMap<object, object>());
+  return looseEqualInternal(
+    left,
+    right,
+    new WeakMap<object, object>(),
+    new WeakMap<object, object>(),
+  );
 }

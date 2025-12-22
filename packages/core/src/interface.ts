@@ -1,15 +1,35 @@
-import { unriftGlobalContext } from "./context";
+import { assertRegisterPhase, unriftGlobalContext } from "./context";
 import { getCurrentSuite, Suite } from "./suite";
 import { Test } from "./test";
 
 import type { PromisableFn } from "./types";
 
-function _describe(description: string, fn: PromisableFn<void>) {
+type DescribeFn = {
+  (description: string, fn: () => void): void;
+  only: (description: string, fn: () => void) => void;
+  skip: (description: string, fn: () => void) => void;
+};
+
+type ItFn = {
+  (description: string, fn: PromisableFn<void>): void;
+  only: (description: string, fn: PromisableFn<void>) => void;
+  skip: (description: string, fn: PromisableFn<void>) => void;
+};
+
+function _describe(
+  description: string,
+  fn: () => void,
+  mode: "default" | "skip" | "only",
+) {
+  assertRegisterPhase("describe");
+
   const parent = getCurrentSuite();
-  const suite = new Suite(description, parent);
+  const suite = new Suite(description, parent, mode);
+
   parent.addSuite(suite);
 
   unriftGlobalContext.currentSuite = suite;
+
   try {
     fn();
   } finally {
@@ -17,17 +37,25 @@ function _describe(description: string, fn: PromisableFn<void>) {
   }
 }
 
-function _it(description: string, fn: PromisableFn<void>) {
-  const test = new Test(description, fn);
+const describe: DescribeFn = (description, fn) =>
+  _describe(description, fn, "default");
+describe.only = (description, fn) => _describe(description, fn, "only");
+describe.skip = (description, fn) => _describe(description, fn, "skip");
+
+function _it(
+  description: string,
+  fn: PromisableFn<void>,
+  mode: "default" | "skip" | "only",
+) {
+  assertRegisterPhase("it");
+
+  const test = new Test(description, fn, mode);
+
   getCurrentSuite().addTest(test);
 }
 
-const describe = (description: string, fn: PromisableFn<void>) => {
-  return _describe(description, fn);
-};
-
-const it = (description: string, fn: PromisableFn<void>) => {
-  return _it(description, fn);
-};
+const it: ItFn = (description, fn) => _it(description, fn, "default");
+it.only = (description, fn) => _it(description, fn, "only");
+it.skip = (description, fn) => _it(description, fn, "skip");
 
 export { describe, it };

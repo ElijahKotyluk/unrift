@@ -11,5 +11,5 @@ enum TaskStatus {
   Todo = "todo",
 }
 
-export type { Promisable, PromisableFn };
+export type { PromisableFn };
 export { TaskStatus };

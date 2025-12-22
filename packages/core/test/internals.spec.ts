@@ -19,8 +19,19 @@ describe("Sample Test Suite", () => {
 describe("Failing Test Suite", () => {
   it("should fail this test", () => {
     expect(1 + 1).toBe(3);
+    expect(true).toBe(false);
   });
 });
+
+describe("toEqual", () => {
+  it("should correctly compare loose equality", () => {
+    expect({}).toEqual({ a: undefined });
+
+    expect([, 1]).toEqual([undefined, 1]);
+
+    expect(new (class X { x = 1 })()).toEqual({ x: 1 });
+  });
+})
 
 describe("toStrictEqual", () => {
   it("should correctly compare complex objects", () => {
@@ -55,5 +66,12 @@ describe("toStrictEqual", () => {
     };
 
     expect(obj1).toStrictEqual(obj2);
+  });
+});
+
+describe("toThrow", () => {
+  it("should pass when function throws expected error", () => {
+    expect(() => { throw new Error("should pass"); }).toThrow("should pass");
+    expect(() => "no throw" ).not.toThrow();
   });
 });
