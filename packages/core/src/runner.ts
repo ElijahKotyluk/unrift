@@ -1,7 +1,6 @@
 import chalk from "chalk";
 import { pathToFileURL } from "url";
-import { existsSync, readdirSync } from "fs";
-import { join, resolve } from "path";
+import { resolve } from "path";
 
 import { Phase, unriftGlobalContext } from "./context";
 import { clearContext, computeOnlyFlags, rootSuite, Suite } from "./suite";
@@ -9,6 +8,7 @@ import { loadConfig, loadConfigFromPath } from "./utils/loadConfig";
 import { TaskStatus } from "./types";
 
 import "./matchers";
+import { discoverTestFiles } from "./utils/discoverTestFiles";
 
 interface RunnerOptions {
   configPath?: string;
@@ -83,28 +83,6 @@ function filterByIncludesExcludes(
   return filtered;
 }
 
-function discoverSpecFiles(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-
-  const entries = readdirSync(dir, { withFileTypes: true });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-
-    if (entry.isDirectory()) {
-      files.push(...discoverSpecFiles(fullPath));
-      continue;
-    }
-
-    if (entry.isFile() && /\.(spec|test)\.(ts|js)$/.test(entry.name)) {
-      files.push(fullPath);
-    }
-  }
-
-  return files;
-}
-
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms.toFixed(0)}ms`;
 
@@ -139,7 +117,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     config?.testDir ?? options.testDir ?? "test",
   );
 
-  let files = discoverSpecFiles(testDir);
+  let files = discoverTestFiles(testDir);
 
   if (options.pattern) {
     files = files.filter((f) => options.pattern!.test(normalizePath(f)));
