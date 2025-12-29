@@ -1,7 +1,7 @@
 import { unriftGlobalContext } from "./context";
 import { Test } from "./test";
 
-import { type PromisableFn, TaskStatus } from "./types";
+import { type PromisableFn, TaskMode, TaskStatus } from "./types";
 
 interface RunOptions {
   timeoutMs?: number;
@@ -24,15 +24,35 @@ interface SuiteTask {
   run(): Promise<void>;
 }
 
+function appendHookFailure(
+  existing: Error | undefined,
+  hookName: string,
+  hookError: Error,
+): Error {
+  if (!existing) return hookError;
+
+  const primaryMsg = existing.message || String(existing);
+  const hookMsg = hookError.message || String(hookError);
+
+  const combined = new Error(`${primaryMsg}\n\n[${hookName}] ${hookMsg}`);
+
+  const primaryStack = existing.stack ?? primaryMsg;
+  const hookStack = hookError.stack ?? hookMsg;
+
+  combined.stack = `${primaryStack}\n\n[${hookName}] ${hookStack}`;
+
+  return combined;
+}
+
 class Suite implements SuiteTask {
   description: string;
-  mode: "default" | "skip" | "only";
+  mode: TaskMode;
   parent?: Suite;
 
-  hasOnly: boolean = false;
-  hasOnlyDescendant: boolean = false;
+  subtreeHasOnly: boolean = false;
 
   root: boolean = false;
+  errors: Array<{ label: string; error: Error }> = [];
   suites: Suite[] = [];
   tests: Test[] = [];
 
@@ -47,22 +67,14 @@ class Suite implements SuiteTask {
   constructor(
     description: string,
     parent?: Suite,
-    mode: "default" | "skip" | "only" = "default",
+    mode: TaskMode = TaskMode.Default,
   ) {
     this.description = description;
     this.parent = parent;
     this.mode = mode;
   }
 
-  containsOnly(): boolean {
-    if (this.mode === "only") return true;
-    for (const test of this.tests) if (test.mode === "only") return true;
-    for (const suite of this.suites) if (suite.containsOnly()) return true;
-
-    return false;
-  }
-
-  private markSubtreeSkipped() {
+  public markSubtreeSkipped() {
     for (const test of this.tests) {
       if (test.status === TaskStatus.Pending) test.status = TaskStatus.Skipped;
       test.durationMs = 0;
@@ -116,17 +128,18 @@ class Suite implements SuiteTask {
   ): Promise<void> {
     if (state.bailed) return;
 
-    if (this.mode === "skip") {
+    if (this.mode === TaskMode.Skip) {
       this.markSubtreeSkipped();
       return;
     }
 
-    const suiteHasOnly = this.hasOnlyDescendant;
-    const inOnlyContext = ancestorOnly || this.hasOnly;
+    const suiteHasOnly = this.subtreeHasOnly;
+    const inOnlyContext = ancestorOnly || this.mode === TaskMode.Only;
 
     // If onlyMode is on and this suite has no runnable-only content, skip it entirely
     if (isOnly && !suiteHasOnly && !inOnlyContext) {
       this.markSubtreeSkipped();
+
       return;
     }
 
@@ -154,13 +167,14 @@ class Suite implements SuiteTask {
       for (const test of this.tests) {
         if (state.bailed) break;
 
-        if (test.mode === "skip") {
+        if (test.mode === TaskMode.Skip) {
           test.status = TaskStatus.Skipped;
           test.durationMs = 0;
+
           continue;
         }
 
-        const testIsOnly = inOnlyContext || test.hasOnly;
+        const testIsOnly = inOnlyContext || test.mode === TaskMode.Only;
 
         // If onlyMode, skip tests that are not in only context
         if (isOnly && !testIsOnly) {
@@ -171,7 +185,16 @@ class Suite implements SuiteTask {
 
         try {
           for (const hook of beforeEachHooks) {
-            await hook();
+            try {
+              await hook();
+            } catch (error) {
+              const hookError =
+                error instanceof Error ? error : new Error(String(error));
+
+              // Tag this as a beforeEach failure and throw so it’s handled by the
+              // surrounding try/catch (and bail logic stays the same).
+              throw appendHookFailure(undefined, "beforeEach", hookError);
+            }
           }
 
           await test.run(options?.timeoutMs);
@@ -184,10 +207,16 @@ class Suite implements SuiteTask {
             try {
               await hook();
             } catch (error) {
-              // If an afterEach hook fails, mark the test as failed
-              test.status = TaskStatus.Fail;
-              test.error =
+              const hookError =
                 error instanceof Error ? error : new Error(String(error));
+
+              // Don't overwrite the original failure — append hook failure info instead.
+              test.status = TaskStatus.Fail;
+              test.error = appendHookFailure(
+                test.error,
+                "afterEach",
+                hookError,
+              );
             }
           }
         }
@@ -235,6 +264,8 @@ class Suite implements SuiteTask {
     this.afterEachHooks = [];
     this.afterAllError = undefined;
     this.beforeAllError = undefined;
+    this.errors = [];
+    this.subtreeHasOnly = false;
   }
 
   getResults(): Array<{
@@ -249,6 +280,15 @@ class Suite implements SuiteTask {
       error?: Error;
       durationMs: number;
     }> = [];
+
+    for (const suiteError of this.errors) {
+      results.push({
+        description: `${this.getFullDescription()} > [${suiteError.label}]`,
+        status: TaskStatus.Fail,
+        error: suiteError.error,
+        durationMs: 0,
+      });
+    }
 
     if (this.beforeAllError) {
       results.push({
@@ -285,19 +325,20 @@ class Suite implements SuiteTask {
 }
 
 export function computeOnlyFlags(suite: Suite): boolean {
-  let subtreeHasOnly = suite.mode === "only";
+  // Clear any stale value first (important for multi-run in same process)
+  suite.subtreeHasOnly = false;
+
+  let subtreeHasOnly = suite.mode === TaskMode.Only;
 
   for (const test of suite.tests) {
-    test.hasOnly = test.mode === "only";
-    if (test.hasOnly) subtreeHasOnly = true;
+    if (test.mode === TaskMode.Only) subtreeHasOnly = true;
   }
 
   for (const child of suite.suites) {
     if (computeOnlyFlags(child)) subtreeHasOnly = true;
   }
 
-  suite.hasOnly = suite.mode === "only";
-  suite.hasOnlyDescendant = subtreeHasOnly;
+  suite.subtreeHasOnly = subtreeHasOnly;
 
   return subtreeHasOnly;
 }
@@ -311,6 +352,7 @@ export function getCurrentSuite() {
 
 export function clearContext() {
   rootSuite.reset();
+  rootSuite.subtreeHasOnly = false;
   unriftGlobalContext.currentSuite = rootSuite;
 }
 

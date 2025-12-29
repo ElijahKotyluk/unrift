@@ -1,5 +1,4 @@
-// expect.ts
-import type { MatcherContext, MatcherFn, MatcherMap } from "./matchers";
+import type { MatcherContext, MatcherMap } from "./types";
 
 const matcherRegistry: MatcherMap = Object.create(null);
 
@@ -7,17 +6,27 @@ export function extendMatchers(newMatchers: MatcherMap) {
   for (const key in newMatchers) matcherRegistry[key] = newMatchers[key];
 }
 
+// Public, stable typing: core matchers are always available
 export interface Matchers<T> {
   toBe(expected: T): void | Promise<void>;
+  toBeDefined(): void | Promise<void>;
+  toBeFalsy(): void | Promise<void>;
+  toBeNull(): void | Promise<void>;
+  toBeTruthy(): void | Promise<void>;
+  toBeUndefined(): void | Promise<void>;
   toEqual(expected: unknown): void | Promise<void>;
+  toMatch(expected: RegExp | string): void | Promise<void>;
   toStrictEqual(expected: unknown): void | Promise<void>;
   toThrow(expected?: unknown): void | Promise<void>;
+
   readonly not: Matchers<T>;
 }
 
-// export interface Matchers<T> {} // for declaration merging
+// Merge point for external matcher packages
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/no-unused-vars
+export interface Matchers<T> {}
 
-interface ExpectInterface {
+export interface ExpectInterface {
   <T>(value: T): Matchers<T>;
   extend<M extends MatcherMap>(m: M): void;
 }
@@ -27,49 +36,44 @@ export const expect: ExpectInterface = (() => {
     function makeExpectation(isNot: boolean): Matchers<T> {
       const ctx: MatcherContext = {
         isNot,
-        diff(received, expected) {
+        diff(a, b) {
           return (
             "\n  Received: " +
-            JSON.stringify(received, null, 2) +
+            JSON.stringify(a, null, 2) +
             "\n  Expected: " +
-            JSON.stringify(expected, null, 2)
+            JSON.stringify(b, null, 2)
           );
         },
       };
 
-      const handler: Record<string, unknown> = {};
-      for (const name in matcherRegistry) {
-        const fn = matcherRegistry[name] as MatcherFn<T>;
+      const matcherFns: Record<PropertyKey, unknown> = {};
 
-        handler[name] = (...args: unknown[]) =>
-          fn.call(ctx, received, ...(args as []));
+      for (const name in matcherRegistry) {
+        const fn = matcherRegistry[name];
+        matcherFns[name] = (...args: unknown[]) =>
+          fn.call(ctx, received, ...args);
       }
 
-      return new Proxy(handler as unknown as Matchers<T>, {
+      return new Proxy(matcherFns, {
         get(target, prop) {
           if (prop === "not") return makeExpectation(!isNot);
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const value = (target as any)[prop];
-
-          if (value === undefined && typeof prop === "string") {
+          if (typeof prop === "string" && !(prop in target)) {
             throw new Error(`Unknown matcher: ${prop}`);
           }
 
-          return value;
+          return target[prop];
         },
-      });
+      }) as unknown as Matchers<T>;
     }
 
     return makeExpectation(false);
   }
 
   (expectFn as ExpectInterface).extend = extendMatchers;
-
   return expectFn as ExpectInterface;
 })();
 
-// optional debug surface
 Object.defineProperty(expect, "matchers", {
   get() {
     return matcherRegistry;

@@ -1,25 +1,25 @@
 import { Suite } from "./suite";
 
-enum Phase {
+enum RunState {
   Register = "register",
   Run = "run",
   Idle = "idle",
 }
 
-type UnriftPhase = Phase;
+type UnriftState = RunState;
 
 interface UnriftGlobalContext {
   currentSuite: Suite | null;
-  phase: UnriftPhase;
+  state: UnriftState;
 }
 
 const unriftGlobalContext: UnriftGlobalContext = {
   currentSuite: null,
-  phase: Phase.Register,
+  state: RunState.Register,
 };
 
-function assertRegisterPhase(apiName: string) {
-  if (unriftGlobalContext.phase !== Phase.Register) {
+function assertRegisterState(apiName: string) {
+  if (unriftGlobalContext.state !== RunState.Register) {
     throw new Error(
       `Unrift: ${apiName}() can only be called during test registration (module import time). ` +
         `You likely called it inside a running test or hook.`,
@@ -27,4 +27,4 @@ function assertRegisterPhase(apiName: string) {
   }
 }
 
-export { assertRegisterPhase, Phase, unriftGlobalContext };
+export { assertRegisterState, RunState, unriftGlobalContext };

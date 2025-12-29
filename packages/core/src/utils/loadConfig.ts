@@ -20,6 +20,7 @@ async function importConfigFile(configPath: string): Promise<unknown> {
   if (configPath.endsWith(".json")) {
     try {
       const raw = readFileSync(configPath, "utf8");
+
       return JSON.parse(raw);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -71,6 +72,7 @@ function findConfigPath(startDir: string): string | null {
       const bIsDefault = b.startsWith("unrift.config.");
 
       if (aIsDefault !== bIsDefault) return aIsDefault ? -1 : 1;
+
       return a.localeCompare(b);
     });
 

@@ -30,8 +30,8 @@ export default defineConfig(
     files: ["**/*.{js,mjs,cjs,ts,jsx,tsx}"],
     languageOptions: { globals: globals.node },
     rules: {
-      semi: ["error", "never"],
       "@typescript-eslint/no-this-alias": "off",
+      "no-unexpected-multiline": "error",
     },
   },
   eslintPluginPrettierRecommended,

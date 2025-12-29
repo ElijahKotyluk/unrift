@@ -23,7 +23,6 @@ function looseEqualInternal(
 
     if (typeof currentLeft !== typeof currentRight) return false;
 
-    // At this point, primitives differ (sameValue already handled equality).
     if (isPrimitive(currentLeft) || isPrimitive(currentRight)) return false;
 
     if (!isObjectLike(currentLeft) || !isObjectLike(currentRight)) return false;
@@ -40,8 +39,10 @@ function looseEqualInternal(
     const mappedLeft = rightToLeftSeen.get(rightObj);
     if (mappedLeft !== undefined) {
       if (mappedLeft !== leftObj) return false;
+
       continue;
     }
+
     leftToRightSeen.set(leftObj, rightObj);
     rightToLeftSeen.set(rightObj, leftObj);
 
@@ -67,25 +68,29 @@ function looseEqualInternal(
 
         worklist.push([leftValue, rightValue]);
       }
+
       continue;
     }
 
     // Typed arrays
-    const leftIsTyped = isTypedArray(currentLeft);
-    const rightIsTyped = isTypedArray(currentRight);
+    const leftIsTypedArray = isTypedArray(currentLeft);
+    const rightIsTypedArray = isTypedArray(currentRight);
 
-    if (leftIsTyped || rightIsTyped) {
-      if (!leftIsTyped || !rightIsTyped) return false;
+    if (leftIsTypedArray || rightIsTypedArray) {
+      if (!leftIsTypedArray || !rightIsTypedArray) return false;
 
-      const leftTA = currentLeft as TypedArray;
-      const rightTA = currentRight as TypedArray;
+      const leftTypedArray = currentLeft as TypedArray;
+      const rightTypedArray = currentRight as TypedArray;
 
-      if (leftTA.constructor !== rightTA.constructor) return false;
-      if (leftTA.length !== rightTA.length) return false;
+      if (leftTypedArray.constructor !== rightTypedArray.constructor)
+        return false;
+      if (leftTypedArray.length !== rightTypedArray.length) return false;
 
-      for (let index = 0; index < leftTA.length; index++) {
-        if (!sameValue(leftTA[index], rightTA[index])) return false;
+      for (let index = 0; index < leftTypedArray.length; index++) {
+        if (!sameValue(leftTypedArray[index], rightTypedArray[index]))
+          return false;
       }
+
       continue;
     }
 
@@ -96,26 +101,27 @@ function looseEqualInternal(
     if (leftIsBuffer || rightIsBuffer) {
       if (!leftIsBuffer || !rightIsBuffer) return false;
 
-      const leftBuf = currentLeft as ArrayBuffer;
-      const rightBuf = currentRight as ArrayBuffer;
+      const leftBuffer = currentLeft as ArrayBuffer;
+      const rightBuffer = currentRight as ArrayBuffer;
 
-      if (leftBuf.byteLength !== rightBuf.byteLength) return false;
+      if (leftBuffer.byteLength !== rightBuffer.byteLength) return false;
 
-      const leftBytes = new Uint8Array(leftBuf);
-      const rightBytes = new Uint8Array(rightBuf);
+      const leftBytes = new Uint8Array(leftBuffer);
+      const rightBytes = new Uint8Array(rightBuffer);
 
       for (let index = 0; index < leftBytes.length; index++) {
         if (leftBytes[index] !== rightBytes[index]) return false;
       }
+
       continue;
     }
 
     // DataView
-    const leftIsView = currentLeft instanceof DataView;
-    const rightIsView = currentRight instanceof DataView;
+    const leftIsDataView = currentLeft instanceof DataView;
+    const rightIsDataView = currentRight instanceof DataView;
 
-    if (leftIsView || rightIsView) {
-      if (!leftIsView || !rightIsView) return false;
+    if (leftIsDataView || rightIsDataView) {
+      if (!leftIsDataView || !rightIsDataView) return false;
 
       const leftView = currentLeft as DataView;
       const rightView = currentRight as DataView;
@@ -126,6 +132,7 @@ function looseEqualInternal(
         if (leftView.getUint8(offset) !== rightView.getUint8(offset))
           return false;
       }
+
       continue;
     }
 
@@ -135,8 +142,13 @@ function looseEqualInternal(
 
     if (leftIsDate || rightIsDate) {
       if (!leftIsDate || !rightIsDate) return false;
-      if ((currentLeft as Date).getTime() !== (currentRight as Date).getTime())
+
+      if (
+        (currentLeft as Date).getTime() !== (currentRight as Date).getTime()
+      ) {
         return false;
+      }
+
       continue;
     }
 
@@ -152,6 +164,7 @@ function looseEqualInternal(
 
       if (leftRe.source !== rightRe.source) return false;
       if (leftRe.flags !== rightRe.flags) return false;
+
       continue;
     }
 
@@ -180,11 +193,14 @@ function looseEqualInternal(
             )
           ) {
             remainingRight.delete(rightValue);
+
             continue outer;
           }
         }
+
         return false;
       }
+
       continue;
     }
 

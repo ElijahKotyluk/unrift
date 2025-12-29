@@ -16,6 +16,7 @@ function discoverTestFiles(dir: string): string[] {
 
     if (entry.isDirectory()) {
       files.push(...discoverTestFiles(fullPath));
+
       continue;
     }
 

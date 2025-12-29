@@ -35,6 +35,7 @@ function findConfigPath(startDir = projectRoot) {
       const bIsDefault = b.startsWith("unrift.config.");
 
       if (aIsDefault !== bIsDefault) return aIsDefault ? -1 : 1;
+
       return a.localeCompare(b);
     });
 
@@ -43,7 +44,9 @@ function findConfigPath(startDir = projectRoot) {
     }
 
     const parent = dirname(dir);
+
     if (parent === dir) break;
+
     dir = parent;
   }
 
@@ -53,15 +56,19 @@ function findConfigPath(startDir = projectRoot) {
 function getConfigArg(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+
     if (a === "--config" || a === "-c") return argv[i + 1] ?? null;
   }
+
   return null;
 }
 
 function isUsingTsLoader() {
   const execArgv = process.execArgv;
   const loaderIndex = execArgv.indexOf("--loader");
+
   if (loaderIndex === -1) return false;
+
   return (execArgv[loaderIndex + 1] ?? "").includes("ts-node/esm");
 }
 

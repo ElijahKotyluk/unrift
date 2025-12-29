@@ -1,4 +1,4 @@
-import { TaskStatus, type PromisableFn } from "./types";
+import { TaskMode, TaskStatus, type PromisableFn } from "./types";
 
 interface TestTask {
   description: string;
@@ -10,25 +10,24 @@ class Test implements TestTask {
   description: string;
   durationMs: number = 0;
   error?: Error;
-  hasOnly: boolean;
+
   fn: PromisableFn<void>;
-  mode: "default" | "skip" | "only";
+  mode: TaskMode;
 
   status: TaskStatus = TaskStatus.Pending;
 
   constructor(
     description: string,
     fn: PromisableFn<void>,
-    mode: "default" | "skip" | "only" = "default",
+    mode: TaskMode = TaskMode.Default,
   ) {
     this.description = description;
     this.fn = fn;
     this.mode = mode;
-    this.hasOnly = mode === "only";
   }
 
   async run(timeoutMs?: number): Promise<void> {
-    if (this.mode === "skip") {
+    if (this.mode === TaskMode.Skip) {
       this.status = TaskStatus.Skipped;
       this.durationMs = 0;
 

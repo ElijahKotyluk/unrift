@@ -1,6 +1,6 @@
 import { getCurrentSuite } from "./suite";
 import { PromisableFn } from "./types";
-import { assertRegisterPhase } from "./context";
+import { assertRegisterState } from "./context";
 
 type HookFn = PromisableFn<void>;
 
@@ -16,20 +16,20 @@ interface Hooks {
 type HookName = keyof Hooks;
 
 function beforeAll(...hooks: HookFn[]): void {
-  assertRegisterPhase("beforeAll");
+  assertRegisterState("beforeAll");
   getCurrentSuite().beforeAllHooks.push(...hooks);
 }
 function afterAll(...hooks: HookFn[]): void {
-  assertRegisterPhase("afterAll");
+  assertRegisterState("afterAll");
   getCurrentSuite().afterAllHooks.push(...hooks);
 }
 function beforeEach(...hooks: HookFn[]): void {
-  assertRegisterPhase("beforeEach");
+  assertRegisterState("beforeEach");
   getCurrentSuite().beforeEachHooks.push(...hooks);
 }
 
 function afterEach(...hooks: HookFn[]): void {
-  assertRegisterPhase("afterEach");
+  assertRegisterState("afterEach");
   getCurrentSuite().afterEachHooks.push(...hooks);
 }
 

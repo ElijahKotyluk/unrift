@@ -15,8 +15,8 @@ importers:
         specifier: ^24.10.1
         version: 24.10.1
       devoid:
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.2.0
+        version: 0.2.0
       eslint:
         specifier: ~9.38.0
         version: 9.38.0
@@ -1054,8 +1054,8 @@ packages:
     resolution: {integrity: sha512-rlpvsxUtM0PQvy9iZe640/IWwWYyBsTApREbA1pHOpmOUIl9MkP/U4z7vTtg4Oaojvqhxt7sdufnT0EzGaR31g==}
     engines: {node: '>=4'}
 
-  devoid@0.1.0:
-    resolution: {integrity: sha512-egq+KewGchvMyUzA4mVXEu5rVmTHGHIq+xaOnYiv4Lfins1TtZD90qyQ4/7K+M+VOEXANqfbY78M4Cpn+5HIAQ==}
+  devoid@0.2.0:
+    resolution: {integrity: sha512-T9PjoqXRe4S3j8C1VOfm0Nrerf/TdIaHASe8q+0XZMCVlGGA48u/yDOvjokB5hpkmeyoKpw3zttdkoCDJBTcbA==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -3955,7 +3955,7 @@ snapshots:
 
   detect-indent@5.0.0: {}
 
-  devoid@0.1.0:
+  devoid@0.2.0:
     dependencies:
       typescript: 5.9.3
 

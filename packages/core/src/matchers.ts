@@ -1,48 +1,115 @@
-// @es
-import { deepEqual } from "./utils/deepEqual";
 import { expect } from "./expect";
-import { toThrow } from "./utils/toThrow";
+import type { MatcherContext } from "./types";
+
+import { deepEqual } from "./utils/deepEqual";
 import { looseEqual } from "./utils/looseEqual";
-// (later: import looseEqual)
+import { toThrow, ToThrowExpected } from "./utils/toThrow";
 
-export type MatcherMap = Record<string, MatcherFn<unknown, unknown[]>>;
+let matchersRegistered = false;
 
-export interface MatcherContext {
-  isNot: boolean;
-  diff(a: unknown, b: unknown): string;
+export function ensureInternalMatchers() {
+  if (matchersRegistered) return;
+
+  registerCoreMatchers();
+
+  matchersRegistered = true;
 }
 
-export type MatcherFn<T, A extends unknown[] = unknown[]> = (
-  this: MatcherContext,
-  received: T,
-  ...args: A
-) => void | Promise<void>;
+export function registerCoreMatchers() {
+  expect.extend({
+    toBe<T>(this: MatcherContext, received: T, expected: T) {
+      const pass = Object.is(received, expected);
 
-expect.extend({
-  toBe<T>(this: MatcherContext, received: T, expected: T) {
-    const pass = Object.is(received, expected);
-    if (this.isNot ? pass : !pass) {
-      throw new Error(`${this.diff(received, expected)}`);
-    }
-  },
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, expected));
+      }
+    },
 
-  toEqual<T>(this: MatcherContext, received: T, expected: T) {
-    const pass = looseEqual(received, expected);
-    if (this.isNot ? pass : !pass) {
-      throw new Error(`${this.diff(received, expected)}`);
-    }
-  },
+    toBeDefined(this: MatcherContext, received: unknown) {
+      const pass = received !== undefined;
 
-  toStrictEqual<T>(this: MatcherContext, received: T, expected: T) {
-    const pass = deepEqual(received, expected);
-    if (this.isNot ? pass : !pass) {
-      throw new Error(`${this.diff(received, expected)}`);
-    }
-  },
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, "defined value"));
+      }
+    },
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  toThrow(this: MatcherContext, received: unknown, expected?: any) {
-    const { pass, message } = toThrow(received, expected, this.isNot);
-    if (!pass) throw new Error(message());
-  },
-});
+    toBeFalsy(this: MatcherContext, received: unknown) {
+      const pass = !received;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, "falsy value"));
+      }
+    },
+
+    toBeTruthy(this: MatcherContext, received: unknown) {
+      const pass = Boolean(received);
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, "truthy value"));
+      }
+    },
+
+    toBeNull(this: MatcherContext, received: unknown) {
+      const pass = received === null;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, null));
+      }
+    },
+
+    toBeUndefined(this: MatcherContext, received: unknown) {
+      const pass = received === undefined;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, undefined));
+      }
+    },
+
+    toEqual<T>(this: MatcherContext, received: T, expected: T) {
+      const pass = looseEqual(received, expected);
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, expected));
+      }
+    },
+
+    toMatch(this: MatcherContext, received: unknown, expected: unknown) {
+      if (typeof received !== "string") {
+        throw new Error(
+          this.diff(received, "Value must be a string to use toMatch()"),
+        );
+      }
+      if (!(typeof expected === "string" || expected instanceof RegExp)) {
+        throw new Error(
+          this.diff(expected, "Expected must be a string or RegExp"),
+        );
+      }
+
+      const pass =
+        typeof expected === "string"
+          ? received.includes(expected)
+          : expected.test(received);
+
+      if (this.isNot ? pass : !pass)
+        throw new Error(this.diff(received, expected));
+    },
+
+    toStrictEqual<T>(this: MatcherContext, received: T, expected: T) {
+      const pass = deepEqual(received, expected);
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, expected));
+      }
+    },
+
+    toThrow(this: MatcherContext, received: unknown, expected?: unknown) {
+      const { pass, message } = toThrow(
+        received,
+        expected as ToThrowExpected,
+        this.isNot,
+      );
+
+      if (!pass) throw new Error(message());
+    },
+  });
+}

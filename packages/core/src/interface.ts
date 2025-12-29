@@ -1,8 +1,8 @@
-import { assertRegisterPhase, unriftGlobalContext } from "./context";
+import { assertRegisterState, unriftGlobalContext } from "./context";
 import { getCurrentSuite, Suite } from "./suite";
 import { Test } from "./test";
 
-import type { PromisableFn } from "./types";
+import { PromisableFn, TaskMode } from "./types";
 
 type DescribeFn = {
   (description: string, fn: () => void): void;
@@ -16,12 +16,8 @@ type ItFn = {
   skip: (description: string, fn: PromisableFn<void>) => void;
 };
 
-function _describe(
-  description: string,
-  fn: () => void,
-  mode: "default" | "skip" | "only",
-) {
-  assertRegisterPhase("describe");
+function _describe(description: string, fn: () => void, mode: TaskMode) {
+  assertRegisterState("describe");
 
   const parent = getCurrentSuite();
   const suite = new Suite(description, parent, mode);
@@ -38,24 +34,20 @@ function _describe(
 }
 
 const describe: DescribeFn = (description, fn) =>
-  _describe(description, fn, "default");
-describe.only = (description, fn) => _describe(description, fn, "only");
-describe.skip = (description, fn) => _describe(description, fn, "skip");
+  _describe(description, fn, TaskMode.Default);
+describe.only = (description, fn) => _describe(description, fn, TaskMode.Only);
+describe.skip = (description, fn) => _describe(description, fn, TaskMode.Skip);
 
-function _it(
-  description: string,
-  fn: PromisableFn<void>,
-  mode: "default" | "skip" | "only",
-) {
-  assertRegisterPhase("it");
+function _it(description: string, fn: PromisableFn<void>, mode: TaskMode) {
+  assertRegisterState("it");
 
   const test = new Test(description, fn, mode);
 
   getCurrentSuite().addTest(test);
 }
 
-const it: ItFn = (description, fn) => _it(description, fn, "default");
-it.only = (description, fn) => _it(description, fn, "only");
-it.skip = (description, fn) => _it(description, fn, "skip");
+const it: ItFn = (description, fn) => _it(description, fn, TaskMode.Default);
+it.only = (description, fn) => _it(description, fn, TaskMode.Only);
+it.skip = (description, fn) => _it(description, fn, TaskMode.Skip);
 
 export { describe, it };

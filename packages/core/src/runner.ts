@@ -1,14 +1,11 @@
 import chalk from "chalk";
-import { pathToFileURL } from "url";
 import { resolve } from "path";
 
-import { Phase, unriftGlobalContext } from "./context";
-import { clearContext, computeOnlyFlags, rootSuite, Suite } from "./suite";
 import { loadConfig, loadConfigFromPath } from "./utils/loadConfig";
 import { TaskStatus } from "./types";
 
-import "./matchers";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
+import { runEngine } from "./run";
 
 interface RunnerOptions {
   configPath?: string;
@@ -50,12 +47,12 @@ function normalizePath(path: string): string {
   return path.replace(/\\/g, "/");
 }
 
-function safeRegExp(source: string): RegExp {
+function safeRegExp(str: string): RegExp {
   try {
-    return new RegExp(source);
+    return new RegExp(str);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Invalid regex "${source}": ${msg}`);
+    throw new Error(`Invalid regex "${str}": ${msg}`);
   }
 }
 
@@ -110,8 +107,6 @@ async function runTestsCLI(options: RunnerOptions = {}) {
 
   debugLog(options.debug, "Using config:", config);
 
-  unriftGlobalContext.phase = Phase.Register;
-
   const testDir = resolve(
     process.cwd(),
     config?.testDir ?? options.testDir ?? "test",
@@ -136,43 +131,25 @@ async function runTestsCLI(options: RunnerOptions = {}) {
       console.log(JSON.stringify({ files, count: files.length }, null, 2));
     } else {
       for (const file of files) console.log(file);
+
       if (options.debug) console.log(`\n${files.length} file(s)`);
     }
     return;
   }
 
-  // Fresh run
-  clearContext();
-
-  // Wrap each file in a suite for better reporter grouping (does NOT change .only semantics).
-  for (const file of files) {
-    const fileSuite = new Suite(normalizePath(file), rootSuite, "default");
-
-    rootSuite.addSuite(fileSuite);
-    unriftGlobalContext.currentSuite = fileSuite;
-
-    await import(pathToFileURL(file).href);
-  }
-
-  // Reset current suite back to root after registration.
-  unriftGlobalContext.currentSuite = rootSuite;
-
   const timeoutMs = options.timeoutMs ?? config?.timeoutMs;
   const bail = options.bail ?? config?.bail ?? false;
 
-  const isOnly = computeOnlyFlags(rootSuite);
-  debugLog(options.debug, "Only mode:", isOnly);
+  const engine = await runEngine({
+    files,
+    timeoutMs,
+    bail,
+    matchers: config?.matchers,
+  });
 
-  unriftGlobalContext.phase = Phase.Run;
+  debugLog(options.debug, "Only mode:", engine.isOnly);
 
-  try {
-    await rootSuite.run({ timeoutMs, bail }, { bailed: false }, isOnly, false);
-  } finally {
-    unriftGlobalContext.phase = Phase.Idle;
-    unriftGlobalContext.currentSuite = rootSuite;
-  }
-
-  const results = rootSuite.getResults();
+  const results = engine.results;
 
   let total = 0;
   let passed = 0;
@@ -221,22 +198,20 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     };
 
     console.log(JSON.stringify(report, null, 2));
+
     if (!ok) process.exitCode = 1;
+
     return;
   }
 
-  // ──────────────────────────────────────────────
-  // Pretty reporter
-  // ──────────────────────────────────────────────
-
-  const durationColWidth = 8; // enough for "1234ms" / "12.34s"
+  // Reporting
+  const durationColWidth = 8;
   let lastHeading: string | null = null;
 
   for (const result of results) {
     const heading = getFileHeadingFromDescription(result.description);
 
     if (heading && heading !== lastHeading) {
-      // Print file heading once
       console.log(chalk.bold(`\n${heading}`));
       lastHeading = heading;
     }
@@ -250,6 +225,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
         durationPadded,
         result.description.replace(/^.*?›\s*/, ""),
       );
+
       continue;
     }
 
@@ -259,6 +235,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
         padRight("—", durationColWidth),
         result.description.replace(/^.*?›\s*/, ""),
       );
+
       continue;
     }
 
@@ -276,6 +253,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
 
     failures.forEach((r, i) => {
       console.log(chalk.red(`\n${i + 1}) ${r.description}`));
+
       if (r.error) {
         console.log(chalk.red(r.error.stack ?? r.error.message));
       }

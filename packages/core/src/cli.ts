@@ -6,6 +6,7 @@ function safeRegExp(source: string): RegExp {
     return new RegExp(source);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+
     throw new Error(`Invalid pattern regex "${source}": ${msg}`);
   }
 }
@@ -24,24 +25,30 @@ function parseArgs(argv: string[]) {
 
     if (a === "--config" || a === "-c") {
       const next = argv[i + 1];
+
       if (!next) throw new Error(`${a} requires a path`);
+
       configPath = next;
       i++;
+
       continue;
     }
 
     if (a === "--debug" || a === "-d") {
       debug = true;
+
       continue;
     }
 
     if (a === "--list" || a === "-l") {
       list = true;
+
       continue;
     }
 
     if (a === "--json" || a === "-j") {
       json = true;
+
       continue;
     }
 

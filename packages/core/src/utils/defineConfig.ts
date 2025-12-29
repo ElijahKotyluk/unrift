@@ -6,6 +6,7 @@ interface UnriftConfigOptions {
   pattern?: string;
   includes?: string[];
   excludes?: string[];
+  matchers?: string[];
 }
 
 function defineConfig(options: UnriftConfigOptions): UnriftConfigOptions {

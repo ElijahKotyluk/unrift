@@ -1,4 +1,4 @@
-type ToThrowExpected =
+export type ToThrowExpected =
   | undefined
   | string
   | RegExp
