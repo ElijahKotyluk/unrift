@@ -15,6 +15,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./run": {
+      "import": "./dist/run.js",
+      "types": "./dist/run.d.ts"
     }
   },
   "bin": {
@@ -35,10 +39,12 @@
   "author": "elijah kotyluk <elijah@elijahkotyluk.com>",
   "license": "ISC",
   "packageManager": "pnpm@10.20.0",
+  "dependencies": {
+    "esbuild": "^0.27.2"
+  },
   "devDependencies": {
-    "chalk": "^5.6.2",
-    "tsc-esm-fix": "^3.1.2",
     "ts-node": "^10.9.2",
+    "tsc-esm-fix": "^3.1.2",
     "typescript": "^5.9.3"
   }
 }

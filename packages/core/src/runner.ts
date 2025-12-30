@@ -1,4 +1,3 @@
-import chalk from "chalk";
 import { resolve } from "path";
 
 import { loadConfig, loadConfigFromPath } from "./utils/loadConfig";
@@ -6,6 +5,7 @@ import { TaskStatus } from "./types";
 
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
+import { colors } from "./utils/colors";
 
 interface RunnerOptions {
   configPath?: string;
@@ -212,7 +212,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     const heading = getFileHeadingFromDescription(result.description);
 
     if (heading && heading !== lastHeading) {
-      console.log(chalk.bold(`\n${heading}`));
+      console.log(colors.bold(`\n${heading}`));
       lastHeading = heading;
     }
 
@@ -221,7 +221,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
 
     if (result.status === TaskStatus.Pass) {
       console.log(
-        chalk.green("✔"),
+        colors.green("✔"),
         durationPadded,
         result.description.replace(/^.*?›\s*/, ""),
       );
@@ -231,7 +231,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
 
     if (result.status === TaskStatus.Skipped) {
       console.log(
-        chalk.yellow("↷"),
+        colors.yellow("↷"),
         padRight("—", durationColWidth),
         result.description.replace(/^.*?›\s*/, ""),
       );
@@ -241,7 +241,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
 
     // Fail
     console.log(
-      chalk.red("✘"),
+      colors.red("✘"),
       durationPadded,
       result.description.replace(/^.*?›\s*/, ""),
     );
@@ -249,20 +249,20 @@ async function runTestsCLI(options: RunnerOptions = {}) {
 
   // Failures section (numbered, readable)
   if (failures.length > 0) {
-    console.log(chalk.bold("\nFailures:"));
+    console.log(colors.bold("\nFailures:"));
 
     failures.forEach((r, i) => {
-      console.log(chalk.red(`\n${i + 1}) ${r.description}`));
+      console.log(colors.red(`\n${i + 1}) ${r.description}`));
 
       if (r.error) {
-        console.log(chalk.red(r.error.stack ?? r.error.message));
+        console.log(colors.red(r.error.stack ?? r.error.message));
       }
     });
   }
 
   // Summary
   console.log(
-    chalk.bold(
+    colors.bold(
       `\nPassed: ${passed}  Failed: ${failed}  Skipped: ${skipped}  Total: ${total}  Time: ${formatDuration(
         durationMs,
       )}\n`,
