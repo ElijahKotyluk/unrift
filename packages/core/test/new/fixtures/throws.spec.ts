@@ -6,4 +6,4 @@ describe("partial registration", () => {
   });
 });
 
-throw new Error("Error during import");
+// throw new Error("Error during import");

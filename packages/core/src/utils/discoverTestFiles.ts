@@ -6,12 +6,14 @@ function isTestFileName(name: string): boolean {
 }
 
 function discoverTestFiles(dir: string): string[] {
+  console.log(`Discovering test files in: ${dir}`);
   if (!existsSync(dir)) return [];
 
   const entries = readdirSync(dir, { withFileTypes: true });
   const files: string[] = [];
 
   for (const entry of entries) {
+    console.log(`Examining: ${entry.name}`);
     const fullPath = join(dir, entry.name);
 
     if (entry.isDirectory()) {
@@ -20,6 +22,7 @@ function discoverTestFiles(dir: string): string[] {
       continue;
     }
 
+    console.log(`Checking if test file: ${isTestFileName(entry.name)}`);
     if (entry.isFile() && isTestFileName(entry.name)) {
       files.push(fullPath);
     }

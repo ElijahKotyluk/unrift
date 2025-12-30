@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { dirname, isAbsolute, join, resolve } from "path";
-import { pathToFileURL } from "url";
 
 import type { UnriftConfigOptions } from "./defineConfig";
+import { toImportUrl } from "./transform";
 
 /**
  * Regex to match valid Unrift config file names.
@@ -28,7 +28,7 @@ async function importConfigFile(configPath: string): Promise<unknown> {
     }
   }
 
-  const module = await import(pathToFileURL(configPath).href);
+  const module = await import(toImportUrl(configPath, "bundle-config"))
 
   return module.default ?? module.config;
 }

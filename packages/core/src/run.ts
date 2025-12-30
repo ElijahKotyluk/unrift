@@ -1,9 +1,8 @@
-import { pathToFileURL } from "url";
-
 import { RunState, unriftGlobalContext } from "./context";
 import { ensureInternalMatchers } from "./matchers";
 import { clearContext, computeOnlyFlags, rootSuite, Suite } from "./suite";
 import { TaskMode, TaskStatus } from "./types";
+import { toImportUrl } from "./utils/transform";
 
 export type RunEngineOptions = {
   files: string[];
@@ -39,6 +38,8 @@ export async function runEngine(
 ): Promise<RunEngineResult> {
   const { files } = options;
 
+  console.log(`Running engine with ${files.length} test files. \n Files:`, files);
+
   clearContext();
 
   ensureInternalMatchers();
@@ -61,8 +62,9 @@ export async function runEngine(
       unriftGlobalContext.currentSuite = fileSuite;
 
       try {
-        await import(pathToFileURL(file).href);
+        await import(toImportUrl(file, "bundle-test"));
       } catch (err) {
+        console.log(`Error importing test file: ${file}`);
         const error = err instanceof Error ? err : new Error(String(err));
 
         fileSuite.errors.push({

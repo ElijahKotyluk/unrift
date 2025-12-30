@@ -6,6 +6,7 @@ import { TaskStatus } from "./types";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
 import { colors } from "./utils/colors";
+import { cleanUnriftCaches } from "./utils/transform";
 
 interface RunnerOptions {
   configPath?: string;
@@ -16,6 +17,7 @@ interface RunnerOptions {
   debug?: boolean;
   list?: boolean;
   json?: boolean;
+  cacheClean?: boolean;
 }
 
 type JsonReport = {
@@ -101,6 +103,22 @@ function getFileHeadingFromDescription(description: string): string | null {
 async function runTestsCLI(options: RunnerOptions = {}) {
   const runStart = performance.now();
 
+  if (options.cacheClean) {
+    const projectRoot = process.cwd();
+    const result = cleanUnriftCaches(projectRoot);
+
+    if (options.json) {
+      console.log(JSON.stringify({ ok: true, cleaned: result }, null, 2));
+    } else {
+      const lines: string[] = [];
+      if (result.projectCacheDeleted) lines.push("✔ deleted project cache");
+      if (result.tempCacheDeleted) lines.push("✔ deleted temp cache");
+      if (lines.length === 0) lines.push("— nothing to clean");
+      console.log(lines.join("\n"));
+    }
+    return;
+  }
+
   const config = options.configPath
     ? await loadConfigFromPath(options.configPath)
     : await loadConfig(process.cwd());
@@ -113,6 +131,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
   );
 
   let files = discoverTestFiles(testDir);
+  console.log(`Discovered ${files.length} test files before filtering. \n Files:`, files);
 
   if (options.pattern) {
     files = files.filter((f) => options.pattern!.test(normalizePath(f)));

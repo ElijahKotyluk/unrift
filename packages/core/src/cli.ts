@@ -17,6 +17,7 @@ function parseArgs(argv: string[]) {
   let debug = false;
   let list = false;
   let json = false;
+  let cacheClean = false;
 
   const rest: string[] = [];
 
@@ -52,20 +53,26 @@ function parseArgs(argv: string[]) {
       continue;
     }
 
+    if (a === "--cache-clean" || a === "--clear-cache") {
+      cacheClean = true;
+
+      continue;
+    }
+
     // backward compat: first non-flag arg is pattern
     rest.push(a);
   }
 
   if (rest[0]) pattern = safeRegExp(rest[0]);
 
-  return { configPath, pattern, debug, list, json };
+  return { configPath, pattern, debug, list, json, cacheClean };
 }
 
-const { configPath, pattern, debug, list, json } = parseArgs(
+const { configPath, pattern, debug, list, json, cacheClean } = parseArgs(
   process.argv.slice(2),
 );
 
-runTestsCLI({ pattern, configPath, debug, list, json }).catch((err) => {
+runTestsCLI({ pattern, configPath, debug, list, json, cacheClean }).catch((err) => {
   console.error(err);
   process.exit(1);
 });
