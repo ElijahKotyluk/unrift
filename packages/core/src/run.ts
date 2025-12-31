@@ -38,11 +38,6 @@ export async function runEngine(
 ): Promise<RunEngineResult> {
   const { files } = options;
 
-  console.log(
-    `Running engine with ${files.length} test files. \n Files:`,
-    files,
-  );
-
   clearContext();
 
   ensureInternalMatchers();
@@ -67,7 +62,6 @@ export async function runEngine(
       try {
         await import(toImportUrl(file, "bundle-test"));
       } catch (err) {
-        console.log(`Error importing test file: ${file}`);
         const error = err instanceof Error ? err : new Error(String(err));
 
         fileSuite.errors.push({

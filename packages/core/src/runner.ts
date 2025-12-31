@@ -1,6 +1,10 @@
-import { dirname, relative, resolve } from "path";
+import { relative, resolve } from "path";
 
-import { loadConfig, loadConfigFromPath, type LoadedConfig } from "./utils/loadConfig";
+import {
+  loadConfig,
+  loadConfigFromPath,
+  type LoadedConfig,
+} from "./utils/loadConfig";
 import { TaskStatus } from "./types";
 
 import { discoverTestFiles } from "./utils/discoverTestFiles";
@@ -45,7 +49,11 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
-function debugLog(enabled: boolean | undefined, json: boolean | undefined, ...args: unknown[]) {
+function debugLog(
+  enabled: boolean | undefined,
+  json: boolean | undefined,
+  ...args: unknown[]
+) {
   // Keep stdout clean for --json mode; use stderr for debug.
   if (!enabled) return;
   (json ? console.error : console.log)(...args);
@@ -68,7 +76,11 @@ function safeRegExp(source: string): RegExp {
  * Patterns remain regex strings (back-compat). If you later add glob support,
  * this is the choke point to swap in a different matcher.
  */
-function matchesAnyPattern(fileAbs: string, patterns: string[], baseDir: string): boolean {
+function matchesAnyPattern(
+  fileAbs: string,
+  patterns: string[],
+  baseDir: string,
+): boolean {
   const abs = normalizePath(fileAbs);
   const rel = normalizePath(relative(baseDir, fileAbs));
 
@@ -87,11 +99,15 @@ function filterByIncludesExcludes(
   let filtered = files;
 
   if (includes && includes.length > 0) {
-    filtered = filtered.filter((file) => matchesAnyPattern(file, includes, baseDir));
+    filtered = filtered.filter((file) =>
+      matchesAnyPattern(file, includes, baseDir),
+    );
   }
 
   if (excludes && excludes.length > 0) {
-    filtered = filtered.filter((file) => !matchesAnyPattern(file, excludes, baseDir));
+    filtered = filtered.filter(
+      (file) => !matchesAnyPattern(file, excludes, baseDir),
+    );
   }
 
   return filtered;
@@ -160,16 +176,25 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     files = files.filter((f) => options.pattern!.test(normalizePath(f)));
   }
 
-  files = filterByIncludesExcludes(files, testDir, config?.includes, config?.excludes).sort(
-    (a, b) => normalizePath(a).localeCompare(normalizePath(b)),
-  );
+  files = filterByIncludesExcludes(
+    files,
+    testDir,
+    config?.includes,
+    config?.excludes,
+  ).sort((a, b) => normalizePath(a).localeCompare(normalizePath(b)));
 
   debugLog(options.debug, options.json, "Discovered test files:", files);
 
   // List mode
   if (options.list) {
     if (options.json) {
-      console.log(JSON.stringify({ files: files.map(normalizePath), count: files.length }, null, 2));
+      console.log(
+        JSON.stringify(
+          { files: files.map(normalizePath), count: files.length },
+          null,
+          2,
+        ),
+      );
     } else {
       for (const file of files) console.log(file);
       if (options.debug) console.log(`\n${files.length} file(s)`);

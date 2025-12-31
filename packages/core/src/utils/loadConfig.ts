@@ -36,10 +36,14 @@ async function importConfigFile(configPath: string): Promise<unknown> {
   }
 
   const mod = await import(toImportUrl(configPath, "bundle-config"));
-  return (mod as any).default ?? (mod as any).config;
+
+  return mod.default ?? mod.config;
 }
 
-function assertConfigObject(config: unknown, absolutePath: string): asserts config is UnriftConfigOptions {
+function assertConfigObject(
+  config: unknown,
+  absolutePath: string,
+): asserts config is UnriftConfigOptions {
   if (!config || typeof config !== "object") {
     throw new Error(
       `Unrift config at ${absolutePath} must export an object (default export recommended).`,
@@ -51,7 +55,9 @@ function toAbsolutePath(p: string): string {
   return isAbsolute(p) ? p : resolve(process.cwd(), p);
 }
 
-export async function loadConfigFromPath(configPath: string): Promise<LoadedConfig> {
+export async function loadConfigFromPath(
+  configPath: string,
+): Promise<LoadedConfig> {
   const absolutePath = toAbsolutePath(configPath);
 
   if (!existsSync(absolutePath)) {
@@ -100,7 +106,9 @@ function findConfigPath(startDir: string): string | null {
   return null;
 }
 
-export async function loadConfig(startDir: string): Promise<LoadedConfig | null> {
+export async function loadConfig(
+  startDir: string,
+): Promise<LoadedConfig | null> {
   const found = findConfigPath(startDir);
   if (!found) return null;
 
