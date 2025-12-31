@@ -32,8 +32,11 @@
     "compile": "tsc -p tsconfig.build.json && tsc-esm-fix dist --tsconfig ./tsconfig.build.json",
     "prepublishOnly": "pnpm run build",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
-    "test": "node bin/unrift.mjs",
-    "test:only": "node bin/unrift.mjs --config ./unrift.only.config.ts"
+    "test:orig": "node bin/unrift.mjs",
+    "test": "pnpm test:orig && pnpm test:fail && pnpm test:bail && pnpm test:only",
+    "test:fail": "node bin/unrift.mjs --config ./test/fail/unrift.outer.config.ts",
+    "test:bail": "node bin/unrift.mjs --config ./test/bail/unrift.outer.config.ts",
+    "test:only": "node bin/unrift.mjs --config ./test/only/unrift.outer.config.ts"
   },
   "keywords": [],
   "author": "elijah kotyluk <elijah@elijahkotyluk.com>",

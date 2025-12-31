@@ -16,13 +16,6 @@ describe("Sample Test Suite", () => {
   });
 });
 
-describe("Failing Test Suite", () => {
-  it("should fail this test", () => {
-    expect(1 + 1).toBe(3);
-    expect(true).toBe(false);
-  });
-});
-
 describe("toEqual", () => {
   it("should correctly compare loose equality", () => {
     expect({}).toEqual({ a: undefined });

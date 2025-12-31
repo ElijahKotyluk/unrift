@@ -126,7 +126,11 @@ class Suite implements SuiteTask {
     isOnly: boolean = false,
     ancestorOnly: boolean = false,
   ): Promise<void> {
-    if (state.bailed) return;
+    // Bail should mark anything not-run as skipped (no "pending" leaks).
+    if (state.bailed) {
+      this.markSubtreeSkipped();
+      return;
+    }
 
     if (this.mode === TaskMode.Skip) {
       this.markSubtreeSkipped();
@@ -139,13 +143,13 @@ class Suite implements SuiteTask {
     // If onlyMode is on and this suite has no runnable-only content, skip it entirely
     if (isOnly && !suiteHasOnly && !inOnlyContext) {
       this.markSubtreeSkipped();
-
       return;
     }
 
     let entered = false;
 
     try {
+      // beforeAll
       try {
         for (const hook of this.beforeAllHooks) {
           await hook();
@@ -164,13 +168,15 @@ class Suite implements SuiteTask {
       const beforeEachHooks = this.collectBeforeEachHooks();
       const afterEachHooks = this.collectAfterEachHooks();
 
-      for (const test of this.tests) {
+      // TEST LOOP (indexed so we can skip the remainder on bail)
+      for (let i = 0; i < this.tests.length; i++) {
+        const test = this.tests[i];
+
         if (state.bailed) break;
 
         if (test.mode === TaskMode.Skip) {
           test.status = TaskStatus.Skipped;
           test.durationMs = 0;
-
           continue;
         }
 
@@ -190,9 +196,6 @@ class Suite implements SuiteTask {
             } catch (error) {
               const hookError =
                 error instanceof Error ? error : new Error(String(error));
-
-              // Tag this as a beforeEach failure and throw so it’s handled by the
-              // surrounding try/catch (and bail logic stays the same).
               throw appendHookFailure(undefined, "beforeEach", hookError);
             }
           }
@@ -210,7 +213,6 @@ class Suite implements SuiteTask {
               const hookError =
                 error instanceof Error ? error : new Error(String(error));
 
-              // Don't overwrite the original failure — append hook failure info instead.
               test.status = TaskStatus.Fail;
               test.error = appendHookFailure(
                 test.error,
@@ -221,18 +223,41 @@ class Suite implements SuiteTask {
           }
         }
 
+        // Bail: mark everything not-run as skipped (no pending)
         if (options?.bail && test.status === TaskStatus.Fail) {
           state.bailed = true;
+
+          // Remaining tests in THIS suite
+          for (let j = i + 1; j < this.tests.length; j++) {
+            const t = this.tests[j];
+            if (t.status === TaskStatus.Pending) t.status = TaskStatus.Skipped;
+            t.durationMs = 0;
+          }
+
+          // All child suites under THIS suite won't run
+          for (const child of this.suites) child.markSubtreeSkipped();
+
           break;
         }
       }
 
-      for (const childSuite of this.suites) {
-        if (state.bailed) break;
+      // CHILD SUITE LOOP (indexed so we can skip remaining siblings on bail)
+      for (let i = 0; i < this.suites.length; i++) {
+        const childSuite = this.suites[i];
+
+        if (state.bailed) {
+          // Current and remaining sibling suites won't run
+          for (let j = i; j < this.suites.length; j++) {
+            this.suites[j].markSubtreeSkipped();
+          }
+          break;
+        }
 
         await childSuite.run(options, state, isOnly, inOnlyContext);
       }
     } finally {
+      // afterAll should still run for suites we entered (even if bailed),
+      // but it should not run for suites we never entered.
       if (entered) {
         for (const afterAllHook of this.afterAllHooks) {
           try {
@@ -251,7 +276,6 @@ class Suite implements SuiteTask {
 
   getFullDescription(): string {
     if (!this.parent || this.parent.root) return this.description;
-
     return `${this.parent.getFullDescription()} › ${this.description}`;
   }
 
@@ -317,8 +341,9 @@ class Suite implements SuiteTask {
       });
     }
 
-    for (const child of this.suites)
+    for (const child of this.suites) {
       results = results.concat(child.getResults());
+    }
 
     return results;
   }
