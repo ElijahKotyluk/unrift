@@ -1,6 +1,6 @@
-import { resolve } from "path";
+import { dirname, relative, resolve } from "path";
 
-import { loadConfig, loadConfigFromPath } from "./utils/loadConfig";
+import { loadConfig, loadConfigFromPath, type LoadedConfig } from "./utils/loadConfig";
 import { TaskStatus } from "./types";
 
 import { discoverTestFiles } from "./utils/discoverTestFiles";
@@ -40,43 +40,58 @@ type JsonReport = {
   }>;
 };
 
-function debugLog(enabled: boolean | undefined, ...args: unknown[]) {
-  if (enabled) console.log(...args);
+function normalizePath(p: string): string {
+  // stable for matching/reporting across platforms
+  return p.replace(/\\/g, "/");
 }
 
-function normalizePath(path: string): string {
-  // stable for regex matching across platforms
-  return path.replace(/\\/g, "/");
+function debugLog(enabled: boolean | undefined, json: boolean | undefined, ...args: unknown[]) {
+  // Keep stdout clean for --json mode; use stderr for debug.
+  if (!enabled) return;
+  (json ? console.error : console.log)(...args);
 }
 
-function safeRegExp(str: string): RegExp {
+function safeRegExp(source: string): RegExp {
   try {
-    return new RegExp(str);
+    return new RegExp(source);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Invalid regex "${str}": ${msg}`);
+    throw new Error(`Invalid regex "${source}": ${msg}`);
   }
 }
 
-function matchesAnyPattern(file: string, patterns: string[]): boolean {
-  const normalized = normalizePath(file);
+/**
+ * Match include/exclude patterns against:
+ *  1) path relative to testDir (what users usually expect)
+ *  2) absolute path as a fallback
+ *
+ * Patterns remain regex strings (back-compat). If you later add glob support,
+ * this is the choke point to swap in a different matcher.
+ */
+function matchesAnyPattern(fileAbs: string, patterns: string[], baseDir: string): boolean {
+  const abs = normalizePath(fileAbs);
+  const rel = normalizePath(relative(baseDir, fileAbs));
 
-  return patterns.some((pattern) => safeRegExp(pattern).test(normalized));
+  return patterns.some((pattern) => {
+    const re = safeRegExp(pattern);
+    return re.test(rel) || re.test(abs);
+  });
 }
 
 function filterByIncludesExcludes(
   files: string[],
+  baseDir: string,
   includes?: string[],
   excludes?: string[],
 ): string[] {
   let filtered = files;
 
   if (includes && includes.length > 0) {
-    filtered = filtered.filter((file) => matchesAnyPattern(file, includes));
+    filtered = filtered.filter((file) => matchesAnyPattern(file, includes, baseDir));
   }
 
   if (excludes && excludes.length > 0) {
-    filtered = filtered.filter((file) => !matchesAnyPattern(file, excludes));
+    filtered = filtered.filter((file) => !matchesAnyPattern(file, excludes, baseDir));
   }
 
   return filtered;
@@ -84,7 +99,6 @@ function filterByIncludesExcludes(
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms.toFixed(0)}ms`;
-
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
@@ -94,15 +108,14 @@ function padRight(str: string, width: number): string {
 
 function getFileHeadingFromDescription(description: string): string | null {
   const index = description.indexOf("›");
-
   if (index === -1) return null;
-
   return description.slice(0, index).trim();
 }
 
 async function runTestsCLI(options: RunnerOptions = {}) {
   const runStart = performance.now();
 
+  // Cache clean mode
   if (options.cacheClean) {
     const projectRoot = process.cwd();
     const result = cleanUnriftCaches(projectRoot);
@@ -116,44 +129,49 @@ async function runTestsCLI(options: RunnerOptions = {}) {
       if (lines.length === 0) lines.push("— nothing to clean");
       console.log(lines.join("\n"));
     }
+
     return;
   }
 
-  const config = options.configPath
+  // Load config (and capture its directory so testDir can be relative to it)
+  const loaded: LoadedConfig | null = options.configPath
     ? await loadConfigFromPath(options.configPath)
     : await loadConfig(process.cwd());
 
-  debugLog(options.debug, "Using config:", config);
+  const config = loaded?.config ?? null;
+  const configDir = loaded?.configDir ?? process.cwd();
+  const resolvedConfigPath = loaded?.configPath ?? null;
 
+  debugLog(options.debug, options.json, "Using config:", {
+    configPath: resolvedConfigPath,
+    configDir,
+    config,
+  });
+
+  // IMPORTANT: testDir is now relative to the config file directory (if present)
   const testDir = resolve(
-    process.cwd(),
+    configDir,
     config?.testDir ?? options.testDir ?? "test",
   );
 
   let files = discoverTestFiles(testDir);
-  console.log(
-    `Discovered ${files.length} test files before filtering. \n Files:`,
-    files,
-  );
 
   if (options.pattern) {
     files = files.filter((f) => options.pattern!.test(normalizePath(f)));
   }
 
-  files = filterByIncludesExcludes(
-    files,
-    config?.includes,
-    config?.excludes,
-  ).sort((a, b) => normalizePath(a).localeCompare(normalizePath(b)));
+  files = filterByIncludesExcludes(files, testDir, config?.includes, config?.excludes).sort(
+    (a, b) => normalizePath(a).localeCompare(normalizePath(b)),
+  );
 
-  debugLog(options.debug, "Discovered test files:", files);
+  debugLog(options.debug, options.json, "Discovered test files:", files);
 
+  // List mode
   if (options.list) {
     if (options.json) {
-      console.log(JSON.stringify({ files, count: files.length }, null, 2));
+      console.log(JSON.stringify({ files: files.map(normalizePath), count: files.length }, null, 2));
     } else {
       for (const file of files) console.log(file);
-
       if (options.debug) console.log(`\n${files.length} file(s)`);
     }
     return;
@@ -169,7 +187,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     matchers: config?.matchers,
   });
 
-  debugLog(options.debug, "Only mode:", engine.isOnly);
+  debugLog(options.debug, options.json, "Only mode:", engine.isOnly);
 
   const results = engine.results;
 
@@ -203,6 +221,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
   const ok = failed === 0;
   const durationMs = performance.now() - runStart;
 
+  // JSON mode: stdout must be JSON only (critical for fixture/subprocess tests)
   if (options.json) {
     const report: JsonReport = {
       ok,
@@ -213,7 +232,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
       bail,
       timeoutMs,
       testDir: normalizePath(testDir),
-      configPath: options.configPath ?? null,
+      configPath: resolvedConfigPath,
       files: files.map(normalizePath),
       durationMs,
       results: serializedResults,
@@ -222,11 +241,10 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     console.log(JSON.stringify(report, null, 2));
 
     if (!ok) process.exitCode = 1;
-
     return;
   }
 
-  // Reporting
+  // Human reporting
   const durationColWidth = 8;
   let lastHeading: string | null = null;
 
@@ -247,7 +265,6 @@ async function runTestsCLI(options: RunnerOptions = {}) {
         durationPadded,
         result.description.replace(/^.*?›\s*/, ""),
       );
-
       continue;
     }
 
@@ -257,7 +274,6 @@ async function runTestsCLI(options: RunnerOptions = {}) {
         padRight("—", durationColWidth),
         result.description.replace(/^.*?›\s*/, ""),
       );
-
       continue;
     }
 
@@ -269,20 +285,15 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     );
   }
 
-  // Failures section (numbered, readable)
   if (failures.length > 0) {
     console.log(colors.bold("\nFailures:"));
 
     failures.forEach((r, i) => {
       console.log(colors.red(`\n${i + 1}) ${r.description}`));
-
-      if (r.error) {
-        console.log(colors.red(r.error.stack ?? r.error.message));
-      }
+      if (r.error) console.log(colors.red(r.error.stack ?? r.error.message));
     });
   }
 
-  // Summary
   console.log(
     colors.bold(
       `\nPassed: ${passed}  Failed: ${failed}  Skipped: ${skipped}  Total: ${total}  Time: ${formatDuration(
