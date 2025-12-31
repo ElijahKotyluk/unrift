@@ -72,7 +72,9 @@ const { configPath, pattern, debug, list, json, cacheClean } = parseArgs(
   process.argv.slice(2),
 );
 
-runTestsCLI({ pattern, configPath, debug, list, json, cacheClean }).catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+runTestsCLI({ pattern, configPath, debug, list, json, cacheClean }).catch(
+  (err) => {
+    console.error(err);
+    process.exit(1);
+  },
+);

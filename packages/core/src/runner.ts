@@ -131,7 +131,10 @@ async function runTestsCLI(options: RunnerOptions = {}) {
   );
 
   let files = discoverTestFiles(testDir);
-  console.log(`Discovered ${files.length} test files before filtering. \n Files:`, files);
+  console.log(
+    `Discovered ${files.length} test files before filtering. \n Files:`,
+    files,
+  );
 
   if (options.pattern) {
     files = files.filter((f) => options.pattern!.test(normalizePath(f)));

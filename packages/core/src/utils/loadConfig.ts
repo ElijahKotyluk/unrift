@@ -28,7 +28,7 @@ async function importConfigFile(configPath: string): Promise<unknown> {
     }
   }
 
-  const module = await import(toImportUrl(configPath, "bundle-config"))
+  const module = await import(toImportUrl(configPath, "bundle-config"));
 
   return module.default ?? module.config;
 }

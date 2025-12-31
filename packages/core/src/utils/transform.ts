@@ -137,7 +137,6 @@ export function cleanUnriftCaches(projectRoot: string): {
   };
 }
 
-
 type Mode = "bundle-config" | "bundle-test";
 type CacheKey = string;
 

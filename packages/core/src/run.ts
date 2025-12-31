@@ -38,7 +38,10 @@ export async function runEngine(
 ): Promise<RunEngineResult> {
   const { files } = options;
 
-  console.log(`Running engine with ${files.length} test files. \n Files:`, files);
+  console.log(
+    `Running engine with ${files.length} test files. \n Files:`,
+    files,
+  );
 
   clearContext();
 

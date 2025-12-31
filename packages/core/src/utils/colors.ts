@@ -4,8 +4,7 @@ const enabled =
   process.env.NO_COLOR !== "true";
 
 function wrap(code: number) {
-  return (text: string) =>
-    enabled ? `\x1b[${code}m${text}\x1b[0m` : text;
+  return (text: string) => (enabled ? `\x1b[${code}m${text}\x1b[0m` : text);
 }
 
 export const colors = {
