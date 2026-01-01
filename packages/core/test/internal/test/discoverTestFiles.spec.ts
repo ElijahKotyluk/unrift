@@ -1,11 +1,9 @@
-import test from "node:test";
-import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { discoverTestFiles, isTestFileName } from "../src/utils/discoverTestFiles.js";
-import { beforeEach, describe, expect, it } from "@unrift/core";
+import { discoverTestFiles, isTestFileName } from "../../../src/utils/discoverTestFiles.js";
+import { describe, expect, it } from "@unrift/core";
 
 const norm = (p: string) => p.replace(/\\/g, "/");
 

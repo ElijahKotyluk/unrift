@@ -53,7 +53,6 @@ describe("bail fixture", () => {
           result.description.endsWith("bail › fails"),
         );
 
-        console.log(report);
         expect(failing?.status).toBe("fail");
     });
 });
