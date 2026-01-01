@@ -20,6 +20,8 @@
     "typecheck": "pnpm run -r typecheck",
     "typecheck:all": "npx lerna run typecheck",
     "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
     "coverage": "vitest run --coverage",
     "coverage:all": "npx lerna run coverage",
     "prepare": "husky",

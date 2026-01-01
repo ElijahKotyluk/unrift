@@ -16,28 +16,42 @@ describe("core matchers", () => {
   });
 
   it("toStrictEqual uses deepEqual (prototype-sensitive)", () => {
-    class A { x = 1; }
-    class B { x = 1; }
+    class A {
+      x = 1;
+    }
+    class B {
+      x = 1;
+    }
 
     expect(new A()).not.toStrictEqual(new B());
   });
 
   it("toEqual is loose (prototype-insensitive, missing ≈ undefined)", () => {
-    class A { x = 1; }
+    class A {
+      x = 1;
+    }
     expect(new A()).toEqual({ x: 1 });
     expect({}).toEqual({ a: undefined });
   });
 
   it("toThrow supports string / regex / ctor", () => {
-    expect(() => { throw new Error("hello world"); }).toThrow("hello");
-    expect(() => { throw new Error("hello world"); }).toThrow(/world/);
+    expect(() => {
+      throw new Error("hello world");
+    }).toThrow("hello");
+    expect(() => {
+      throw new Error("hello world");
+    }).toThrow(/world/);
 
     class MyErr extends Error {}
-    expect(() => { throw new MyErr("x"); }).toThrow(MyErr);
+    expect(() => {
+      throw new MyErr("x");
+    }).toThrow(MyErr);
   });
 
   it("toThrow supports non-Error throws", () => {
-    expect(() => { throw "boom"; }).toThrow("boom");
+    expect(() => {
+      throw "boom";
+    }).toThrow("boom");
   });
 
   it("unknown matcher throws a helpful error", () => {

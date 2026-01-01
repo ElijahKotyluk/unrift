@@ -22,9 +22,13 @@ describe("toEqual", () => {
 
     expect([, 1]).toEqual([undefined, 1]);
 
-    expect(new (class X { x = 1 })()).toEqual({ x: 1 });
+    expect(
+      new (class X {
+        x = 1;
+      })(),
+    ).toEqual({ x: 1 });
   });
-})
+});
 
 describe("toStrictEqual", () => {
   it("should correctly compare complex objects", () => {
@@ -64,7 +68,9 @@ describe("toStrictEqual", () => {
 
 describe("toThrow", () => {
   it("should pass when function throws expected error", () => {
-    expect(() => { throw new Error("should pass"); }).toThrow("should pass");
-    expect(() => "no throw" ).not.toThrow();
+    expect(() => {
+      throw new Error("should pass");
+    }).toThrow("should pass");
+    expect(() => "no throw").not.toThrow();
   });
 });
