@@ -54,10 +54,11 @@ function readPackageName(projectRoot: string): string | null {
 }
 
 function tryProjectCacheRoot(projectRoot: string): string | null {
-  const nmCache = join(projectRoot, "node_modules", ".unrift", "cache");
+  const nodeModulesCache = projectNodeModulesCacheRoot(projectRoot);
+
   try {
-    ensureDir(nmCache);
-    return nmCache;
+    ensureDir(nodeModulesCache);
+    return nodeModulesCache;
   } catch {
     return null;
   }
@@ -103,7 +104,8 @@ function projectNodeModulesCacheRoot(projectRoot: string) {
 
 function tempCacheRootForProject(projectRoot: string) {
   const projectKey = hashString(resolve(projectRoot));
-  return join(os.tmpdir(), "unrift", projectKey);
+
+  return getTmpCacheRoot(projectKey);
 }
 
 function rmDirIfExists(dir: string): boolean {
@@ -217,12 +219,12 @@ export function toImportUrl(
   if (!isTsLike(filePath)) return pathToFileURL(filePath).href;
 
   const source = readFileSync(filePath, "utf8");
-  const h = hashString(source);
+  const hashStr = hashString(source);
   const key: CacheKey = `${mode}:${filePath}`;
 
   const existing = cache.get(key);
 
-  if (existing && existing.hash === h) return existing.outUrl;
+  if (existing && existing.hash === hashStr) return existing.outUrl;
 
   const projectRoot = findProjectRoot(dirname(filePath));
   const selfHost = readPackageName(projectRoot) === "@unrift/core";
@@ -241,7 +243,7 @@ export function toImportUrl(
   const outDir = cacheDirForMode(cacheRoot, mode);
   ensureDir(outDir);
 
-  const outFile = cacheOutPath(outDir, filePath, h);
+  const outFile = cacheOutPath(outDir, filePath, hashStr);
 
   buildSync({
     entryPoints: [filePath],
@@ -264,7 +266,7 @@ export function toImportUrl(
 
   const outUrl = pathToFileURL(outFile).href;
 
-  cache.set(key, { hash: h, outUrl });
+  cache.set(key, { hash: hashStr, outUrl });
 
   return outUrl;
 }
