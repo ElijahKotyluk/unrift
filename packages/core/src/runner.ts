@@ -1,16 +1,17 @@
-import { relative, resolve } from "path";
+import { relative, resolve } from "node:path";
 
 import {
   loadConfig,
   loadConfigFromPath,
   type LoadedConfig,
 } from "./utils/loadConfig";
-import { TaskStatus } from "./types";
 
+import { cleanUnriftCaches } from "./utils/transform";
+import { colors } from "./utils/colors";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
-import { colors } from "./utils/colors";
-import { cleanUnriftCaches } from "./utils/transform";
+
+import { TaskStatus } from "./types";
 
 interface RunnerOptions {
   configPath?: string;
@@ -69,24 +70,20 @@ function safeRegExp(source: string): RegExp {
 }
 
 /**
- * Match include/exclude patterns against:
- *  1) path relative to testDir (what users usually expect)
- *  2) absolute path as a fallback
- *
- * Patterns remain regex strings (back-compat). If you later add glob support,
- * this is the choke point to swap in a different matcher.
+ * @TODO Add glob support
  */
 function matchesAnyPattern(
   fileAbs: string,
   patterns: string[],
   baseDir: string,
 ): boolean {
-  const abs = normalizePath(fileAbs);
-  const rel = normalizePath(relative(baseDir, fileAbs));
+  const absolutePath = normalizePath(fileAbs);
+  const relativePath = normalizePath(relative(baseDir, fileAbs));
 
   return patterns.some((pattern) => {
     const re = safeRegExp(pattern);
-    return re.test(rel) || re.test(abs);
+
+    return re.test(relativePath) || re.test(absolutePath);
   });
 }
 
@@ -115,6 +112,7 @@ function filterByIncludesExcludes(
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms.toFixed(0)}ms`;
+
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
@@ -124,7 +122,9 @@ function padRight(str: string, width: number): string {
 
 function getFileHeadingFromDescription(description: string): string | null {
   const index = description.indexOf("›");
+
   if (index === -1) return null;
+
   return description.slice(0, index).trim();
 }
 
@@ -149,7 +149,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     return;
   }
 
-  // Load config (and capture its directory so testDir can be relative to it)
+  // Load config and capture its directory so testDir can be relative to it
   const loaded: LoadedConfig | null = options.configPath
     ? await loadConfigFromPath(options.configPath)
     : await loadConfig(process.cwd());
@@ -164,7 +164,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     config,
   });
 
-  // IMPORTANT: testDir is now relative to the config file directory (if present)
+  // Test dir is relative to config dir if config is loaded
   const testDir = resolve(
     configDir,
     config?.testDir ?? options.testDir ?? "test",
@@ -199,6 +199,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
       for (const file of files) console.log(file);
       if (options.debug) console.log(`\n${files.length} file(s)`);
     }
+
     return;
   }
 
@@ -246,7 +247,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
   const ok = failed === 0;
   const durationMs = performance.now() - runStart;
 
-  // JSON mode: stdout must be JSON only (critical for fixture/subprocess tests)
+  // JSON mode: stdout must be JSON only
   if (options.json) {
     const report: JsonReport = {
       ok,
@@ -266,10 +267,11 @@ async function runTestsCLI(options: RunnerOptions = {}) {
     console.log(JSON.stringify(report, null, 2));
 
     if (!ok) process.exitCode = 1;
+
     return;
   }
 
-  // Human reporting
+  // Standard reporting
   const durationColWidth = 8;
   let lastHeading: string | null = null;
 
@@ -290,6 +292,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
         durationPadded,
         result.description.replace(/^.*?›\s*/, ""),
       );
+
       continue;
     }
 
@@ -299,6 +302,7 @@ async function runTestsCLI(options: RunnerOptions = {}) {
         padRight("—", durationColWidth),
         result.description.replace(/^.*?›\s*/, ""),
       );
+
       continue;
     }
 

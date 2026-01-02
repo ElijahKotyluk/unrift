@@ -1,9 +1,10 @@
 import { expect } from "./expect";
-import type { MatcherContext } from "./types";
 
 import { deepEqual } from "./utils/deepEqual";
 import { looseEqual } from "./utils/looseEqual";
 import { toThrow, ToThrowExpected } from "./utils/toThrow";
+
+import type { MatcherContext } from "./types";
 
 let matchersRegistered = false;
 

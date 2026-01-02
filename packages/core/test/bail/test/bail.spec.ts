@@ -16,7 +16,6 @@ describe("bail", () => {
 
 describe("bail check", () => {
   it("verify", () => {
-    // With bail=true, only the first test should run.
     expect(ran).toEqual(["fail"]);
   });
 });

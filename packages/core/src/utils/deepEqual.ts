@@ -23,7 +23,7 @@ function deepEqualInternal(
     // Types must match at this point
     if (typeof currentLeft !== typeof currentRight) return false;
 
-    // Primitive mismatch (we already handled equality above)
+    // Primitive mismatch - we already handled equality above
     if (isPrimitive(currentLeft) || isPrimitive(currentRight)) return false;
 
     // Functions, etc. – only ever equal by reference, which we've already checked
@@ -36,12 +36,13 @@ function deepEqualInternal(
     const previouslyMappedRight = leftToRightSeen.get(leftObj);
     if (previouslyMappedRight !== undefined) {
       if (previouslyMappedRight !== rightObj) return false;
+
       continue;
     }
 
     leftToRightSeen.set(leftObj, rightObj);
 
-    // Arrays (prototype-sensitive handled by proto check later, but arrays are special-cased)
+    // Arrays - prototype-sensitive handled by prototype check later
     const leftIsArray = Array.isArray(currentLeft);
     const rightIsArray = Array.isArray(currentRight);
 
@@ -53,7 +54,7 @@ function deepEqualInternal(
 
       if (leftArr.length !== rightArr.length) return false;
 
-      // NOTE: preserves sparseness by reading indexed values directly.
+      // Preserve sparseness by reading indexed values directly.
       for (let index = 0; index < leftArr.length; index++) {
         worklist.push([leftArr[index], rightArr[index]]);
       }
@@ -241,7 +242,7 @@ function deepEqualInternal(
  * - Value semantics for primitives (+ NaN equal, +0/-0 equal)
  * - Structural comparison for Arrays, Maps, Sets, TypedArrays, ArrayBuffer, DataView, Date, RegExp
  * - Prototype-sensitive object comparison
- * - Cycle-safe (handles circular references)
+ * - Handles circular references
  */
 export function deepEqual<T>(a: T, b: T): boolean {
   if (sameValue(a, b)) return true;

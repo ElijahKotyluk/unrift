@@ -1,4 +1,4 @@
-interface UnriftConfigOptions {
+export interface UnriftConfigOptions {
   testDir?: string;
   rootDir?: string;
   timeoutMs?: number;
@@ -9,8 +9,8 @@ interface UnriftConfigOptions {
   matchers?: string[];
 }
 
-function defineConfig(options: UnriftConfigOptions): UnriftConfigOptions {
+export function defineConfig(
+  options: UnriftConfigOptions,
+): UnriftConfigOptions {
   return options;
 }
-
-export { defineConfig, type UnriftConfigOptions };

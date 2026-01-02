@@ -36,6 +36,7 @@
     "test": "pnpm test:internal && pnpm test:fail && pnpm test:bail && pnpm test:only",
     "test:fail": "node bin/unrift.mjs --config ./test/fail/unrift.outer.config.ts",
     "test:bail": "node bin/unrift.mjs --config ./test/bail/unrift.outer.config.ts",
+    "test:hooks": "node bin/unrift.mjs --config ./test/hooks/unrift.outer.config.ts",
     "test:internal": "node bin/unrift.mjs --config ./test/internal/unrift.config.ts",
     "test:only": "node bin/unrift.mjs --config ./test/only/unrift.outer.config.ts"
   },

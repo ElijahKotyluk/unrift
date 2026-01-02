@@ -16,8 +16,8 @@ function runUnriftJson(args: string[]) {
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
 
-      child.stdout.on("data", (d) => (stdout += d));
-      child.stderr.on("data", (d) => (stderr += d));
+      child.stdout.on("data", (data) => (stdout += data));
+      child.stderr.on("data", (data) => (stderr += data));
 
       child.on("close", (code) => res({ code: code ?? 0, stdout, stderr }));
     },
@@ -25,7 +25,7 @@ function runUnriftJson(args: string[]) {
 }
 
 describe("bail fixture", () => {
-  it("the /test/bail fixture succeeds when the tests fail", async () => {
+  it("should successfully bail and skip remaining tests after failing", async () => {
     const bin = resolve("bin/unrift.mjs");
     const cfg = resolve("test/bail/unrift.config.ts");
 
@@ -36,7 +36,6 @@ describe("bail fixture", () => {
       "--json",
     ]);
 
-    // inner run fails as expected
     expect(code).toBe(1);
 
     const report = JSON.parse(stdout) as {

@@ -1,6 +1,6 @@
+import { assertRegisterState } from "./context";
 import { getCurrentSuite } from "./suite";
 import { PromisableFn } from "./types";
-import { assertRegisterState } from "./context";
 
 type HookFn = PromisableFn<void>;
 

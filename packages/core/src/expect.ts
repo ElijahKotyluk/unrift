@@ -6,7 +6,10 @@ export function extendMatchers(newMatchers: MatcherMap) {
   for (const key in newMatchers) matcherRegistry[key] = newMatchers[key];
 }
 
-// Public, stable typing: core matchers are always available
+/**
+ * Built-in matchers
+ * @TODO add more matchers and extract to separate package.
+ */
 export interface Matchers<T> {
   toBe(expected: T): void | Promise<void>;
   toBeDefined(): void | Promise<void>;

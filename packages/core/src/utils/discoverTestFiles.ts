@@ -1,5 +1,5 @@
-import { existsSync, readdirSync } from "fs";
-import { join } from "path";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 function isTestFileName(name: string): boolean {
   return /\.(spec|test)\.(ts|js)$/.test(name);

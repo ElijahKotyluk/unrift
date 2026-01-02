@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 import { runTestsCLI } from "./runner";
 
 function safeRegExp(source: string): RegExp {
@@ -59,7 +60,7 @@ function parseArgs(argv: string[]) {
       continue;
     }
 
-    // backward compat: first non-flag arg is pattern
+    // First non-flag arg is pattern
     rest.push(a);
   }
 

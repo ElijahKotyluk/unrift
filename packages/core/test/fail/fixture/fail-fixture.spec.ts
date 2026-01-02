@@ -16,16 +16,16 @@ function runUnriftJson(args: string[]) {
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
 
-      child.stdout.on("data", (d) => (stdout += d));
-      child.stderr.on("data", (d) => (stderr += d));
+      child.stdout.on("data", (data) => (stdout += data));
+      child.stderr.on("data", (data) => (stderr += data));
 
       child.on("close", (code) => res({ code: code ?? 0, stdout, stderr }));
     },
   );
 }
 
-describe("failing fixture", () => {
-  it("the /test/fail fixture fails (and CI stays green)", async () => {
+describe("fail-fixture", () => {
+  it("should successfully fail", async () => {
     const bin = resolve("bin/unrift.mjs");
     const cfg = resolve("test/fail/unrift.config.ts");
 
@@ -36,7 +36,6 @@ describe("failing fixture", () => {
       "--json",
     ]);
 
-    // inner run fails as expected
     expect(code).toBe(1);
 
     const report = JSON.parse(stdout) as {
@@ -55,8 +54,8 @@ describe("failing fixture", () => {
     expect(report.failed).toBe(1);
     expect(report.total).toBe(1);
 
-    const failing = report.results.find((r) =>
-      r.description.endsWith("› should fail as expected"),
+    const failing = report.results.find((result) =>
+      result.description.endsWith("› should fail as expected"),
     );
 
     expect(failing?.status).toBe("fail");

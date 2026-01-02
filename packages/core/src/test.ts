@@ -6,7 +6,7 @@ interface TestTask {
   run(): Promise<void>;
 }
 
-class Test implements TestTask {
+export class Test implements TestTask {
   description: string;
   durationMs: number = 0;
   error?: Error;
@@ -67,5 +67,3 @@ class Test implements TestTask {
     }
   }
 }
-
-export { Test, TaskStatus };

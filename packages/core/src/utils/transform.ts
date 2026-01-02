@@ -1,5 +1,5 @@
-// src/utils/transform.ts
-import os from "node:os";
+import { buildSync } from "esbuild";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -9,10 +9,9 @@ import {
   realpathSync,
   rmSync,
 } from "node:fs";
+import os from "node:os";
 import { join, basename, extname, resolve, dirname, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createHash } from "node:crypto";
-import { buildSync } from "esbuild";
 
 function ensureDir(dir: string) {
   mkdirSync(dir, { recursive: true });
@@ -31,9 +30,10 @@ function isTsLike(file: string): boolean {
   );
 }
 
-/** Find nearest package.json upward from a file’s folder */
+// Find the nearest package.json upward from a file’s folder
 function findProjectRoot(startDir: string): string {
   let dir = resolve(startDir);
+
   while (true) {
     if (existsSync(join(dir, "package.json"))) return dir;
     const parent = resolve(dir, "..");
@@ -46,6 +46,7 @@ function readPackageName(projectRoot: string): string | null {
   try {
     const raw = readFileSync(join(projectRoot, "package.json"), "utf8");
     const json = JSON.parse(raw) as { name?: unknown };
+
     return typeof json.name === "string" ? json.name : null;
   } catch {
     return null;
@@ -66,6 +67,7 @@ function getTmpCacheRoot(projectRoot: string): string {
   const projectKey = hashString(resolve(projectRoot));
   const tmpCache = join(os.tmpdir(), "unrift", projectKey);
   ensureDir(tmpCache);
+
   return tmpCache;
 }
 
@@ -78,11 +80,12 @@ function pathExists(p: string): boolean {
   }
 }
 
-/** True if child is inside parent (after resolving symlinks when possible). */
+// True if child is inside parent (after resolving symlinks when possible).
 function isSubpath(child: string, parent: string): boolean {
   const parentReal = safeRealpath(parent);
   const childReal = safeRealpath(child);
   const p = parentReal.endsWith(sep) ? parentReal : parentReal + sep;
+
   return childReal === parentReal || childReal.startsWith(p);
 }
 
@@ -107,6 +110,7 @@ function rmDirIfExists(dir: string): boolean {
   try {
     if (!existsSync(dir)) return false;
     rmSync(dir, { recursive: true, force: true });
+
     return true;
   } catch {
     // Don’t fail test runs because cleanup failed
@@ -166,8 +170,8 @@ function ensureSelfLink(cacheRoot: string, projectRoot: string) {
     );
   }
 
-  const nm = join(cacheRoot, "node_modules");
-  const scopeDir = join(nm, "@unrift");
+  const nodeModules = join(cacheRoot, "node_modules");
+  const scopeDir = join(nodeModules, "@unrift");
   const linkPath = join(scopeDir, "core");
 
   ensureDir(scopeDir);
@@ -182,6 +186,7 @@ function ensureSelfLink(cacheRoot: string, projectRoot: string) {
 
 function pickCacheRoot(projectRoot: string, selfHost: boolean): string {
   const fromEnv = process.env.UNRIFT_CACHE_DIR;
+
   if (fromEnv) {
     const envPath = resolve(fromEnv);
 
@@ -196,7 +201,7 @@ function pickCacheRoot(projectRoot: string, selfHost: boolean): string {
   // Normal users: prefer project-local cache
   const projectCache = tryProjectCacheRoot(projectRoot);
 
-  // Self-host: MUST avoid project-local cache if we need the self-link bridge
+  // Self-host: need to avoid project-local cache if we need the self-link bridge
   if (selfHost) {
     return getTmpCacheRoot(projectRoot);
   }
@@ -216,6 +221,7 @@ export function toImportUrl(
   const key: CacheKey = `${mode}:${filePath}`;
 
   const existing = cache.get(key);
+
   if (existing && existing.hash === h) return existing.outUrl;
 
   const projectRoot = findProjectRoot(dirname(filePath));
@@ -257,6 +263,8 @@ export function toImportUrl(
   });
 
   const outUrl = pathToFileURL(outFile).href;
+
   cache.set(key, { hash: h, outUrl });
+
   return outUrl;
 }

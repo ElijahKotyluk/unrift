@@ -1,7 +1,7 @@
 import { describe, it, expect } from "@unrift/core";
 
 describe("only", () => {
-  it.only("should only run this test", () => {
+  it.only("should pass", () => {
     expect(true).toBe(true);
   });
 

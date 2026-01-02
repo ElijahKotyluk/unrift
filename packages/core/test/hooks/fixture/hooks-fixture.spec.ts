@@ -16,18 +16,18 @@ function runUnriftJson(args: string[]) {
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
 
-      child.stdout.on("data", (d) => (stdout += d));
-      child.stderr.on("data", (d) => (stderr += d));
+      child.stdout.on("data", (data) => (stdout += data));
+      child.stderr.on("data", (data) => (stderr += data));
 
       child.on("close", (code) => res({ code: code ?? 0, stdout, stderr }));
     },
   );
 }
 
-describe("hooks fixture", () => {
-  it("the hooks tests should handle failures but still pass ci", async () => {
+describe("hooks", () => {
+  it("should successfully handle failures within hooks", async () => {
     const bin = resolve("bin/unrift.mjs");
-    const cfg = resolve("test/fail/unrift.config.ts");
+    const cfg = resolve("test/hooks/unrift.config.ts");
 
     const { code, stdout } = await runUnriftJson([
       bin,
@@ -36,13 +36,13 @@ describe("hooks fixture", () => {
       "--json",
     ]);
 
-    // inner run fails as expected
     expect(code).toBe(1);
 
     const report = JSON.parse(stdout) as {
       ok: boolean;
       failed: number;
       passed: number;
+      skipped: number;
       total: number;
       results: Array<{
         description: string;
@@ -51,14 +51,16 @@ describe("hooks fixture", () => {
       }>;
     };
 
+    console.log("report:", report);
+
+    const skipped = report.results.filter(result => result.status === "skipped");
+    const passed = report.results.filter(result => result.status === "pass");
+    const failed = report.results.filter(result => result.status === "fail");
+
     expect(report.ok).toBe(false);
-    expect(report.failed).toBe(1);
-    expect(report.total).toBe(1);
-
-    const failing = report.results.find((result) =>
-      result.description.endsWith("› should fail as expected"),
-    );
-
-    expect(failing?.status).toBe("fail");
+    expect(failed.length).toBe(2);
+    expect(passed.length).toBe(4);
+    expect(skipped.length).toBe(2);
+    expect(report.total).toBe(8);
   });
 });

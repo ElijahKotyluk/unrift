@@ -16,8 +16,8 @@ function runUnriftJson(args: string[]) {
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
 
-      child.stdout.on("data", (d) => (stdout += d));
-      child.stderr.on("data", (d) => (stderr += d));
+      child.stdout.on("data", (data) => (stdout += data));
+      child.stderr.on("data", (data) => (stderr += data));
 
       child.on("close", (code) => res({ code: code ?? 1, stdout, stderr }));
     },
@@ -25,7 +25,7 @@ function runUnriftJson(args: string[]) {
 }
 
 describe(".only fixture", () => {
-  it("the /test/only fixture passes", async () => {
+  it("runs only the tasks marked with .only", async () => {
     const bin = resolve("bin/unrift.mjs");
     const cfg = resolve("test/only/unrift.config.ts");
 
@@ -56,13 +56,16 @@ describe(".only fixture", () => {
     expect(report.ok).toBe(true);
     expect(report.files.length).toBe(2);
     expect(report.failed).toBe(0);
-    expect(report.passed).toBe(1);
+    expect(report.passed).toBe(2);
     expect(report.skipped).toBe(3);
-    expect(report.total).toBe(4);
+    expect(report.total).toBe(5);
 
-    const passing = report.results.find((result) => result.status === "pass");
+    const passing = report.results.filter((result) => result.status === "pass");
 
-    expect(passing?.description).toMatch(/only › should only run this test/);
-    expect(passing?.status).toBe("pass");
+    expect(passing.length).toBe(2);
+    
+    for (const passingTest of passing) {
+      expect(passingTest.description).toMatch(/› should pass/);
+    }
   });
 });

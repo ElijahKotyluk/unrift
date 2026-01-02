@@ -8,7 +8,7 @@ interface RunOptions {
   bail?: boolean;
 }
 
-interface RunState {
+interface SuiteRunState {
   bailed: boolean;
 }
 
@@ -122,27 +122,30 @@ class Suite implements SuiteTask {
 
   async run(
     options?: RunOptions,
-    state: RunState = { bailed: false },
+    state: SuiteRunState = { bailed: false },
     isOnly: boolean = false,
     ancestorOnly: boolean = false,
   ): Promise<void> {
     // Bail should mark anything not-run as skipped (no "pending" leaks).
     if (state.bailed) {
       this.markSubtreeSkipped();
+
       return;
     }
 
     if (this.mode === TaskMode.Skip) {
       this.markSubtreeSkipped();
+
       return;
     }
 
     const suiteHasOnly = this.subtreeHasOnly;
     const inOnlyContext = ancestorOnly || this.mode === TaskMode.Only;
 
-    // If onlyMode is on and this suite has no runnable-only content, skip it entirely
+    // If only is on and this suite has no runnable-only content, skip it entirely
     if (isOnly && !suiteHasOnly && !inOnlyContext) {
       this.markSubtreeSkipped();
+
       return;
     }
 
@@ -158,7 +161,7 @@ class Suite implements SuiteTask {
         this.beforeAllError =
           error instanceof Error ? error : new Error(String(error));
 
-        // Prevent "pending" tests: everything under this suite didn't run
+        // Prevent "pending" tests from showing up if beforeAll fails
         this.markSubtreeSkipped();
         return;
       }
@@ -168,7 +171,7 @@ class Suite implements SuiteTask {
       const beforeEachHooks = this.collectBeforeEachHooks();
       const afterEachHooks = this.collectAfterEachHooks();
 
-      // TEST LOOP (indexed so we can skip the remainder on bail)
+      // Indexed so we can skip remaining tests on bail
       for (let i = 0; i < this.tests.length; i++) {
         const test = this.tests[i];
 
@@ -223,30 +226,30 @@ class Suite implements SuiteTask {
           }
         }
 
-        // Bail: mark everything not-run as skipped (no pending)
+        // Mark everything that hasn't run as skipped on bail
         if (options?.bail && test.status === TaskStatus.Fail) {
           state.bailed = true;
 
-          // Remaining tests in THIS suite
+          // Remaining tests in this suite
           for (let j = i + 1; j < this.tests.length; j++) {
             const t = this.tests[j];
             if (t.status === TaskStatus.Pending) t.status = TaskStatus.Skipped;
             t.durationMs = 0;
           }
 
-          // All child suites under THIS suite won't run
+          // All child suites won't run
           for (const child of this.suites) child.markSubtreeSkipped();
 
           break;
         }
       }
 
-      // CHILD SUITE LOOP (indexed so we can skip remaining siblings on bail)
+      // Indexed so we can skip remaining suites on bail
       for (let i = 0; i < this.suites.length; i++) {
         const childSuite = this.suites[i];
 
         if (state.bailed) {
-          // Current and remaining sibling suites won't run
+          // Current and remaining suites won't run
           for (let j = i; j < this.suites.length; j++) {
             this.suites[j].markSubtreeSkipped();
           }
@@ -256,8 +259,8 @@ class Suite implements SuiteTask {
         await childSuite.run(options, state, isOnly, inOnlyContext);
       }
     } finally {
-      // afterAll should still run for suites we entered (even if bailed),
-      // but it should not run for suites we never entered.
+      // afterAll should still run for suites we entered, even on bail,
+      // but it should not run for suites we haven't entered.
       if (entered) {
         for (const afterAllHook of this.afterAllHooks) {
           try {
@@ -350,7 +353,7 @@ class Suite implements SuiteTask {
 }
 
 export function computeOnlyFlags(suite: Suite): boolean {
-  // Clear any stale value first (important for multi-run in same process)
+  // Clear any stale value first for multi-run in same process
   suite.subtreeHasOnly = false;
 
   let subtreeHasOnly = suite.mode === TaskMode.Only;
