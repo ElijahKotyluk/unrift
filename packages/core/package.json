@@ -27,9 +27,9 @@
   "scripts": {
     "test:publish": "pnpm clean && pnpm build && pnpm pack --pack-destination ./dist-pack ",
     "build": "pnpm run clean && pnpm run compile",
-    "build:tsc": "tsc -p ./tsconfig.build.json && tsc-esm-fix dist --tsconfig ./tsconfig.build.json",
+    "build:tsc": "tsc -p tsconfig.build.json && node scripts/patch-esm-extensions.js",
     "clean": "rm -rf ./dist",
-    "compile": "tsc -p tsconfig.build.json && tsc-esm-fix dist --tsconfig ./tsconfig.build.json",
+    "compile": "tsc -p tsconfig.build.json && node scripts/patch-esm-extensions.js",
     "prepublishOnly": "pnpm run build",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "test:orig": "node bin/unrift.mjs",
@@ -49,7 +49,6 @@
   },
   "devDependencies": {
     "ts-node": "^10.9.2",
-    "tsc-esm-fix": "^3.1.2",
     "typescript": "^5.9.3"
   }
 }

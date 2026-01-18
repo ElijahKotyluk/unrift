@@ -11,7 +11,14 @@ import {
 } from "node:fs";
 import os from "node:os";
 import { join, basename, extname, resolve, dirname, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
+
+const injectedFilename = fileURLToPath(import.meta.url);
+const injectedDirname = dirname(injectedFilename);
+
+export function resolveInjectedGlobals() {
+  return resolve(injectedDirname, "../injected/globals.js");
+}
 
 function ensureDir(dir: string) {
   mkdirSync(dir, { recursive: true });
@@ -258,6 +265,13 @@ export function toImportUrl(
     external: ["@unrift/*", "@unrift/core", "@unrift/core/*"],
 
     absWorkingDir: projectRoot,
+
+    inject: [resolveInjectedGlobals()],
+    define: {
+      __dirname: "injectedDirname",
+      __filename: "injectedFilename",
+      require: "injectedRequire",
+    },
 
     sourcemap: "inline",
     sourcesContent: true,
