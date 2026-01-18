@@ -12,6 +12,7 @@ import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
 
 import { TaskStatus } from "./types";
+import { loadTestFile } from "./utils/loadTestFile";
 
 interface RunnerOptions {
   configPath?: string;
@@ -184,6 +185,17 @@ async function runTestsCLI(options: RunnerOptions = {}) {
   ).sort((a, b) => normalizePath(a).localeCompare(normalizePath(b)));
 
   debugLog(options.debug, options.json, "Discovered test files:", files);
+
+  for (const file of files) {
+    try {
+      await loadTestFile(file);
+    } catch (err) {
+      console.error(colors.red(`✘ Failed to load ${file}`));
+      console.error(err);
+      process.exitCode = 1;
+      return;
+    }
+  }
 
   // List mode
   if (options.list) {
