@@ -44,7 +44,7 @@ function appendHookFailure(
   return combined;
 }
 
-class Suite implements SuiteTask {
+export class Suite implements SuiteTask {
   description: string;
   mode: TaskMode;
   parent?: Suite;
@@ -383,5 +383,3 @@ export function clearContext() {
   rootSuite.subtreeHasOnly = false;
   unriftGlobalContext.currentSuite = rootSuite;
 }
-
-export { Suite };

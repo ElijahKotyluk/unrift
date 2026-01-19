@@ -43,8 +43,11 @@ function findProjectRoot(startDir: string): string {
 
   while (true) {
     if (existsSync(join(dir, "package.json"))) return dir;
+
     const parent = resolve(dir, "..");
+
     if (parent === dir) return resolve(startDir);
+
     dir = parent;
   }
 }
@@ -65,6 +68,7 @@ function tryProjectCacheRoot(projectRoot: string): string | null {
 
   try {
     ensureDir(nodeModulesCache);
+
     return nodeModulesCache;
   } catch {
     return null;
@@ -74,14 +78,16 @@ function tryProjectCacheRoot(projectRoot: string): string | null {
 function getTmpCacheRoot(projectRoot: string): string {
   const projectKey = hashString(resolve(projectRoot));
   const tmpCache = join(os.tmpdir(), "unrift", projectKey);
+
   ensureDir(tmpCache);
 
   return tmpCache;
 }
 
-function pathExists(p: string): boolean {
+function pathExists(path: string): boolean {
   try {
-    lstatSync(p);
+    lstatSync(path);
+
     return true;
   } catch {
     return false;
@@ -139,7 +145,7 @@ export function cleanUnriftCaches(projectRoot: string): {
   const projectCacheDeleted = rmDirIfExists(projectCacheDir);
   const tempCacheDeleted = rmDirIfExists(tempCacheDir);
 
-  // also drop in-memory map so current process doesn’t think outputs exist
+  // Clear in-memory cache
   cache.clear();
 
   return {
@@ -248,6 +254,7 @@ export function toImportUrl(
   }
 
   const outDir = cacheDirForMode(cacheRoot, mode);
+
   ensureDir(outDir);
 
   const outFile = cacheOutPath(outDir, filePath, hashStr);
@@ -255,24 +262,19 @@ export function toImportUrl(
   buildSync({
     entryPoints: [filePath],
     outfile: outFile,
-
     bundle: true,
     format: "esm",
     platform: "node",
     target: "node18",
-
     packages: "external",
     external: ["@unrift/*", "@unrift/core", "@unrift/core/*"],
-
     absWorkingDir: projectRoot,
-
     inject: [resolveInjectedGlobals()],
     define: {
       __dirname: "injectedDirname",
       __filename: "injectedFilename",
       require: "injectedRequire",
     },
-
     sourcemap: "inline",
     sourcesContent: true,
     logLevel: "silent",

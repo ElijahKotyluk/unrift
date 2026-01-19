@@ -128,7 +128,7 @@ function getFileHeadingFromDescription(description: string): string | null {
   return description.slice(0, index).trim();
 }
 
-async function runTestsCLI(options: RunnerOptions = {}) {
+export async function runTestsCLI(options: RunnerOptions = {}) {
   const runStart = performance.now();
 
   // Cache clean mode
@@ -333,5 +333,3 @@ async function runTestsCLI(options: RunnerOptions = {}) {
 
   if (!ok) process.exitCode = 1;
 }
-
-export { runTestsCLI };

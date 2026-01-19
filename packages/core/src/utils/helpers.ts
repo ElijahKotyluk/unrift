@@ -1,6 +1,6 @@
 type Primitive = null | undefined | string | number | boolean | symbol | bigint;
 
-type TypedArray =
+export type TypedArray =
   | Uint8Array
   | Int8Array
   | Uint16Array
@@ -12,8 +12,9 @@ type TypedArray =
   | BigInt64Array
   | BigUint64Array;
 
-function isPrimitive(value: unknown): value is Primitive {
+export function isPrimitive(value: unknown): value is Primitive {
   const t = typeof value;
+
   return (
     value === null ||
     t === "string" ||
@@ -25,11 +26,11 @@ function isPrimitive(value: unknown): value is Primitive {
   );
 }
 
-function isObjectLike(value: unknown): value is object {
+export function isObjectLike(value: unknown): value is object {
   return typeof value === "object" && value !== null;
 }
 
-function isTypedArray(value: unknown): value is TypedArray {
+export function isTypedArray(value: unknown): value is TypedArray {
   return ArrayBuffer.isView(value) && !(value instanceof DataView);
 }
 
@@ -38,7 +39,7 @@ function isTypedArray(value: unknown): value is TypedArray {
  * - NaN equals NaN
  * - +0 and -0 are equal
  */
-function sameValue(a: unknown, b: unknown): boolean {
+export function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
 
   return (
@@ -48,5 +49,3 @@ function sameValue(a: unknown, b: unknown): boolean {
     Number.isNaN(b)
   );
 }
-
-export { isPrimitive, isObjectLike, isTypedArray, sameValue, type TypedArray };

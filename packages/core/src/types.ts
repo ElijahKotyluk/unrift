@@ -1,4 +1,5 @@
 type Promisable<T> = Promise<T> | T;
+
 export type PromisableFn<T> = () => Promisable<T>;
 
 export enum TaskStatus {

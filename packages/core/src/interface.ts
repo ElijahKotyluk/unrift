@@ -4,6 +4,10 @@ import { Test } from "./test";
 
 import { type PromisableFn, TaskMode } from "./types";
 
+/**
+ * @TODO expose test and suite aliases
+ */
+
 type DescribeFn = {
   (description: string, fn: () => void): void;
   only: (description: string, fn: () => void) => void;

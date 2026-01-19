@@ -32,11 +32,14 @@ function looseEqualInternal(
 
     // Cycle / aliasing consistency (bijection-ish)
     const mappedRight = leftToRightSeen.get(leftObj);
+
     if (mappedRight !== undefined) {
       if (mappedRight !== rightObj) return false;
       continue;
     }
+
     const mappedLeft = rightToLeftSeen.get(rightObj);
+
     if (mappedLeft !== undefined) {
       if (mappedLeft !== leftObj) return false;
 

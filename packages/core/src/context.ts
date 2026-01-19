@@ -1,6 +1,6 @@
 import { Suite } from "./suite";
 
-enum RunState {
+export enum RunState {
   Register = "register",
   Run = "run",
   Idle = "idle",
@@ -13,12 +13,12 @@ interface UnriftGlobalContext {
   state: UnriftState;
 }
 
-const unriftGlobalContext: UnriftGlobalContext = {
+export const unriftGlobalContext: UnriftGlobalContext = {
   currentSuite: null,
   state: RunState.Register,
 };
 
-function assertRegisterState(apiName: string) {
+export function assertRegisterState(apiName: string) {
   if (unriftGlobalContext.state !== RunState.Register) {
     throw new Error(
       `Unrift: ${apiName}() can only be called during test registration (module import time). ` +
@@ -26,5 +26,3 @@ function assertRegisterState(apiName: string) {
     );
   }
 }
-
-export { assertRegisterState, RunState, unriftGlobalContext };
