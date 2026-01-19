@@ -51,8 +51,6 @@ describe("hooks", () => {
       }>;
     };
 
-    console.log("report:", report);
-
     const skipped = report.results.filter(result => result.status === "skipped");
     const passed = report.results.filter(result => result.status === "pass");
     const failed = report.results.filter(result => result.status === "fail");
