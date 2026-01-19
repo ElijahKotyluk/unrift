@@ -2,7 +2,7 @@ import { expect } from "./expect";
 
 import { deepEqual } from "./utils/deepEqual";
 import { looseEqual } from "./utils/looseEqual";
-import { toThrow, ToThrowExpected } from "./utils/toThrow";
+import { toThrow, type ToThrowExpected } from "./utils/toThrow";
 
 import type { MatcherContext } from "./types";
 
@@ -16,7 +16,7 @@ export function ensureInternalMatchers() {
   matchersRegistered = true;
 }
 
-export function registerCoreMatchers() {
+function registerCoreMatchers() {
   expect.extend({
     toBe<T>(this: MatcherContext, received: T, expected: T) {
       const pass = Object.is(received, expected);

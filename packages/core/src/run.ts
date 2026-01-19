@@ -4,14 +4,14 @@ import { RunState, unriftGlobalContext } from "./context";
 import { TaskMode, TaskStatus } from "./types";
 import { toImportUrl } from "./utils/transform";
 
-export type RunEngineOptions = {
+type RunEngineOptions = {
   files: string[];
   timeoutMs?: number;
   bail?: boolean;
   matchers?: string[];
 };
 
-export type RunEngineResult = {
+type RunEngineResult = {
   isOnly: boolean;
   timeoutMs?: number;
   bail: boolean;
@@ -41,6 +41,7 @@ export async function runEngine(
   clearContext();
 
   ensureInternalMatchers();
+
   await loadMatcherModules(options.matchers);
 
   const timeoutMs = options.timeoutMs;

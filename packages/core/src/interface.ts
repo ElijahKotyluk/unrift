@@ -2,7 +2,7 @@ import { assertRegisterState, unriftGlobalContext } from "./context";
 import { getCurrentSuite, Suite } from "./suite";
 import { Test } from "./test";
 
-import { PromisableFn, TaskMode } from "./types";
+import { type PromisableFn, TaskMode } from "./types";
 
 type DescribeFn = {
   (description: string, fn: () => void): void;

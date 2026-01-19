@@ -1,11 +1,11 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-function isTestFileName(name: string): boolean {
+export function isTestFileName(name: string): boolean {
   return /\.(spec|test)\.(ts|js)$/.test(name);
 }
 
-function discoverTestFiles(dir: string): string[] {
+export function discoverTestFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
 
   const entries = readdirSync(dir, { withFileTypes: true });
@@ -27,5 +27,3 @@ function discoverTestFiles(dir: string): string[] {
 
   return files;
 }
-
-export { discoverTestFiles, isTestFileName };

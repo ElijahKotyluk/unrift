@@ -16,7 +16,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 const injectedFilename = fileURLToPath(import.meta.url);
 const injectedDirname = dirname(injectedFilename);
 
-export function resolveInjectedGlobals() {
+function resolveInjectedGlobals() {
   return resolve(injectedDirname, "../injected/globals.js");
 }
 
