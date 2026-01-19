@@ -3,7 +3,7 @@ import { dirname, join, resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DIST_DIR = resolve(__dirname, "../dist/esm"); // dynamic & correct
+const ESM_DIST = resolve(__dirname, "../dist/esm");
 
 const importRegex = /(?<=import\s.+?from\s+['"])(\.\/[^'"]+)(?=['"])/g;
 const exportRegex = /(?<=export\s.+?from\s+['"])(\.\/[^'"]+)(?=['"])/g;
@@ -50,7 +50,7 @@ async function patchFile(file) {
   }
 }
 
-const files = await findJsFiles(DIST_DIR);
+const files = await findJsFiles(ESM_DIST);
 
 await Promise.all(files.map(patchFile));
 

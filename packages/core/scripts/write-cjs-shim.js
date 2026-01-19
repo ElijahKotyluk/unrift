@@ -3,9 +3,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DIST_DIR = resolve(__dirname, "../dist/cjs");
+const CJS_DIST = resolve(__dirname, "../dist/cjs");
 
-const outputPath = resolve(DIST_DIR, "index.cjs");
+const outputPath = resolve(CJS_DIST, "index.cjs");
 
 const shim = `'use strict';
 
