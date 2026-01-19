@@ -39,7 +39,7 @@
     "test:only": "node bin/unrift.mjs --config ./test/only/unrift.outer.config.ts",
     "test:orig": "node bin/unrift.mjs",
     "test:publish": "pnpm clean && pnpm build && pnpm pack --pack-destination ./dist-pack",
-    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    "typecheck": "tsc -p tsconfig.build.esm.json --noEmit"
   },
   "keywords": [],
   "author": "elijah kotyluk <elijah@elijahkotyluk.com>",
