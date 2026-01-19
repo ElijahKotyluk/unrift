@@ -12,10 +12,33 @@ function safeRegExp(source: string): RegExp {
   }
 }
 
+function printHelp() {
+  console.log(`
+Unrift Test Runner
+
+Usage:
+  unrift [pattern] [options]
+
+Options:
+  -c, --config <path>      Path to config file
+  -d, --debug              Enable debug logging
+  -l, --list               List discovered test files
+  -j, --json               Output test results as JSON
+      --cache-clean        Clear transform cache
+  -h, --help               Show help
+
+Examples:
+  unrift
+  unrift math
+  unrift -c test/config.ts --debug
+`);
+}
+
 function parseArgs(argv: string[]) {
   let configPath: string | undefined;
   let pattern: RegExp | undefined;
   let debug = false;
+  let help = false;
   let list = false;
   let json = false;
   let cacheClean = false;
@@ -24,6 +47,11 @@ function parseArgs(argv: string[]) {
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+
+    if (a === "--help" || a === "-h") {
+      help = true;
+      continue;
+    }
 
     if (a === "--config" || a === "-c") {
       const next = argv[i + 1];
@@ -66,12 +94,17 @@ function parseArgs(argv: string[]) {
 
   if (rest[0]) pattern = safeRegExp(rest[0]);
 
-  return { configPath, pattern, debug, list, json, cacheClean };
+  return { configPath, pattern, debug, list, json, cacheClean, help };
 }
 
-const { configPath, pattern, debug, list, json, cacheClean } = parseArgs(
+const { configPath, pattern, debug, list, json, cacheClean, help } = parseArgs(
   process.argv.slice(2),
 );
+
+if (help) {
+  printHelp();
+  process.exit(0);
+}
 
 runTestsCLI({ pattern, configPath, debug, list, json, cacheClean }).catch(
   (err) => {
