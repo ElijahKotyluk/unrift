@@ -2,4 +2,4 @@
 "use strict";
 
 // Run the real CLI
-await import("../dist/cli.js");
+await import("../dist/esm/cli.js");
