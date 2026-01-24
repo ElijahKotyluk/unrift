@@ -1,7 +1,7 @@
 {
   "name": "@unrift/core",
   "version": "0.0.0",
-  "description": "",
+  "description": "unrift core package",
   "private": false,
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.js",
