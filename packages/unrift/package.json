@@ -1,0 +1,49 @@
+{
+  "name": "unrift",
+  "version": "0.0.0",
+  "description": "test framework",
+  "private": false,
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "type": "module",
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.cjs",
+      "types": "./dist/esm/index.d.ts"
+    },
+    "./cli": {
+      "import": "./dist/esm/cli.js",
+      "types": "./dist/esm/cli.d.ts"
+    },
+    "./run": {
+      "import": "./dist/esm/run.js",
+      "types": "./dist/esm/run.d.ts"
+    }
+  },
+  "bin": {
+    "unrift": "./bin/unrift.mjs"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.esm.json&& node scripts/write-cjs-shim.js",
+    "clean": "rm -rf ./dist",
+    "prepublishOnly": "pnpm run build",
+    "test:publish": "pnpm clean && pnpm build && pnpm pack --pack-destination ./dist-pack"
+  },
+  "keywords": [],
+  "author": "elijah kotyluk <elijah@elijahkotyluk.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elijahkotyluk/unrift"
+  },
+  "license": "MIT",
+  "packageManager": "pnpm@10.20.0",
+  "devDependencies": {
+    "@unrift/core": "^0.0.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "./",
+    "outDir": "./dist/esm",
+    "rootDir": "src",
+    "module": "esnext",
+    "target": "es2022",
+    "types": ["@unrift/core"],
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/**/*"],
+}
