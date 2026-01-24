@@ -17,6 +17,10 @@
       "require": "./dist/cjs/index.cjs",
       "types": "./dist/esm/index.d.ts"
     },
+    "./cli": {
+      "import": "./dist/esm/cli.js",
+      "types": "./dist/esm/cli.d.ts"
+    },
     "./run": {
       "import": "./dist/esm/run.js",
       "types": "./dist/esm/run.d.ts"
