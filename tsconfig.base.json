@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "esnext",
+    "module": "esnext",
+    "lib": ["esnext"],
+    "moduleResolution": "node",
+    "strict": true,
+    "resolveJsonModule": true,
+    // "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    "noEmitOnError": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "types": ["@types/node"],
+    "noEmit": false,
+    "strictNullChecks": true,
+    "skipDefaultLibCheck": true,
+    "paths": {
+      "@unrift/*": ["packages/*/src"]
+    }
+    // "moduleDetection": "force",
+    // "isolatedModules": false,
+  },
+  "ts-node": {
+    // Tell ts-node CLI to install the --loader automatically, explained below
+    "esm": true
+  },
+  "exclude": ["node_modules"]
+}

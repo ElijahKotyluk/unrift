@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      // "unrift/*": ["packages/unrift/src/*"],
+      "@unrift/core/*": ["packages/core/src/*"],
+      "@unrift/*": ["packages/*/src"]
+    },
+    "noEmit": true
+  }
+}
