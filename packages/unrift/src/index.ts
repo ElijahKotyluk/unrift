@@ -17,3 +17,5 @@ export type {
   MatcherFn,
   MatcherMap,
 } from "@unrift/core";
+
+// Promisable is re-exported from @unrift/core once types are updated

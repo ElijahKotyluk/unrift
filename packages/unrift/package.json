@@ -1,12 +1,15 @@
 {
   "name": "unrift",
-  "version": "0.0.0",
+  "version": "0.0.1-alpha.1",
   "description": "test framework",
   "private": false,
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.js",
   "types": "./dist/esm/index.d.ts",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "files": [
     "dist",
     "bin"
@@ -43,7 +46,7 @@
   },
   "license": "MIT",
   "packageManager": "pnpm@10.20.0",
-  "devDependencies": {
+  "dependencies": {
     "@unrift/core": "^0.0.0"
   }
 }
