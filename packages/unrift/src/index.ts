@@ -6,6 +6,7 @@ export {
   defineConfig,
   describe,
   it,
+  test,
   expect,
   extendMatchers,
 } from "@unrift/core";
@@ -16,6 +17,6 @@ export type {
   MatcherContext,
   MatcherFn,
   MatcherMap,
+  Promisable,
+  UnriftConfigOptions,
 } from "@unrift/core";
-
-// Promisable is re-exported from @unrift/core once types are updated

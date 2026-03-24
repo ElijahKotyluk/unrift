@@ -1,7 +1,7 @@
 {
   "name": "unrift",
-  "version": "0.0.1-alpha.1",
-  "description": "test framework",
+  "version": "0.1.0",
+  "description": "A lightweight TypeScript test framework",
   "private": false,
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.js",
@@ -33,20 +33,24 @@
     "unrift": "./bin/unrift.mjs"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.esm.json&& node scripts/write-cjs-shim.js",
+    "build": "tsc -p tsconfig.build.esm.json && node scripts/write-cjs-shim.js",
     "clean": "rm -rf ./dist",
     "prepublishOnly": "pnpm run build",
     "test:publish": "pnpm clean && pnpm build && pnpm pack --pack-destination ./dist-pack"
   },
-  "keywords": [],
+  "keywords": ["testing", "test", "test-runner", "typescript", "esm", "assert", "expect", "matchers"],
   "author": "elijah kotyluk <elijah@elijahkotyluk.com>",
   "repository": {
     "type": "git",
     "url": "https://github.com/elijahkotyluk/unrift"
   },
+  "bugs": {
+    "url": "https://github.com/elijahkotyluk/unrift/issues"
+  },
+  "homepage": "https://github.com/elijahkotyluk/unrift",
   "license": "MIT",
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
-    "@unrift/core": "^0.0.0"
+    "@unrift/core": "^0.1.0"
   }
 }
