@@ -96,20 +96,40 @@ jobs:
         run: |
           BUMP="${{ steps.bump.outputs.type }}"
 
-          if [ "${{ steps.changes.outputs.core }}" = "true" ]; then
+          bump_package() {
+            local pkg_dir="$1"
             if [ "$BUMP" = "prerelease" ]; then
-              cd packages/core && npm version prerelease --preid=alpha --no-git-tag-version && cd ../..
+              node -e "
+                const fs = require('fs');
+                const p = '${pkg_dir}/package.json';
+                const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+                const [major, minor, patch] = pkg.version.replace(/-.*/, '').split('.').map(Number);
+                const pre = pkg.version.includes('-alpha.') ? Number(pkg.version.split('-alpha.')[1]) + 1 : 0;
+                pkg.version = major + '.' + minor + '.' + (pre === 0 ? patch + 1 : patch) + '-alpha.' + pre;
+                fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+                console.log(pkg.name + '@' + pkg.version);
+              "
             else
-              cd packages/core && npm version "$BUMP" --no-git-tag-version && cd ../..
+              node -e "
+                const fs = require('fs');
+                const p = '${pkg_dir}/package.json';
+                const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+                const [major, minor, patch] = pkg.version.replace(/-.*/, '').split('.').map(Number);
+                if ('$BUMP' === 'major') pkg.version = (major+1) + '.0.0';
+                else if ('$BUMP' === 'minor') pkg.version = major + '.' + (minor+1) + '.0';
+                else pkg.version = major + '.' + minor + '.' + (patch+1);
+                fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+                console.log(pkg.name + '@' + pkg.version);
+              "
             fi
+          }
+
+          if [ "${{ steps.changes.outputs.core }}" = "true" ]; then
+            bump_package "packages/core"
           fi
 
           if [ "${{ steps.changes.outputs.unrift }}" = "true" ]; then
-            if [ "$BUMP" = "prerelease" ]; then
-              cd packages/unrift && npm version prerelease --preid=alpha --no-git-tag-version && cd ../..
-            else
-              cd packages/unrift && npm version "$BUMP" --no-git-tag-version && cd ../..
-            fi
+            bump_package "packages/unrift"
           fi
 
           # Read the new version from whichever package was bumped (prefer core)
