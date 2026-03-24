@@ -22,6 +22,7 @@ export default defineConfig(
       "**/out",
       "**/lib",
       "**/test/**.*",
+      "packages/docs/**",
     ],
   },
   {
