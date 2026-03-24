@@ -51,6 +51,6 @@
   "license": "MIT",
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
-    "@unrift/core": "^0.1.0"
+    "@unrift/core": "workspace:^"
   }
 }
