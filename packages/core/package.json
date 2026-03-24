@@ -1,6 +1,6 @@
 {
   "name": "@unrift/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "unrift core package",
   "private": false,
   "main": "./dist/cjs/index.cjs",
@@ -48,7 +48,17 @@
     "test:publish": "pnpm clean && pnpm build && pnpm pack --pack-destination ./dist-pack",
     "typecheck": "tsc -p tsconfig.build.esm.json --noEmit"
   },
-  "keywords": ["testing", "test", "test-runner", "typescript", "javascript", "esm", "assert", "expect", "matchers"],
+  "keywords": [
+    "testing",
+    "test",
+    "test-runner",
+    "typescript",
+    "javascript",
+    "esm",
+    "assert",
+    "expect",
+    "matchers"
+  ],
   "author": "elijah kotyluk <elijah@elijahkotyluk.com>",
   "repository": {
     "type": "git",

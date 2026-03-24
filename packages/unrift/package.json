@@ -1,6 +1,6 @@
 {
   "name": "unrift",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A lightweight TypeScript test framework",
   "private": false,
   "main": "./dist/cjs/index.cjs",
@@ -38,7 +38,16 @@
     "prepublishOnly": "pnpm run build",
     "test:publish": "pnpm clean && pnpm build && pnpm pack --pack-destination ./dist-pack"
   },
-  "keywords": ["testing", "test", "test-runner", "typescript", "esm", "assert", "expect", "matchers"],
+  "keywords": [
+    "testing",
+    "test",
+    "test-runner",
+    "typescript",
+    "esm",
+    "assert",
+    "expect",
+    "matchers"
+  ],
   "author": "elijah kotyluk <elijah@elijahkotyluk.com>",
   "repository": {
     "type": "git",
