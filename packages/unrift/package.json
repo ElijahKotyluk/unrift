@@ -44,6 +44,7 @@
     "test-runner",
     "typescript",
     "esm",
+    "javascript",
     "assert",
     "expect",
     "matchers"
