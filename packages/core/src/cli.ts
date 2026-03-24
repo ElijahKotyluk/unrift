@@ -17,7 +17,7 @@ function readVersion(): string {
       );
       if (pkg.name === "@unrift/core") return pkg.version;
     } catch {
-      throw new Error(`Failed to read version from package.json in ${dir}`);
+      // No package.json here, keep walking up
     }
     dir = resolve(dir, "..");
   }
