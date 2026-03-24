@@ -1,6 +1,6 @@
 {
   "name": "@unrift/docs",
-  "private": true,
+  "private": false,
   "type": "module",
   "scripts": {
     "dev": "astro dev",
