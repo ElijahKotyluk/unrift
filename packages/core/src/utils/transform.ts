@@ -118,7 +118,7 @@ function projectNodeModulesCacheRoot(projectRoot: string) {
 function tempCacheRootForProject(projectRoot: string) {
   const projectKey = hashString(resolve(projectRoot));
 
-  return getTmpCacheRoot(projectKey);
+  return join(os.tmpdir(), "unrift", projectKey);
 }
 
 function rmDirIfExists(dir: string): boolean {
@@ -259,26 +259,41 @@ export function toImportUrl(
 
   const outFile = cacheOutPath(outDir, filePath, hashStr);
 
-  buildSync({
-    entryPoints: [filePath],
-    outfile: outFile,
-    bundle: true,
-    format: "esm",
-    platform: "node",
-    target: "node18",
-    packages: "external",
-    external: ["@unrift/*", "@unrift/core", "@unrift/core/*"],
-    absWorkingDir: projectRoot,
-    inject: [resolveInjectedGlobals()],
-    define: {
-      __dirname: "injectedDirname",
-      __filename: "injectedFilename",
-      require: "injectedRequire",
-    },
-    sourcemap: "inline",
-    sourcesContent: true,
-    logLevel: "silent",
-  });
+  try {
+    buildSync({
+      entryPoints: [filePath],
+      outfile: outFile,
+      bundle: true,
+      format: "esm",
+      platform: "node",
+      target: "node18",
+      packages: "external",
+      external: ["@unrift/*", "@unrift/core", "@unrift/core/*"],
+      absWorkingDir: projectRoot,
+      inject: [resolveInjectedGlobals()],
+      define: {
+        __dirname: "injectedDirname",
+        __filename: "injectedFilename",
+        require: "injectedRequire",
+      },
+      sourcemap: "inline",
+      sourcesContent: true,
+      logLevel: "silent",
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+
+    if (
+      msg.includes("Cannot find module") ||
+      msg.includes("MODULE_NOT_FOUND")
+    ) {
+      throw new Error(
+        `esbuild is required but could not be loaded. Run: npm install esbuild\n\nOriginal error: ${msg}`,
+      );
+    }
+
+    throw err;
+  }
 
   const outUrl = pathToFileURL(outFile).href;
 

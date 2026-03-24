@@ -1,0 +1,1 @@
+import "@unrift/core/cli";

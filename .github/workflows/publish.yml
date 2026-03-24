@@ -1,0 +1,157 @@
+name: Publish to npm
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  publish:
+    if: github.event.pull_request.merged == true && (contains(github.event.pull_request.labels.*.name, 'release:major') || contains(github.event.pull_request.labels.*.name, 'release:minor') || contains(github.event.pull_request.labels.*.name, 'release:patch') || contains(github.event.pull_request.labels.*.name, 'release:prerelease'))
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10.20.0
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build:all
+
+      - name: Run Tests
+        run: pnpm test:all
+
+      - name: Detect changed packages
+        id: changes
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.merge_commit_sha }}"
+
+          CHANGED_FILES=$(git diff --name-only "$BASE" "$HEAD")
+
+          CORE_CHANGED=false
+          UNRIFT_CHANGED=false
+
+          while IFS= read -r file; do
+            case "$file" in
+              packages/core/*) CORE_CHANGED=true ;;
+              packages/unrift/*) UNRIFT_CHANGED=true ;;
+            esac
+          done <<< "$CHANGED_FILES"
+
+          # If core changed, always publish unrift too (it depends on core)
+          if [ "$CORE_CHANGED" = "true" ]; then
+            UNRIFT_CHANGED=true
+          fi
+
+          echo "core=$CORE_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "unrift=$UNRIFT_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "any=$([ "$CORE_CHANGED" = "true" ] || [ "$UNRIFT_CHANGED" = "true" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+          echo "Changed: core=$CORE_CHANGED unrift=$UNRIFT_CHANGED"
+
+      - name: Determine version bump
+        if: steps.changes.outputs.any == 'true'
+        id: bump
+        run: |
+          if ${{ contains(github.event.pull_request.labels.*.name, 'release:major') }}; then
+            echo "type=major" >> "$GITHUB_OUTPUT"
+          elif ${{ contains(github.event.pull_request.labels.*.name, 'release:minor') }}; then
+            echo "type=minor" >> "$GITHUB_OUTPUT"
+          elif ${{ contains(github.event.pull_request.labels.*.name, 'release:patch') }}; then
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+          elif ${{ contains(github.event.pull_request.labels.*.name, 'release:prerelease') }}; then
+            echo "type=prerelease" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure git
+        if: steps.changes.outputs.any == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump versions
+        if: steps.changes.outputs.any == 'true'
+        run: |
+          BUMP="${{ steps.bump.outputs.type }}"
+
+          if [ "${{ steps.changes.outputs.core }}" = "true" ]; then
+            if [ "$BUMP" = "prerelease" ]; then
+              cd packages/core && npm version prerelease --preid=alpha --no-git-tag-version && cd ../..
+            else
+              cd packages/core && npm version "$BUMP" --no-git-tag-version && cd ../..
+            fi
+          fi
+
+          if [ "${{ steps.changes.outputs.unrift }}" = "true" ]; then
+            if [ "$BUMP" = "prerelease" ]; then
+              cd packages/unrift && npm version prerelease --preid=alpha --no-git-tag-version && cd ../..
+            else
+              cd packages/unrift && npm version "$BUMP" --no-git-tag-version && cd ../..
+            fi
+          fi
+
+          # Read the new version from whichever package was bumped (prefer core)
+          if [ "${{ steps.changes.outputs.core }}" = "true" ]; then
+            NEW_VERSION=$(node -p "require('./packages/core/package.json').version")
+          else
+            NEW_VERSION=$(node -p "require('./packages/unrift/package.json').version")
+          fi
+          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+
+      - name: Update workspace dependency
+        if: steps.changes.outputs.any == 'true'
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Commit version bump
+        if: steps.changes.outputs.any == 'true'
+        run: |
+          git add -A
+          git commit -m "release: v${NEW_VERSION}"
+          git tag "v${NEW_VERSION}"
+          git push origin main --follow-tags
+
+      - name: Publish @unrift/core
+        if: steps.changes.outputs.core == 'true'
+        run: pnpm --filter @unrift/core publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish unrift
+        if: steps.changes.outputs.unrift == 'true'
+        run: pnpm --filter unrift publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.changes.outputs.any == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ env.NEW_VERSION }}"
+          name: "v${{ env.NEW_VERSION }}"
+          generate_release_notes: true
+
+      - name: No packages to publish
+        if: steps.changes.outputs.any != 'true'
+        run: echo "No package changes detected in this PR — skipping publish."

@@ -11,6 +11,7 @@ import { colors } from "./utils/colors";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
 
+import { normalizePath } from "./utils/normalizePath";
 import { TaskStatus } from "./types";
 
 interface RunnerOptions {
@@ -30,6 +31,7 @@ type JsonReport = {
   failed: number;
   passed: number;
   skipped: number;
+  todo: number;
   total: number;
   bail: boolean;
   timeoutMs?: number;
@@ -44,11 +46,6 @@ type JsonReport = {
     error?: { message: string; stack?: string };
   }>;
 };
-
-function normalizePath(p: string): string {
-  // stable for matching/reporting across platforms
-  return p.replace(/\\/g, "/");
-}
 
 function debugLog(
   enabled: boolean | undefined,
@@ -69,6 +66,19 @@ function safeRegExp(source: string): RegExp {
   }
 }
 
+const regExpCache = new Map<string, RegExp>();
+
+function getCachedRegExp(pattern: string): RegExp {
+  let re = regExpCache.get(pattern);
+
+  if (!re) {
+    re = safeRegExp(pattern);
+    regExpCache.set(pattern, re);
+  }
+
+  return re;
+}
+
 /**
  * @TODO Add glob support
  */
@@ -81,7 +91,7 @@ function matchesAnyPattern(
   const relativePath = normalizePath(relative(baseDir, fileAbs));
 
   return patterns.some((pattern) => {
-    const re = safeRegExp(pattern);
+    const re = getCachedRegExp(pattern);
 
     return re.test(relativePath) || re.test(absolutePath);
   });
@@ -116,16 +126,105 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
-function padRight(str: string, width: number): string {
-  return str.length >= width ? str : str + " ".repeat(width - str.length);
-}
-
 function getFileHeadingFromDescription(description: string): string | null {
   const index = description.indexOf("›");
 
   if (index === -1) return null;
 
   return description.slice(0, index).trim();
+}
+
+function shortenPath(absPath: string): string {
+  const cwd = normalizePath(process.cwd());
+  const norm = normalizePath(absPath);
+
+  if (norm.startsWith(cwd + "/")) return norm.slice(cwd.length + 1);
+
+  return norm;
+}
+
+function horizontalRule(label?: string): string {
+  const width = Math.min(process.stdout.columns || 80, 80);
+
+  if (!label) return colors.dim("─".repeat(width));
+
+  const padding = 2;
+  const labelLen = label.length + padding * 2;
+  const sideLen = Math.max(1, Math.floor((width - labelLen) / 2));
+  const left = "─".repeat(sideLen);
+  const right = "─".repeat(Math.max(1, width - sideLen - labelLen));
+
+  return (
+    colors.dim(`${left}${"─".repeat(padding)}`) +
+    label +
+    colors.dim(`${"─".repeat(padding)}${right}`)
+  );
+}
+
+type FileGroup = {
+  heading: string;
+  results: Array<{
+    description: string;
+    status: TaskStatus;
+    durationMs: number;
+    error?: Error;
+  }>;
+};
+
+function groupResultsByFile(
+  results: Array<{
+    description: string;
+    status: TaskStatus;
+    error?: Error;
+    durationMs: number;
+  }>,
+): FileGroup[] {
+  const groups: FileGroup[] = [];
+  let current: FileGroup | null = null;
+
+  for (const result of results) {
+    const heading = getFileHeadingFromDescription(result.description);
+    const key = heading ?? "";
+
+    if (!current || current.heading !== key) {
+      current = { heading: key, results: [] };
+      groups.push(current);
+    }
+
+    current.results.push(result);
+  }
+
+  return groups;
+}
+
+function getFileStats(group: FileGroup) {
+  let pass = 0;
+  let fail = 0;
+  let skip = 0;
+  let todoCount = 0;
+  let totalDuration = 0;
+
+  for (const r of group.results) {
+    if (r.status === TaskStatus.Pass) pass++;
+    else if (r.status === TaskStatus.Fail) fail++;
+    else if (r.status === TaskStatus.Skipped) skip++;
+    else if (r.status === TaskStatus.Todo) todoCount++;
+    totalDuration += r.durationMs;
+  }
+
+  return {
+    pass,
+    fail,
+    skip,
+    todo: todoCount,
+    total: group.results.length,
+    totalDuration,
+  };
+}
+
+function extractTestName(description: string): string {
+  // Remove the file heading and first suite separator, keep nested describe structure
+  return description.replace(/^.*?›\s*/, "");
 }
 
 export async function runTestsCLI(options: RunnerOptions = {}) {
@@ -203,6 +302,39 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     return;
   }
 
+  // No test files found
+  if (files.length === 0) {
+    const dir = normalizePath(testDir);
+
+    if (options.json) {
+      const report: JsonReport = {
+        ok: false,
+        failed: 0,
+        passed: 0,
+        skipped: 0,
+        todo: 0,
+        total: 0,
+        bail: options.bail ?? config?.bail ?? false,
+        timeoutMs: options.timeoutMs ?? config?.timeoutMs,
+        testDir: dir,
+        configPath: resolvedConfigPath,
+        files: [],
+        durationMs: performance.now() - runStart,
+        results: [],
+      };
+
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log(
+        `\n ${colors.boldYellow("!")} No test files found in ${colors.bold(dir)}\n`,
+      );
+    }
+
+    process.exitCode = 1;
+
+    return;
+  }
+
   const timeoutMs = options.timeoutMs ?? config?.timeoutMs;
   const bail = options.bail ?? config?.bail ?? false;
 
@@ -221,6 +353,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   let passed = 0;
   let failed = 0;
   let skipped = 0;
+  let todo = 0;
 
   const failures: typeof results = [];
   const serializedResults: JsonReport["results"] = [];
@@ -231,6 +364,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     if (result.status === TaskStatus.Pass) passed++;
     else if (result.status === TaskStatus.Skipped) skipped++;
     else if (result.status === TaskStatus.Fail) failed++;
+    else if (result.status === TaskStatus.Todo) todo++;
 
     if (result.status === TaskStatus.Fail) failures.push(result);
 
@@ -254,6 +388,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       failed,
       passed,
       skipped,
+      todo,
       total,
       bail,
       timeoutMs,
@@ -271,65 +406,140 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     return;
   }
 
-  // Standard reporting
-  const durationColWidth = 8;
-  let lastHeading: string | null = null;
+  // ── Pretty reporting ──────────────────────────────────────────────
 
-  for (const result of results) {
-    const heading = getFileHeadingFromDescription(result.description);
+  const groups = groupResultsByFile(results);
 
-    if (heading && heading !== lastHeading) {
-      console.log(colors.bold(`\n${heading}`));
-      lastHeading = heading;
-    }
+  // File-by-file results
+  for (const group of groups) {
+    const stats = getFileStats(group);
+    const shortPath = shortenPath(group.heading);
 
-    const duration = formatDuration(result.durationMs ?? 0);
-    const durationPadded = padRight(duration, durationColWidth);
+    // File heading with inline summary
+    const fileIcon =
+      stats.fail > 0 ? colors.boldRed("✘") : colors.boldGreen("✓");
+    const countParts: string[] = [];
 
-    if (result.status === TaskStatus.Pass) {
-      console.log(
-        colors.green("✔"),
-        durationPadded,
-        result.description.replace(/^.*?›\s*/, ""),
-      );
+    if (stats.pass > 0) countParts.push(colors.green(`${stats.pass} passed`));
+    if (stats.fail > 0) countParts.push(colors.red(`${stats.fail} failed`));
+    if (stats.skip > 0) countParts.push(colors.yellow(`${stats.skip} skipped`));
+    if (stats.todo > 0) countParts.push(colors.magenta(`${stats.todo} todo`));
 
-      continue;
-    }
+    const fileDuration = colors.dim(formatDuration(stats.totalDuration));
+    const countSummary =
+      colors.dim("(") + countParts.join(colors.dim(", ")) + colors.dim(")");
 
-    if (result.status === TaskStatus.Skipped) {
-      console.log(
-        colors.yellow("↷"),
-        padRight("—", durationColWidth),
-        result.description.replace(/^.*?›\s*/, ""),
-      );
-
-      continue;
-    }
-
-    // Fail
     console.log(
-      colors.red("✘"),
-      durationPadded,
-      result.description.replace(/^.*?›\s*/, ""),
+      `\n ${fileIcon} ${colors.bold(shortPath)} ${countSummary} ${fileDuration}`,
     );
+
+    // Individual test results, indented
+    let lastSuitePath = "";
+
+    for (const result of group.results) {
+      const testName = extractTestName(result.description);
+      const parts = testName.split(" › ");
+      const leaf = parts[parts.length - 1];
+      const suitePath = parts.slice(0, -1).join(" › ");
+
+      // Print suite name when it changes
+      if (suitePath && suitePath !== lastSuitePath) {
+        const depth = parts.length - 1;
+        const suiteIndent = "   " + "  ".repeat(Math.max(0, depth - 1));
+
+        console.log(
+          `${suiteIndent}${colors.dim("›")} ${colors.bold(parts[depth - 1])}`,
+        );
+        lastSuitePath = suitePath;
+      }
+
+      const depth = parts.length - 1;
+      const indent = "   " + "  ".repeat(depth);
+
+      if (result.status === TaskStatus.Pass) {
+        const dur = colors.dim(formatDuration(result.durationMs ?? 0));
+
+        console.log(
+          `${indent}${colors.green("✔")} ${colors.dim(leaf)} ${dur}`,
+        );
+        continue;
+      }
+
+      if (result.status === TaskStatus.Fail) {
+        const dur = colors.dim(formatDuration(result.durationMs ?? 0));
+
+        console.log(
+          `${indent}${colors.red("✘")} ${colors.boldRed(leaf)} ${dur}`,
+        );
+        continue;
+      }
+
+      if (result.status === TaskStatus.Skipped) {
+        console.log(`${indent}${colors.yellow("↷")} ${colors.dim(leaf)}`);
+        continue;
+      }
+
+      if (result.status === TaskStatus.Todo) {
+        console.log(`${indent}${colors.magenta("○")} ${colors.dim(leaf)}`);
+        continue;
+      }
+    }
   }
 
+  // ── Failure details ────────────────────────────────────────────────
   if (failures.length > 0) {
-    console.log(colors.bold("\nFailures:"));
+    console.log(`\n${horizontalRule(colors.boldRed(" FAILURES "))}\n`);
 
     failures.forEach((r, i) => {
-      console.log(colors.red(`\n${i + 1}) ${r.description}`));
-      if (r.error) console.log(colors.red(r.error.stack ?? r.error.message));
+      const testName = extractTestName(r.description);
+
+      console.log(colors.boldRed(`  ${i + 1}) ${testName}`));
+
+      if (r.error) {
+        const errText = r.error.stack ?? r.error.message;
+        const lines = errText.split("\n");
+
+        for (const line of lines) {
+          // Highlight the "Received/Expected" lines differently
+          if (line.trimStart().startsWith("Received:")) {
+            console.log(colors.red(`     ${line.trim()}`));
+          } else if (line.trimStart().startsWith("Expected:")) {
+            console.log(colors.green(`     ${line.trim()}`));
+          } else if (line.trim().startsWith("at ")) {
+            console.log(colors.dim(`     ${line.trim()}`));
+          } else {
+            console.log(`     ${colors.red(line.trim())}`);
+          }
+        }
+      }
+
+      if (i < failures.length - 1) console.log("");
     });
+
+    console.log(`\n${horizontalRule()}`);
   }
 
+  // ── Summary ────────────────────────────────────────────────────────
+  console.log("");
+
+  const summaryParts: string[] = [];
+
+  if (passed > 0) summaryParts.push(colors.boldGreen(`${passed} passed`));
+  if (failed > 0) summaryParts.push(colors.boldRed(`${failed} failed`));
+  if (skipped > 0) summaryParts.push(colors.boldYellow(`${skipped} skipped`));
+  if (todo > 0) summaryParts.push(colors.magenta(`${todo} todo`));
+
+  const badge = ok ? colors.badgePass(" PASS ") : colors.badgeFail(" FAIL ");
+
   console.log(
-    colors.bold(
-      `\nPassed: ${passed}  Failed: ${failed}  Skipped: ${skipped}  Total: ${total}  Time: ${formatDuration(
-        durationMs,
-      )}\n`,
-    ),
+    ` ${badge}  ${summaryParts.join(colors.dim("  ·  "))}  ${colors.dim("of")} ${colors.bold(String(total))} ${colors.dim("tests")}  ${colors.dim("in")} ${colors.bold(formatDuration(durationMs))}`,
   );
+
+  console.log(
+    `         ${colors.dim(`${files.length} test file${files.length === 1 ? "" : "s"}`)}${bail ? colors.dim("  ·  bail mode") : ""}`,
+  );
+
+  console.log("");
 
   if (!ok) process.exitCode = 1;
 }
