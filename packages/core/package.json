@@ -38,7 +38,7 @@
     "clean": "rm -rf ./dist",
     "compile": "tsc -p tsconfig.build.json && node scripts/patch-esm-extensions.js",
     "prepublishOnly": "pnpm run build",
-    "test": "pnpm test:internal && pnpm test:fail && pnpm test:bail && pnpm test:only && pnpm test:todo",
+    "test": "pnpm test:internal && pnpm test:fail && pnpm test:bail && pnpm test:only && pnpm test:todo && pnpm test:hooks",
     "test:bail": "node bin/unrift.mjs --config ./test/bail/unrift.outer.config.ts",
     "test:fail": "node bin/unrift.mjs --config ./test/fail/unrift.outer.config.ts",
     "test:hooks": "node bin/unrift.mjs --config ./test/hooks/unrift.outer.config.ts",
