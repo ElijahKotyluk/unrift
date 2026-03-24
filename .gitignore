@@ -4,3 +4,6 @@ node_modules
 **/dist-pack
 
 coverage
+
+# Nested lockfiles (root lockfile is the source of truth)
+packages/*/pnpm-lock.yaml

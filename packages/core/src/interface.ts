@@ -12,12 +12,14 @@ type DescribeFn = {
   (description: string, fn: () => void): void;
   only: (description: string, fn: () => void) => void;
   skip: (description: string, fn: () => void) => void;
+  todo: (description: string) => void;
 };
 
 type ItFn = {
   (description: string, fn: PromisableFn<void>): void;
   only: (description: string, fn: PromisableFn<void>) => void;
   skip: (description: string, fn: PromisableFn<void>) => void;
+  todo: (description: string) => void;
 };
 
 function _describe(description: string, fn: () => void, mode: TaskMode) {
@@ -41,6 +43,8 @@ const describe: DescribeFn = (description, fn) =>
   _describe(description, fn, TaskMode.Default);
 describe.only = (description, fn) => _describe(description, fn, TaskMode.Only);
 describe.skip = (description, fn) => _describe(description, fn, TaskMode.Skip);
+describe.todo = (description) =>
+  _describe(description, () => {}, TaskMode.Todo);
 
 function _it(description: string, fn: PromisableFn<void>, mode: TaskMode) {
   assertRegisterState("it");
@@ -53,5 +57,8 @@ function _it(description: string, fn: PromisableFn<void>, mode: TaskMode) {
 const it: ItFn = (description, fn) => _it(description, fn, TaskMode.Default);
 it.only = (description, fn) => _it(description, fn, TaskMode.Only);
 it.skip = (description, fn) => _it(description, fn, TaskMode.Skip);
+it.todo = (description) => _it(description, () => {}, TaskMode.Todo);
 
-export { describe, it };
+const test: ItFn = it;
+
+export { describe, it, test };

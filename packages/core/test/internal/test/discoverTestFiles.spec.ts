@@ -18,11 +18,14 @@ describe("isTestFileName", () => {
       ["a.test.ts", true],
       ["a.spec.js", true],
       ["a.test.js", true],
-      ["a.spec.tsx", false],
-      ["a.test.mjs", false],
+      ["a.spec.tsx", true],
+      ["a.test.mjs", true],
+      ["a.test.jsx", true],
+      ["a.spec.mts", true],
+      ["a.test.cts", true],
+      ["a.spec.cjs", true],
       ["a.spec.d.ts", false],
       ["a.ts", false],
-      ["a.test.jsx", false],
     ];
 
     for (const [name, expected] of cases) {
@@ -48,6 +51,7 @@ describe("discoverTestFiles", () => {
     const expected = [
       `${norm(root)}/a/x.spec.ts`,
       `${norm(root)}/a/y.test.js`,
+      `${norm(root)}/b/c/nope.spec.tsx`,
       `${norm(root)}/b/c/z.test.ts`,
     ].sort();
 

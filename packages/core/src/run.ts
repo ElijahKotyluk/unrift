@@ -1,7 +1,9 @@
 import { clearContext, computeOnlyFlags, rootSuite, Suite } from "./suite";
 import { ensureInternalMatchers } from "./matchers";
 import { RunState, unriftGlobalContext } from "./context";
+import { normalizePath } from "./utils/normalizePath";
 import { TaskMode, TaskStatus } from "./types";
+import { toError } from "./utils/toError";
 import { toImportUrl } from "./utils/transform";
 
 type RunEngineOptions = {
@@ -27,10 +29,6 @@ async function loadMatcherModules(specifiers?: string[]) {
   for (const spec of specifiers ?? []) {
     await import(spec);
   }
-}
-
-function normalizePath(p: string): string {
-  return p.replace(/\\/g, "/");
 }
 
 export async function runEngine(
@@ -63,7 +61,7 @@ export async function runEngine(
       try {
         await import(toImportUrl(file, "bundle-test"));
       } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
+        const error = toError(err);
 
         fileSuite.errors.push({
           label: "import",

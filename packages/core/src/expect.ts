@@ -1,4 +1,5 @@
 import type { MatcherContext, MatcherMap } from "./types";
+import { formatDiff } from "./utils/diff";
 
 const matcherRegistry: MatcherMap = Object.create(null);
 
@@ -17,12 +18,21 @@ export interface Matchers<T> {
   toBeNull(): void | Promise<void>;
   toBeTruthy(): void | Promise<void>;
   toBeUndefined(): void | Promise<void>;
+  toBeGreaterThan(expected: number): void | Promise<void>;
+  toBeLessThan(expected: number): void | Promise<void>;
+  toBeInstanceOf(
+    expected: new (...args: unknown[]) => unknown,
+  ): void | Promise<void>;
+  toContain(expected: unknown): void | Promise<void>;
   toEqual(expected: unknown): void | Promise<void>;
+  toHaveLength(expected: number): void | Promise<void>;
   toMatch(expected: RegExp | string): void | Promise<void>;
   toStrictEqual(expected: unknown): void | Promise<void>;
   toThrow(expected?: unknown): void | Promise<void>;
 
   readonly not: Matchers<T>;
+  readonly resolves: Matchers<Awaited<T>>;
+  readonly rejects: Matchers<unknown>;
 }
 
 // Merge point for external matcher packages
@@ -32,6 +42,7 @@ export interface Matchers<T> {}
 export interface ExpectInterface {
   <T>(value: T): Matchers<T>;
   extend<M extends MatcherMap>(m: M): void;
+  readonly matchers: Readonly<MatcherMap>;
 }
 
 export const expect: ExpectInterface = (() => {
@@ -40,12 +51,7 @@ export const expect: ExpectInterface = (() => {
       const ctx: MatcherContext = {
         isNot,
         diff(a, b) {
-          return (
-            "\n  Received: " +
-            JSON.stringify(a, null, 2) +
-            "\n  Expected: " +
-            JSON.stringify(b, null, 2)
-          );
+          return formatDiff(a, b);
         },
       };
 
@@ -57,9 +63,67 @@ export const expect: ExpectInterface = (() => {
           fn.call(ctx, received, ...args);
       }
 
+      function makeAsyncProxy(
+        getActual: () => Promise<unknown>,
+      ): Matchers<unknown> {
+        const asyncFns: Record<PropertyKey, unknown> = {};
+
+        for (const name in matcherRegistry) {
+          const fn = matcherRegistry[name];
+
+          asyncFns[name] = async (...args: unknown[]) => {
+            const actual = await getActual();
+            return fn.call(ctx, actual, ...args);
+          };
+        }
+
+        return new Proxy(asyncFns, {
+          get(target, prop) {
+            if (prop === "not") {
+              return makeExpectation(!isNot);
+            }
+
+            if (typeof prop === "string" && !(prop in target)) {
+              throw new Error(`Unknown matcher: ${prop}`);
+            }
+
+            return target[prop];
+          },
+        }) as unknown as Matchers<unknown>;
+      }
+
       return new Proxy(matcherFns, {
         get(target, prop) {
           if (prop === "not") return makeExpectation(!isNot);
+
+          if (prop === "resolves") {
+            return makeAsyncProxy(async () => {
+              try {
+                return await (received as Promise<unknown>);
+              } catch (err) {
+                throw new Error(
+                  `Expected promise to resolve, but it rejected with: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+            });
+          }
+
+          if (prop === "rejects") {
+            return makeAsyncProxy(async () => {
+              try {
+                await (received as Promise<unknown>);
+                throw new Error("Expected promise to reject, but it resolved");
+              } catch (err) {
+                if (
+                  err instanceof Error &&
+                  err.message === "Expected promise to reject, but it resolved"
+                ) {
+                  throw err;
+                }
+                return err;
+              }
+            });
+          }
 
           if (typeof prop === "string" && !(prop in target)) {
             throw new Error(`Unknown matcher: ${prop}`);

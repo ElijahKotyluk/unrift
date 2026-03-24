@@ -1,12 +1,7 @@
 import { TaskMode, TaskStatus, type PromisableFn } from "./types";
+import { toError } from "./utils/toError";
 
-interface TestTask {
-  description: string;
-  fn: PromisableFn<void>;
-  run(): Promise<void>;
-}
-
-export class Test implements TestTask {
+export class Test {
   description: string;
   durationMs: number = 0;
   error?: Error;
@@ -34,6 +29,13 @@ export class Test implements TestTask {
       return;
     }
 
+    if (this.mode === TaskMode.Todo) {
+      this.status = TaskStatus.Todo;
+      this.durationMs = 0;
+
+      return;
+    }
+
     const start = performance.now();
     this.status = TaskStatus.Running;
 
@@ -45,10 +47,17 @@ export class Test implements TestTask {
 
         const timeoutFn = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
-            reject(new Error(`Test timed out after ${timeoutMs} ms`));
+            reject(
+              new Error(
+                `Test "${this.description}" timed out after ${timeoutMs} ms`,
+              ),
+            );
           }, timeoutMs);
         });
 
+        // NOTE: Promise.race does not cancel the losing promise. A timed-out test
+        // function continues running in the background. True cancellation would
+        // require AbortController integration, which is a larger future change.
         try {
           await Promise.race([exec, timeoutFn]);
         } finally {
@@ -60,7 +69,7 @@ export class Test implements TestTask {
 
       this.status = TaskStatus.Pass;
     } catch (error) {
-      this.error = error instanceof Error ? error : new Error(String(error));
+      this.error = toError(error);
       this.status = TaskStatus.Fail;
     } finally {
       this.durationMs = performance.now() - start;

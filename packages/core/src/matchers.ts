@@ -16,6 +16,10 @@ export function ensureInternalMatchers() {
   matchersRegistered = true;
 }
 
+export function resetMatchers() {
+  matchersRegistered = false;
+}
+
 function registerCoreMatchers() {
   expect.extend({
     toBe<T>(this: MatcherContext, received: T, expected: T) {
@@ -66,11 +70,93 @@ function registerCoreMatchers() {
       }
     },
 
+    toBeGreaterThan(
+      this: MatcherContext,
+      received: unknown,
+      expected: unknown,
+    ) {
+      if (typeof received !== "number") {
+        throw new Error(this.diff(received, "expected a number"));
+      }
+
+      const pass = received > (expected as number);
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, `> ${expected}`));
+      }
+    },
+
+    toBeLessThan(this: MatcherContext, received: unknown, expected: unknown) {
+      if (typeof received !== "number") {
+        throw new Error(this.diff(received, "expected a number"));
+      }
+
+      const pass = received < (expected as number);
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, `< ${expected}`));
+      }
+    },
+
+    toBeInstanceOf(this: MatcherContext, received: unknown, expected: unknown) {
+      const ctor = expected as new (...args: unknown[]) => unknown;
+      const pass = received instanceof ctor;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(
+          this.diff(
+            typeof received === "object" && received
+              ? (received.constructor?.name ?? typeof received)
+              : typeof received,
+            ctor.name,
+          ),
+        );
+      }
+    },
+
+    toContain(this: MatcherContext, received: unknown, expected: unknown) {
+      let pass: boolean;
+
+      if (Array.isArray(received)) {
+        pass = received.includes(expected);
+      } else if (typeof received === "string") {
+        pass = received.includes(expected as string);
+      } else {
+        throw new Error(
+          this.diff(received, "expected an array or string for toContain()"),
+        );
+      }
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, expected));
+      }
+    },
+
     toEqual<T>(this: MatcherContext, received: T, expected: T) {
       const pass = looseEqual(received, expected);
 
       if (this.isNot ? pass : !pass) {
         throw new Error(this.diff(received, expected));
+      }
+    },
+
+    toHaveLength(this: MatcherContext, received: unknown, expected: unknown) {
+      const obj = received as { length?: unknown };
+
+      if (
+        obj == null ||
+        typeof obj !== "object" ||
+        typeof obj.length !== "number"
+      ) {
+        throw new Error(
+          this.diff(received, "expected a value with a .length property"),
+        );
+      }
+
+      const pass = obj.length === (expected as number);
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(obj.length, expected));
       }
     },
 

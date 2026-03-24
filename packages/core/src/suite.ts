@@ -1,7 +1,9 @@
 import { unriftGlobalContext } from "./context";
+import { resetMatchers } from "./matchers";
 import { Test } from "./test";
 
 import { type PromisableFn, TaskMode, TaskStatus } from "./types";
+import { toError } from "./utils/toError";
 
 interface RunOptions {
   timeoutMs?: number;
@@ -10,18 +12,6 @@ interface RunOptions {
 
 interface SuiteRunState {
   bailed: boolean;
-}
-
-interface SuiteTask {
-  description: string;
-  parent?: Suite;
-  suites: Suite[];
-  tests: Test[];
-
-  addSuite(suite: Suite): void;
-  addTest(test: Test): void;
-
-  run(): Promise<void>;
 }
 
 function appendHookFailure(
@@ -44,7 +34,7 @@ function appendHookFailure(
   return combined;
 }
 
-export class Suite implements SuiteTask {
+export class Suite {
   description: string;
   mode: TaskMode;
   parent?: Suite;
@@ -81,6 +71,15 @@ export class Suite implements SuiteTask {
     }
 
     for (const suite of this.suites) suite.markSubtreeSkipped();
+  }
+
+  public markSubtreeTodo() {
+    for (const test of this.tests) {
+      if (test.status === TaskStatus.Pending) test.status = TaskStatus.Todo;
+      test.durationMs = 0;
+    }
+
+    for (const suite of this.suites) suite.markSubtreeTodo();
   }
 
   addSuite(suite: Suite) {
@@ -139,6 +138,12 @@ export class Suite implements SuiteTask {
       return;
     }
 
+    if (this.mode === TaskMode.Todo) {
+      this.markSubtreeTodo();
+
+      return;
+    }
+
     const suiteHasOnly = this.subtreeHasOnly;
     const inOnlyContext = ancestorOnly || this.mode === TaskMode.Only;
 
@@ -158,8 +163,7 @@ export class Suite implements SuiteTask {
           await hook();
         }
       } catch (error) {
-        this.beforeAllError =
-          error instanceof Error ? error : new Error(String(error));
+        this.beforeAllError = toError(error);
 
         // Prevent "pending" tests from showing up if beforeAll fails
         this.markSubtreeSkipped();
@@ -183,6 +187,12 @@ export class Suite implements SuiteTask {
           continue;
         }
 
+        if (test.mode === TaskMode.Todo) {
+          test.status = TaskStatus.Todo;
+          test.durationMs = 0;
+          continue;
+        }
+
         const testIsOnly = inOnlyContext || test.mode === TaskMode.Only;
 
         // If onlyMode, skip tests that are not in only context
@@ -197,30 +207,24 @@ export class Suite implements SuiteTask {
             try {
               await hook();
             } catch (error) {
-              const hookError =
-                error instanceof Error ? error : new Error(String(error));
-              throw appendHookFailure(undefined, "beforeEach", hookError);
+              throw appendHookFailure(undefined, "beforeEach", toError(error));
             }
           }
 
           await test.run(options?.timeoutMs);
         } catch (error) {
           test.status = TaskStatus.Fail;
-          test.error =
-            error instanceof Error ? error : new Error(String(error));
+          test.error = toError(error);
         } finally {
           for (const hook of afterEachHooks) {
             try {
               await hook();
             } catch (error) {
-              const hookError =
-                error instanceof Error ? error : new Error(String(error));
-
               test.status = TaskStatus.Fail;
               test.error = appendHookFailure(
                 test.error,
                 "afterEach",
-                hookError,
+                toError(error),
               );
             }
           }
@@ -268,8 +272,7 @@ export class Suite implements SuiteTask {
           } catch (error) {
             // Record once; keep running remaining afterAll hooks
             if (!this.afterAllError) {
-              this.afterAllError =
-                error instanceof Error ? error : new Error(String(error));
+              this.afterAllError = toError(error);
             }
           }
         }
@@ -371,6 +374,9 @@ export function computeOnlyFlags(suite: Suite): boolean {
   return subtreeHasOnly;
 }
 
+// KNOWN LIMITATION: rootSuite is a global singleton. This means parallel test
+// execution in the same process is not supported. A future DI/context-container
+// pattern would be needed to support worker-based parallelism.
 export const rootSuite = new Suite("root");
 rootSuite.root = true;
 
@@ -381,5 +387,6 @@ export function getCurrentSuite() {
 export function clearContext() {
   rootSuite.reset();
   rootSuite.subtreeHasOnly = false;
+  resetMatchers();
   unriftGlobalContext.currentSuite = rootSuite;
 }

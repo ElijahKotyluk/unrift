@@ -25,6 +25,7 @@ Options:
   -l, --list               List discovered test files
   -j, --json               Output test results as JSON
       --cache-clean        Clear transform cache
+  -t, --timeout <ms>       Default test timeout in milliseconds
   -h, --help               Show help
 
 Examples:
@@ -37,6 +38,7 @@ Examples:
 function parseArgs(argv: string[]) {
   let configPath: string | undefined;
   let pattern: RegExp | undefined;
+  let timeoutMs: number | undefined;
   let debug = false;
   let help = false;
   let list = false;
@@ -82,6 +84,20 @@ function parseArgs(argv: string[]) {
       continue;
     }
 
+    if (a === "--timeout" || a === "-t") {
+      const next = argv[i + 1];
+
+      if (!next) throw new Error(`${a} requires a value in milliseconds`);
+
+      timeoutMs = parseInt(next, 10);
+
+      if (Number.isNaN(timeoutMs)) throw new Error(`Invalid timeout: ${next}`);
+
+      i++;
+
+      continue;
+    }
+
     if (a === "--cache-clean" || a === "--clear-cache") {
       cacheClean = true;
 
@@ -94,21 +110,35 @@ function parseArgs(argv: string[]) {
 
   if (rest[0]) pattern = safeRegExp(rest[0]);
 
-  return { configPath, pattern, debug, list, json, cacheClean, help };
+  return {
+    configPath,
+    pattern,
+    timeoutMs,
+    debug,
+    list,
+    json,
+    cacheClean,
+    help,
+  };
 }
 
-const { configPath, pattern, debug, list, json, cacheClean, help } = parseArgs(
-  process.argv.slice(2),
-);
+const { configPath, pattern, timeoutMs, debug, list, json, cacheClean, help } =
+  parseArgs(process.argv.slice(2));
 
 if (help) {
   printHelp();
   process.exit(0);
 }
 
-runTestsCLI({ pattern, configPath, debug, list, json, cacheClean }).catch(
-  (err) => {
-    console.error(err);
-    process.exit(1);
-  },
-);
+runTestsCLI({
+  pattern,
+  configPath,
+  timeoutMs,
+  debug,
+  list,
+  json,
+  cacheClean,
+}).catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

@@ -1,4 +1,4 @@
-type Promisable<T> = Promise<T> | T;
+export type Promisable<T> = Promise<T> | T;
 
 export type PromisableFn<T> = () => Promisable<T>;
 
@@ -16,6 +16,7 @@ export enum TaskMode {
   Default = "default",
   Only = "only",
   Skip = "skip",
+  Todo = "todo",
 }
 
 export interface MatcherContext {
