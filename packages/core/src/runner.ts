@@ -302,6 +302,39 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     return;
   }
 
+  // No test files found
+  if (files.length === 0) {
+    const dir = normalizePath(testDir);
+
+    if (options.json) {
+      const report: JsonReport = {
+        ok: false,
+        failed: 0,
+        passed: 0,
+        skipped: 0,
+        todo: 0,
+        total: 0,
+        bail: options.bail ?? config?.bail ?? false,
+        timeoutMs: options.timeoutMs ?? config?.timeoutMs,
+        testDir: dir,
+        configPath: resolvedConfigPath,
+        files: [],
+        durationMs: performance.now() - runStart,
+        results: [],
+      };
+
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log(
+        `\n ${colors.boldYellow("!")} No test files found in ${colors.bold(dir)}\n`,
+      );
+    }
+
+    process.exitCode = 1;
+
+    return;
+  }
+
   const timeoutMs = options.timeoutMs ?? config?.timeoutMs;
   const bail = options.bail ?? config?.bail ?? false;
 

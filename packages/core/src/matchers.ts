@@ -141,22 +141,25 @@ function registerCoreMatchers() {
     },
 
     toHaveLength(this: MatcherContext, received: unknown, expected: unknown) {
-      const obj = received as { length?: unknown };
+      const len =
+        typeof received === "string"
+          ? received.length
+          : received != null &&
+              typeof received === "object" &&
+              typeof (received as { length?: unknown }).length === "number"
+            ? (received as { length: number }).length
+            : undefined;
 
-      if (
-        obj == null ||
-        typeof obj !== "object" ||
-        typeof obj.length !== "number"
-      ) {
+      if (len === undefined) {
         throw new Error(
           this.diff(received, "expected a value with a .length property"),
         );
       }
 
-      const pass = obj.length === (expected as number);
+      const pass = len === (expected as number);
 
       if (this.isNot ? pass : !pass) {
-        throw new Error(this.diff(obj.length, expected));
+        throw new Error(this.diff(len, expected));
       }
     },
 

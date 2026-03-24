@@ -1,6 +1,6 @@
 {
   "name": "@unrift/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "unrift core package",
   "private": false,
   "main": "./dist/cjs/index.cjs",
@@ -38,21 +38,26 @@
     "clean": "rm -rf ./dist",
     "compile": "tsc -p tsconfig.build.json && node scripts/patch-esm-extensions.js",
     "prepublishOnly": "pnpm run build",
-    "test": "pnpm test:internal && pnpm test:fail && pnpm test:bail && pnpm test:only",
+    "test": "pnpm test:internal && pnpm test:fail && pnpm test:bail && pnpm test:only && pnpm test:todo",
     "test:bail": "node bin/unrift.mjs --config ./test/bail/unrift.outer.config.ts",
     "test:fail": "node bin/unrift.mjs --config ./test/fail/unrift.outer.config.ts",
     "test:hooks": "node bin/unrift.mjs --config ./test/hooks/unrift.outer.config.ts",
     "test:internal": "node bin/unrift.mjs --config ./test/internal/unrift.config.ts",
     "test:only": "node bin/unrift.mjs --config ./test/only/unrift.outer.config.ts",
+    "test:todo": "node bin/unrift.mjs --config ./test/todo/unrift.outer.config.ts",
     "test:publish": "pnpm clean && pnpm build && pnpm pack --pack-destination ./dist-pack",
     "typecheck": "tsc -p tsconfig.build.esm.json --noEmit"
   },
-  "keywords": [],
+  "keywords": ["testing", "test", "test-runner", "typescript", "esm", "assert", "expect", "matchers"],
   "author": "elijah kotyluk <elijah@elijahkotyluk.com>",
   "repository": {
     "type": "git",
     "url": "https://github.com/elijahkotyluk/unrift"
   },
+  "bugs": {
+    "url": "https://github.com/elijahkotyluk/unrift/issues"
+  },
+  "homepage": "https://github.com/elijahkotyluk/unrift",
   "license": "MIT",
   "packageManager": "pnpm@10.20.0",
   "dependencies": {

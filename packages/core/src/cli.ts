@@ -1,6 +1,30 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runTestsCLI } from "./runner";
+
+const __cliDir = dirname(fileURLToPath(import.meta.url));
+
+function readVersion(): string {
+  // Walk up from current file to find package.json (works from both src/ and dist/esm/)
+  let dir = __cliDir;
+  for (let i = 0; i < 5; i++) {
+    try {
+      const pkg = JSON.parse(
+        readFileSync(resolve(dir, "package.json"), "utf8"),
+      );
+      if (pkg.name === "@unrift/core") return pkg.version;
+    } catch {
+      throw new Error(`Failed to read version from package.json in ${dir}`);
+    }
+    dir = resolve(dir, "..");
+  }
+  return "0.0.0";
+}
+
+const version = readVersion();
 
 function safeRegExp(source: string): RegExp {
   try {
@@ -14,24 +38,27 @@ function safeRegExp(source: string): RegExp {
 
 function printHelp() {
   console.log(`
-Unrift Test Runner
+Unrift Test Runner v${version}
 
 Usage:
   unrift [pattern] [options]
 
 Options:
   -c, --config <path>      Path to config file
+  -b, --bail               Stop on first test failure
+  -t, --timeout <ms>       Default test timeout in milliseconds
   -d, --debug              Enable debug logging
   -l, --list               List discovered test files
   -j, --json               Output test results as JSON
       --cache-clean        Clear transform cache
-  -t, --timeout <ms>       Default test timeout in milliseconds
+  -v, --version            Show version
   -h, --help               Show help
 
 Examples:
   unrift
   unrift math
-  unrift -c test/config.ts --debug
+  unrift -c test/config.ts --bail
+  unrift --timeout 10000
 `);
 }
 
@@ -39,8 +66,10 @@ function parseArgs(argv: string[]) {
   let configPath: string | undefined;
   let pattern: RegExp | undefined;
   let timeoutMs: number | undefined;
+  let bail: boolean | undefined;
   let debug = false;
   let help = false;
+  let showVersion = false;
   let list = false;
   let json = false;
   let cacheClean = false;
@@ -55,6 +84,11 @@ function parseArgs(argv: string[]) {
       continue;
     }
 
+    if (a === "--version" || a === "-v") {
+      showVersion = true;
+      continue;
+    }
+
     if (a === "--config" || a === "-c") {
       const next = argv[i + 1];
 
@@ -62,6 +96,12 @@ function parseArgs(argv: string[]) {
 
       configPath = next;
       i++;
+
+      continue;
+    }
+
+    if (a === "--bail" || a === "-b") {
+      bail = true;
 
       continue;
     }
@@ -114,16 +154,33 @@ function parseArgs(argv: string[]) {
     configPath,
     pattern,
     timeoutMs,
+    bail,
     debug,
     list,
     json,
     cacheClean,
     help,
+    showVersion,
   };
 }
 
-const { configPath, pattern, timeoutMs, debug, list, json, cacheClean, help } =
-  parseArgs(process.argv.slice(2));
+const {
+  configPath,
+  pattern,
+  timeoutMs,
+  bail,
+  debug,
+  list,
+  json,
+  cacheClean,
+  help,
+  showVersion,
+} = parseArgs(process.argv.slice(2));
+
+if (showVersion) {
+  console.log(version);
+  process.exit(0);
+}
 
 if (help) {
   printHelp();
@@ -134,6 +191,7 @@ runTestsCLI({
   pattern,
   configPath,
   timeoutMs,
+  bail,
   debug,
   list,
   json,
