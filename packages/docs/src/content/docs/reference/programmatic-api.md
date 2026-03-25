@@ -53,9 +53,14 @@ type RunEngineResult = {
 
 ```ts
 import { runEngine } from "unrift/run";
-import { discoverTestFiles } from "@unrift/core";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 
-const files = discoverTestFiles("./test");
+// Discover test files in the test directory
+const testDir = "./test";
+const files = readdirSync(testDir, { recursive: true })
+  .filter(f => /\.(spec|test)\.(ts|js|mts|tsx)$/.test(String(f)))
+  .map(f => join(testDir, String(f)));
 
 const { results } = await runEngine({ files, timeoutMs: 10000 });
 

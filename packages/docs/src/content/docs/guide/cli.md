@@ -60,6 +60,9 @@ The `--json` flag outputs a structured report to stdout:
   "todo": 0,
   "total": 6,
   "bail": false,
+  "timeoutMs": 5000,
+  "testDir": "test",
+  "configPath": "/path/to/unrift.config.ts",
   "durationMs": 142.5,
   "files": ["test/math.spec.ts"],
   "results": [
@@ -83,9 +86,9 @@ When `--json` is active, debug output goes to stderr to keep stdout clean.
 
 ## Cache management
 
-Unrift caches esbuild bundles to speed up subsequent runs. The cache lives in `node_modules/.unrift/cache` or the OS temp directory.
+Unrift caches esbuild bundles in `node_modules/.unrift/cache` to speed up subsequent runs.
 
 ```bash
-# Clear all caches
+# Clear the cache
 unrift --cache-clean
 ```

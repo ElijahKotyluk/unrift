@@ -21,12 +21,7 @@ export default defineConfig({
 });
 ```
 
-Unrift searches for config files in this order:
-- `unrift.config.ts`
-- `unrift.config.js`
-- `unrift.config.mjs`
-- `unrift.config.cjs`
-- `unrift.config.json`
+Unrift searches upward from your project root for a config file named `unrift.config.*` with any of these extensions: `.ts`, `.js`, `.mjs`, `.cjs`, `.json`.
 
 ## Options
 
@@ -48,8 +43,11 @@ Unrift recursively scans `testDir` for files matching these patterns:
 - `*.spec.ts` / `*.test.ts`
 - `*.spec.js` / `*.test.js`
 - `*.spec.mts` / `*.test.mts`
+- `*.spec.cts` / `*.test.cts`
 - `*.spec.tsx` / `*.test.tsx`
-- And other TypeScript/JavaScript extensions
+- `*.spec.jsx` / `*.test.jsx`
+- `*.spec.mjs` / `*.test.mjs`
+- `*.spec.cjs` / `*.test.cjs`
 
 ## Includes and excludes
 
