@@ -21,7 +21,9 @@
   --sl-color-bg: #0a0b1a;
   --sl-color-bg-inline-code: #111228;
 
+  --sl-color-text: #e0e1e6;
   --sl-color-text-accent: #00b4d8;
+  --sl-color-white: #f0f1f5;
 }
 
 /* Light theme overrides */
@@ -33,7 +35,80 @@
   --sl-color-text-accent: #0088a3;
 }
 
-/* Hero section gradient matching logo */
+/* ── Header fixes ─────────────────────────────────────── */
+
+/* GitHub icon and header text should be visible */
+:root[data-theme="dark"] header.header {
+  color: #e0e1e6;
+}
+
+:root[data-theme="dark"] header.header a,
+:root[data-theme="dark"] header.header svg {
+  color: #e0e1e6;
+  fill: #e0e1e6;
+}
+
+:root[data-theme="dark"] header.header a:hover,
+:root[data-theme="dark"] header.header svg:hover {
+  color: #ffffff;
+  fill: #ffffff;
+}
+
+/* Social icons in header */
+:root[data-theme="dark"] .social-icons a {
+  color: #e0e1e6;
+}
+
+:root[data-theme="dark"] .social-icons a:hover {
+  color: #ffffff;
+}
+
+/* ── Sidebar nav highlight fix ────────────────────────── */
+
+/* Active sidebar link — ensure text is readable on cyan highlight */
+:root[data-theme="dark"] nav.sidebar a[aria-current="page"],
+:root[data-theme="dark"] nav.sidebar a[aria-current="true"] {
+  color: #ffffff;
+  background: rgba(0, 180, 216, 0.15);
+  border-color: #00b4d8;
+  font-weight: 600;
+}
+
+/* Sidebar hover — visible text */
+:root[data-theme="dark"] nav.sidebar a:hover {
+  color: #ffffff;
+  background: rgba(0, 180, 216, 0.1);
+}
+
+/* Starlight sidebar current page link */
+:root[data-theme="dark"] [data-current="true"] > a,
+:root[data-theme="dark"] sidebar-link a[aria-current="page"] {
+  color: #ffffff !important;
+}
+
+/* ── Gradient text for "Unrift" branding ──────────────── */
+
+/* Header site title gradient */
+.site-title span,
+.site-title .site-title-text {
+  background: linear-gradient(135deg, #00b4d8 0%, #7b2ff7 50%, #c77dff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
+}
+
+/* Hero title gradient on landing page */
+.hero .hero-html h1,
+.hero h1 {
+  background: linear-gradient(135deg, #00b4d8 0%, #7b2ff7 50%, #c77dff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Hero section ─────────────────────────────────────── */
+
 .hero {
   background: radial-gradient(
     ellipse at 50% 40%,
@@ -43,34 +118,31 @@
   );
 }
 
-/* Sidebar active link highlight */
-[data-theme="dark"] nav.sidebar a[aria-current="page"] {
-  color: #00b4d8;
-  border-color: #00b4d8;
-}
+/* ── Code blocks ──────────────────────────────────────── */
 
-/* Code block accent */
 :root[data-theme="dark"] .expressive-code {
   --ec-codeBg: #0e0f1e;
   --ec-codeBrdCol: #1a1b2e;
 }
 
-/* Badge / tag styling with magenta accent */
+/* ── Badge / tag styling with magenta accent ──────────── */
+
 .sl-badge {
   --sl-color-badge-accent: #c77dff;
 }
 
-/* Link hover with magenta tint */
+/* ── Link hover with magenta tint ─────────────────────── */
+
 :root[data-theme="dark"] .content-panel a:hover {
   color: #c77dff;
 }
 
-/* Logo glow effect on hover */
-.site-title img:hover {
-  filter: drop-shadow(0 0 8px rgba(0, 180, 216, 0.6));
-  transition: filter 0.2s ease;
-}
+/* ── Logo glow effect on hover ────────────────────────── */
 
 .site-title img {
   transition: filter 0.2s ease;
+}
+
+.site-title img:hover {
+  filter: drop-shadow(0 0 8px rgba(0, 180, 216, 0.6));
 }
