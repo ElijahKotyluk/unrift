@@ -86,25 +86,36 @@
   color: #ffffff !important;
 }
 
+/* ── Montserrat font for branding ─────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
+
 /* ── Gradient text for "Unrift" branding ──────────────── */
 
-/* Header site title gradient */
+/* Header site title gradient — use !important to prevent FOUC flash */
 .site-title span,
-.site-title .site-title-text {
-  background: linear-gradient(135deg, #00b4d8 0%, #7b2ff7 50%, #c77dff 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  font-weight: 700;
+.site-title .site-title-text,
+[class*="site-title"] span {
+  background: linear-gradient(90deg, #06bee0 0%, #1ab2eb 25%, #6175dd 55%, #c238c0 100%) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+  color: transparent !important;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 /* Hero title gradient on landing page */
 .hero .hero-html h1,
 .hero h1 {
-  background: linear-gradient(135deg, #00b4d8 0%, #7b2ff7 50%, #c77dff 100%);
+  background: linear-gradient(90deg, #06bee0 0%, #1ab2eb 25%, #6175dd 55%, #c238c0 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 /* ── Hero section ─────────────────────────────────────── */
