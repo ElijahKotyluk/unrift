@@ -8,6 +8,11 @@ export default defineConfig({
       title: "Unrift",
       description:
         "A lightweight, fast TypeScript test framework with ESM-first design.",
+      logo: {
+        src: "./src/assets/header-logo.png",
+        alt: "Unrift",
+      },
+      customCss: ["./src/styles/custom.css"],
       social: [
         {
           icon: "github",

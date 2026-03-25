@@ -1,0 +1,76 @@
+/* Unrift docs theme — cyan/magenta palette from logo */
+
+:root {
+  /* Primary accent: cyan/blue from logo */
+  --sl-color-accent-low: #0a2a3a;
+  --sl-color-accent: #00b4d8;
+  --sl-color-accent-high: #90e0ef;
+
+  /* Text accents */
+  --sl-color-text-accent: #00b4d8;
+}
+
+/* Dark theme (default) */
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #0a2a3a;
+  --sl-color-accent: #00b4d8;
+  --sl-color-accent-high: #90e0ef;
+
+  --sl-color-bg-nav: #090a16;
+  --sl-color-bg-sidebar: #0a0b1a;
+  --sl-color-bg: #0a0b1a;
+  --sl-color-bg-inline-code: #111228;
+
+  --sl-color-text-accent: #00b4d8;
+}
+
+/* Light theme overrides */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #e0f7fa;
+  --sl-color-accent: #0088a3;
+  --sl-color-accent-high: #005066;
+
+  --sl-color-text-accent: #0088a3;
+}
+
+/* Hero section gradient matching logo */
+.hero {
+  background: radial-gradient(
+    ellipse at 50% 40%,
+    rgba(0, 180, 216, 0.08) 0%,
+    rgba(199, 125, 255, 0.05) 50%,
+    transparent 80%
+  );
+}
+
+/* Sidebar active link highlight */
+[data-theme="dark"] nav.sidebar a[aria-current="page"] {
+  color: #00b4d8;
+  border-color: #00b4d8;
+}
+
+/* Code block accent */
+:root[data-theme="dark"] .expressive-code {
+  --ec-codeBg: #0e0f1e;
+  --ec-codeBrdCol: #1a1b2e;
+}
+
+/* Badge / tag styling with magenta accent */
+.sl-badge {
+  --sl-color-badge-accent: #c77dff;
+}
+
+/* Link hover with magenta tint */
+:root[data-theme="dark"] .content-panel a:hover {
+  color: #c77dff;
+}
+
+/* Logo glow effect on hover */
+.site-title img:hover {
+  filter: drop-shadow(0 0 8px rgba(0, 180, 216, 0.6));
+  transition: filter 0.2s ease;
+}
+
+.site-title img {
+  transition: filter 0.2s ease;
+}
