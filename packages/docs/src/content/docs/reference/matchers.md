@@ -188,6 +188,10 @@ expect(() => { throw new TypeError("bad"); }).toThrow(TypeError);
 expect(() => { throw new Error("fail"); }).toThrow({ message: "fail" });
 ```
 
+:::caution
+`toThrow` only works with synchronous functions. If you pass an async function, Unrift will throw an error prompting you to use `expect(fn).rejects.toThrow()` instead.
+:::
+
 ## Negation
 
 All matchers support `.not`:

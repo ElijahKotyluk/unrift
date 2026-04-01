@@ -31,7 +31,7 @@ Unrift searches upward from your project root for a config file named `unrift.co
 | `rootDir` | `string` | — | Project root directory |
 | `timeoutMs` | `number` | — | Default timeout for each test in milliseconds |
 | `bail` | `boolean` | `false` | Stop running tests after the first failure |
-| `pattern` | `string` | — | Regex pattern to filter test files |
+| `pattern` | `string` | — | Regex pattern to filter test files (CLI only — not yet read from config) |
 | `includes` | `string[]` | — | Regex patterns — only matching files are included |
 | `excludes` | `string[]` | — | Regex patterns — matching files are excluded |
 | `matchers` | `string[]` | — | Module specifiers for custom matcher packages |

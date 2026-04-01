@@ -65,7 +65,15 @@ export const expect: ExpectInterface = (() => {
 
       function makeAsyncProxy(
         getActual: () => Promise<unknown>,
+        asyncIsNot: boolean,
       ): Matchers<unknown> {
+        const asyncCtx: MatcherContext = {
+          isNot: asyncIsNot,
+          diff(a, b) {
+            return formatDiff(a, b);
+          },
+        };
+
         const asyncFns: Record<PropertyKey, unknown> = {};
 
         for (const name in matcherRegistry) {
@@ -73,14 +81,14 @@ export const expect: ExpectInterface = (() => {
 
           asyncFns[name] = async (...args: unknown[]) => {
             const actual = await getActual();
-            return fn.call(ctx, actual, ...args);
+            return fn.call(asyncCtx, actual, ...args);
           };
         }
 
         return new Proxy(asyncFns, {
           get(target, prop) {
             if (prop === "not") {
-              return makeExpectation(!isNot);
+              return makeAsyncProxy(getActual, !asyncIsNot);
             }
 
             if (typeof prop === "string" && !(prop in target)) {
@@ -105,7 +113,7 @@ export const expect: ExpectInterface = (() => {
                   `Expected promise to resolve, but it rejected with: ${err instanceof Error ? err.message : String(err)}`,
                 );
               }
-            });
+            }, isNot);
           }
 
           if (prop === "rejects") {
@@ -122,7 +130,7 @@ export const expect: ExpectInterface = (() => {
                 }
                 return err;
               }
-            });
+            }, isNot);
           }
 
           if (typeof prop === "string" && !(prop in target)) {

@@ -27,7 +27,7 @@ describe("math", () => {
 npx unrift
 ```
 
-Unrift discovers all `*.spec.ts` and `*.test.ts` files in the `test/` directory by default.
+Unrift discovers `*.spec.ts` and `*.test.ts` files (and [other supported extensions](/guide/configuration/#test-file-discovery)) in the `test/` directory by default.
 
 ## Filter tests
 

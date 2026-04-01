@@ -9,10 +9,12 @@ Hooks let you run setup and teardown code at different points in the test lifecy
 
 | Hook | When it runs |
 |------|-------------|
-| `beforeAll(fn)` | Once before all tests in the current suite |
-| `afterAll(fn)` | Once after all tests in the current suite |
-| `beforeEach(fn)` | Before each test in the current suite |
-| `afterEach(fn)` | After each test in the current suite |
+| `beforeAll(...fns)` | Once before all tests in the current suite |
+| `afterAll(...fns)` | Once after all tests in the current suite |
+| `beforeEach(...fns)` | Before each test in the current suite |
+| `afterEach(...fns)` | After each test in the current suite |
+
+All hooks accept one or more functions. Multiple functions passed in a single call run in the order they are provided.
 
 ## Basic usage
 

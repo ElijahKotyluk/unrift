@@ -170,4 +170,20 @@ describe("async matchers", () => {
       expect((err as Error).message).toContain("Expected promise to reject");
     }
   });
+
+  it("resolves.not works with async proxy", async () => {
+    await expect(Promise.resolve(42)).resolves.not.toBe(99);
+  });
+
+  it("rejects.not works with async proxy", async () => {
+    await expect(Promise.reject(new Error("boom"))).rejects.not.toBe("other");
+  });
+
+  it("toThrow detects async functions and gives helpful error", () => {
+    const result = expect(() =>
+      expect(async () => {
+        throw new Error("x");
+      }).toThrow(),
+    ).toThrow("toThrow() received an async function");
+  });
 });

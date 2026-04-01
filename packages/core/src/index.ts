@@ -10,3 +10,4 @@ export type {
   MatcherMap,
   Promisable,
 } from "./types";
+export type { RunEngineResult } from "./run";

@@ -90,6 +90,31 @@ export default defineConfig({
 });
 ```
 
+## Inspecting registered matchers
+
+`expect.matchers` is a read-only property that returns all currently registered matchers:
+
+```ts
+import { expect } from "unrift";
+
+console.log(Object.keys(expect.matchers));
+// ["toBe", "toEqual", "toThrow", ...]
+```
+
+## extendMatchers
+
+Unrift also exports `extendMatchers` as a standalone function. It behaves identically to `expect.extend()` but can be imported directly:
+
+```ts
+import { extendMatchers } from "unrift";
+
+extendMatchers({
+  toBePositive(received: unknown) { /* ... */ },
+});
+```
+
+In most cases, prefer `expect.extend()` for clarity.
+
 ## TypeScript support
 
 To get type checking for custom matchers, use declaration merging:

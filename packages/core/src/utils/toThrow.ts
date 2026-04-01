@@ -87,12 +87,28 @@ export function toThrow(
 
   let threw = false;
   let thrown: unknown;
+  let result: unknown;
 
   try {
-    (received as () => void)();
+    result = (received as () => unknown)();
   } catch (e) {
     threw = true;
     thrown = e;
+  }
+
+  if (
+    !threw &&
+    result != null &&
+    typeof (result as { then?: unknown }).then === "function"
+  ) {
+    // Suppress the unhandled rejection from the returned promise
+    (result as Promise<unknown>).catch(() => {});
+
+    return {
+      pass: false,
+      message: () =>
+        "toThrow() received an async function. Use expect(fn).rejects.toThrow() for async errors.",
+    };
   }
 
   const matched = threw && matchThrown(thrown, expected);

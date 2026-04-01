@@ -1,6 +1,6 @@
 ---
 title: Migrating from Jest
-description: Switch from Jest or Vitest to Unrift.
+description: Switch from Jest to Unrift.
 ---
 
 Unrift's API is designed to be familiar to Jest and Vitest users. Most tests can be migrated with minimal changes.

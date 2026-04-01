@@ -49,6 +49,10 @@ type RunEngineResult = {
 };
 ```
 
+:::note
+The `status` field uses the internal `TaskStatus` enum. In practice, results will only contain `"pass"`, `"fail"`, `"skipped"`, or `"todo"`.
+:::
+
 ## Example: CI script
 
 ```ts
