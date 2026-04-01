@@ -1,0 +1,35 @@
+---
+title: UNRIFT
+description: A lightweight, fast TypeScript test framework with ESM-first design.
+template: splash
+hero:
+  tagline: A lightweight, fast TypeScript test framework with ESM-first design.
+  image:
+    file: ../../assets/logo.png
+  actions:
+    - text: Get Started
+      link: /getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/ElijahKotyluk/unrift
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+<CardGrid stagger>
+  <Card title="TypeScript Native" icon="seti:typescript">
+    Write tests in TypeScript with zero config. esbuild-powered transforms handle compilation automatically.
+  </Card>
+  <Card title="ESM-First" icon="rocket">
+    Built for modern JavaScript with native ESM support. CJS fallback included for compatibility.
+  </Card>
+  <Card title="Familiar API" icon="pencil">
+    `describe`, `it`, `expect` — the API you already know from Jest and Vitest. Minimal learning curve.
+  </Card>
+  <Card title="Extensible" icon="puzzle">
+    Add custom matchers with `expect.extend()`. Full TypeScript support with declaration merging.
+  </Card>
+</CardGrid>

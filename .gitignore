@@ -9,3 +9,6 @@ coverage
 packages/*/pnpm-lock.yaml
 
 **/*/.DS_Store
+
+# Astro generated files
+.astro

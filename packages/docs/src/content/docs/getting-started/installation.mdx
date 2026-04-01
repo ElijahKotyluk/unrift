@@ -1,0 +1,48 @@
+---
+title: Installation
+description: Install Unrift in your project.
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+## Requirements
+
+- Node.js **18** or later
+
+## Install
+
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install -D unrift
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add -D unrift
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add -D unrift
+    ```
+  </TabItem>
+</Tabs>
+
+## Verify
+
+```bash
+npx unrift --version
+```
+
+This should print the installed version number.
+
+## What's included
+
+The `unrift` package re-exports everything from `@unrift/core`. You get:
+
+- Test registration — `describe`, `it`, `test`
+- Assertions — `expect` with built-in matchers
+- Hooks — `beforeAll`, `afterAll`, `beforeEach`, `afterEach`
+- Configuration — `defineConfig`
+- CLI — the `unrift` command

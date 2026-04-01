@@ -1,0 +1,160 @@
+/* Unrift docs theme — cyan/magenta palette from logo */
+
+:root {
+  /* Primary accent: cyan/blue from logo */
+  --sl-color-accent-low: #0a2a3a;
+  --sl-color-accent: #00b4d8;
+  --sl-color-accent-high: #90e0ef;
+
+  /* Text accents */
+  --sl-color-text-accent: #00b4d8;
+}
+
+/* Dark theme (default) */
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #0a2a3a;
+  --sl-color-accent: #00b4d8;
+  --sl-color-accent-high: #90e0ef;
+
+  --sl-color-bg-nav: #090a16;
+  --sl-color-bg-sidebar: #0a0b1a;
+  --sl-color-bg: #0a0b1a;
+  --sl-color-bg-inline-code: #111228;
+
+  --sl-color-text: #e0e1e6;
+  --sl-color-text-accent: #00b4d8;
+  --sl-color-white: #f0f1f5;
+}
+
+/* Light theme overrides */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #e0f7fa;
+  --sl-color-accent: #0088a3;
+  --sl-color-accent-high: #005066;
+
+  --sl-color-text-accent: #0088a3;
+}
+
+/* ── Header fixes ─────────────────────────────────────── */
+
+/* GitHub icon and header text should be visible */
+:root[data-theme="dark"] header.header {
+  color: #e0e1e6;
+}
+
+:root[data-theme="dark"] header.header a,
+:root[data-theme="dark"] header.header svg {
+  color: #e0e1e6;
+  fill: #e0e1e6;
+}
+
+:root[data-theme="dark"] header.header a:hover,
+:root[data-theme="dark"] header.header svg:hover {
+  color: #ffffff;
+  fill: #ffffff;
+}
+
+/* Social icons in header */
+:root[data-theme="dark"] .social-icons a {
+  color: #e0e1e6;
+}
+
+:root[data-theme="dark"] .social-icons a:hover {
+  color: #ffffff;
+}
+
+/* ── Sidebar nav highlight fix ────────────────────────── */
+
+/* Active sidebar link — ensure text is readable on cyan highlight */
+:root[data-theme="dark"] nav.sidebar a[aria-current="page"],
+:root[data-theme="dark"] nav.sidebar a[aria-current="true"] {
+  color: #ffffff;
+  background: rgba(0, 180, 216, 0.15);
+  border-color: #00b4d8;
+  font-weight: 600;
+}
+
+/* Sidebar hover — visible text */
+:root[data-theme="dark"] nav.sidebar a:hover {
+  color: #ffffff;
+  background: rgba(0, 180, 216, 0.1);
+}
+
+/* Starlight sidebar current page link */
+:root[data-theme="dark"] [data-current="true"] > a,
+:root[data-theme="dark"] sidebar-link a[aria-current="page"] {
+  color: #ffffff !important;
+}
+
+/* ── Montserrat font for branding ─────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');
+
+/* ── Gradient text for "Unrift" branding ──────────────── */
+
+/* Header site title gradient — use !important to prevent FOUC flash */
+.site-title span,
+.site-title .site-title-text,
+[class*="site-title"] span {
+  background: linear-gradient(90deg, #06bee0 0%, #1ab2eb 25%, #6175dd 55%, #c238c0 100%) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+  color: transparent !important;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+/* Hero title gradient on landing page */
+.hero .hero-html h1,
+.hero h1 {
+  background: linear-gradient(90deg, #06bee0 0%, #1ab2eb 25%, #6175dd 55%, #c238c0 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* ── Hero section ─────────────────────────────────────── */
+
+.hero {
+  background: radial-gradient(
+    ellipse at 50% 40%,
+    rgba(0, 180, 216, 0.08) 0%,
+    rgba(199, 125, 255, 0.05) 50%,
+    transparent 80%
+  );
+}
+
+/* ── Code blocks ──────────────────────────────────────── */
+
+:root[data-theme="dark"] .expressive-code {
+  --ec-codeBg: #0e0f1e;
+  --ec-codeBrdCol: #1a1b2e;
+}
+
+/* ── Badge / tag styling with magenta accent ──────────── */
+
+.sl-badge {
+  --sl-color-badge-accent: #c77dff;
+}
+
+/* ── Link hover with magenta tint ─────────────────────── */
+
+:root[data-theme="dark"] .content-panel a:hover {
+  color: #c77dff;
+}
+
+/* ── Logo glow effect on hover ────────────────────────── */
+
+.site-title img {
+  transition: filter 0.2s ease;
+}
+
+.site-title img:hover {
+  filter: drop-shadow(0 0 8px rgba(0, 180, 216, 0.6));
+}

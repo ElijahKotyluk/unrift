@@ -13,7 +13,7 @@ type RunEngineOptions = {
   matchers?: string[];
 };
 
-type RunEngineResult = {
+export type RunEngineResult = {
   isOnly: boolean;
   timeoutMs?: number;
   bail: boolean;
