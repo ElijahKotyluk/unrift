@@ -18,5 +18,6 @@ export type {
   MatcherFn,
   MatcherMap,
   Promisable,
+  RunEngineResult,
   UnriftConfigOptions,
 } from "@unrift/core";
