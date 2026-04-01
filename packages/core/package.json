@@ -1,6 +1,6 @@
 {
   "name": "@unrift/core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "unrift core package",
   "private": false,
   "main": "./dist/cjs/index.cjs",
