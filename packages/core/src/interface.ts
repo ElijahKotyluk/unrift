@@ -16,9 +16,17 @@ type DescribeFn = {
 };
 
 type ItFn = {
-  (description: string, fn: PromisableFn<void>): void;
-  only: (description: string, fn: PromisableFn<void>) => void;
-  skip: (description: string, fn: PromisableFn<void>) => void;
+  (description: string, fn: PromisableFn<void>, timeoutMs?: number): void;
+  only: (
+    description: string,
+    fn: PromisableFn<void>,
+    timeoutMs?: number,
+  ) => void;
+  skip: (
+    description: string,
+    fn: PromisableFn<void>,
+    timeoutMs?: number,
+  ) => void;
   todo: (description: string) => void;
 };
 
@@ -56,17 +64,25 @@ describe.skip = (description, fn) => _describe(description, fn, TaskMode.Skip);
 describe.todo = (description) =>
   _describe(description, () => {}, TaskMode.Todo);
 
-function _it(description: string, fn: PromisableFn<void>, mode: TaskMode) {
+function _it(
+  description: string,
+  fn: PromisableFn<void>,
+  mode: TaskMode,
+  timeoutMs?: number,
+) {
   assertRegisterState("it");
 
-  const test = new Test(description, fn, mode);
+  const test = new Test(description, fn, mode, timeoutMs);
 
   getCurrentSuite().addTest(test);
 }
 
-const it: ItFn = (description, fn) => _it(description, fn, TaskMode.Default);
-it.only = (description, fn) => _it(description, fn, TaskMode.Only);
-it.skip = (description, fn) => _it(description, fn, TaskMode.Skip);
+const it: ItFn = (description, fn, timeoutMs) =>
+  _it(description, fn, TaskMode.Default, timeoutMs);
+it.only = (description, fn, timeoutMs) =>
+  _it(description, fn, TaskMode.Only, timeoutMs);
+it.skip = (description, fn, timeoutMs) =>
+  _it(description, fn, TaskMode.Skip, timeoutMs);
 it.todo = (description) => _it(description, () => {}, TaskMode.Todo);
 
 const test: ItFn = it;

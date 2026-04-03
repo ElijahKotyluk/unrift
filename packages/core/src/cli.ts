@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runTestsCLI } from "./runner";
+import { runTestsCLI, watchTestsCLI } from "./runner";
 import { safeRegExp } from "./utils/helpers";
 
 const __cliDir = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +38,7 @@ Options:
   -c, --config <path>      Path to config file
   -b, --bail               Stop on first test failure
   -t, --timeout <ms>       Default test timeout in milliseconds
+  -w, --watch              Re-run tests on file changes
   -d, --debug              Enable debug logging
   -l, --list               List discovered test files
   -j, --json               Output test results as JSON
@@ -50,6 +51,7 @@ Examples:
   unrift math
   unrift -c test/config.ts --bail
   unrift --timeout 10000
+  unrift --watch
 `);
 }
 
@@ -64,6 +66,7 @@ function parseArgs(argv: string[]) {
   let list = false;
   let json = false;
   let cacheClean = false;
+  let watch = false;
 
   const rest: string[] = [];
 
@@ -129,6 +132,12 @@ function parseArgs(argv: string[]) {
       continue;
     }
 
+    if (a === "--watch" || a === "-w") {
+      watch = true;
+
+      continue;
+    }
+
     if (a === "--cache-clean" || a === "--clear-cache") {
       cacheClean = true;
 
@@ -150,6 +159,7 @@ function parseArgs(argv: string[]) {
     list,
     json,
     cacheClean,
+    watch,
     help,
     showVersion,
   };
@@ -164,6 +174,7 @@ const {
   list,
   json,
   cacheClean,
+  watch,
   help,
   showVersion,
 } = parseArgs(process.argv.slice(2));
@@ -178,7 +189,7 @@ if (help) {
   process.exit(0);
 }
 
-runTestsCLI({
+const runOpts = {
   pattern,
   configPath,
   timeoutMs,
@@ -187,7 +198,9 @@ runTestsCLI({
   list,
   json,
   cacheClean,
-}).catch((err) => {
+};
+
+(watch ? watchTestsCLI(runOpts) : runTestsCLI(runOpts)).catch((err) => {
   console.error(err);
   process.exit(1);
 });

@@ -1,6 +1,5 @@
 export interface UnriftConfigOptions {
   testDir?: string;
-  rootDir?: string;
   timeoutMs?: number;
   bail?: boolean;
   pattern?: string;

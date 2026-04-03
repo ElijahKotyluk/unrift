@@ -1,4 +1,5 @@
-import { relative, resolve } from "node:path";
+import { watch as fsWatch, readdirSync, type FSWatcher } from "node:fs";
+import { relative, resolve, join } from "node:path";
 
 import {
   loadConfig,
@@ -12,7 +13,7 @@ import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
 
 import { normalizePath } from "./utils/normalizePath";
-import { safeRegExp } from "./utils/helpers";
+import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
 import { TaskStatus } from "./types";
 
 interface RunnerOptions {
@@ -64,16 +65,13 @@ function getCachedRegExp(pattern: string): RegExp {
   let re = regExpCache.get(pattern);
 
   if (!re) {
-    re = safeRegExp(pattern);
+    re = isGlobPattern(pattern) ? globToRegex(pattern) : safeRegExp(pattern);
     regExpCache.set(pattern, re);
   }
 
   return re;
 }
 
-/**
- * @TODO Add glob support
- */
 function matchesAnyPattern(
   fileAbs: string,
   patterns: string[],
@@ -564,4 +562,126 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   console.log("");
 
   if (!ok) process.exitCode = 1;
+}
+
+// ── Watch mode ─────────────────────────────────────────────────────────────────
+
+/**
+ * Watch a directory tree for changes, calling `onChange` after a debounce.
+ * Uses individual `fs.watch()` calls per directory so it works on all
+ * platforms (Linux `fs.watch` does not support `recursive: true` before Node 22).
+ * Returns a cleanup function to stop watching.
+ */
+function watchRecursive(
+  dir: string,
+  onChange: (filename: string) => void,
+  debounceMs = 150,
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let lastFile = "";
+
+  function trigger(filename: string) {
+    lastFile = filename;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => onChange(lastFile), debounceMs);
+  }
+
+  const watchers: FSWatcher[] = [];
+
+  function watchDir(d: string) {
+    try {
+      watchers.push(fsWatch(d, (_event, filename) => trigger(filename ?? d)));
+    } catch {
+      return;
+    }
+
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (
+        entry.isDirectory() &&
+        !entry.name.startsWith(".") &&
+        entry.name !== "node_modules"
+      ) {
+        watchDir(join(d, entry.name));
+      }
+    }
+  }
+
+  watchDir(dir);
+
+  return () => {
+    if (timer) clearTimeout(timer);
+    for (const w of watchers) {
+      try {
+        w.close();
+      } catch {
+        // ignore
+      }
+    }
+  };
+}
+
+export async function watchTestsCLI(options: RunnerOptions = {}) {
+  // Run once immediately
+  await runTestsCLI(options);
+
+  // Resolve the directory to watch (same logic as runTestsCLI)
+  const loaded = options.configPath
+    ? await import("./utils/loadConfig").then((m) =>
+        m.loadConfigFromPath(options.configPath!),
+      )
+    : await import("./utils/loadConfig").then((m) =>
+        m.loadConfig(process.cwd()),
+      );
+
+  const config = loaded?.config ?? null;
+  const configDir = loaded?.configDir ?? process.cwd();
+  const testDir = resolve(
+    configDir,
+    config?.testDir ?? options.testDir ?? "test",
+  );
+
+  console.log(
+    `\n ${colors.dim("↺")} ${colors.dim("Watching")} ${colors.bold(shortenPath(testDir))} ${colors.dim("for changes…  Ctrl+C to quit")}\n`,
+  );
+
+  let running = false;
+
+  const stop = watchRecursive(testDir, async (filename) => {
+    if (running) return;
+    running = true;
+
+    const shortFile = shortenPath(filename);
+    console.log(
+      `\n${colors.dim("─".repeat(Math.min(process.stdout.columns || 80, 80)))}`,
+    );
+    console.log(
+      ` ${colors.dim("↺")} ${colors.dim(`${shortFile} changed — re-running…`)}\n`,
+    );
+
+    // Reset exit code so each run is evaluated independently
+    process.exitCode = 0;
+
+    try {
+      await runTestsCLI(options);
+    } finally {
+      running = false;
+    }
+
+    console.log(
+      ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,
+    );
+  });
+
+  // Keep process alive and clean up on exit
+  process.on("SIGINT", () => {
+    stop();
+    process.exit(0);
+  });
 }
