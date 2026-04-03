@@ -17,12 +17,13 @@ A lightweight, fast TypeScript test framework with ESM-first design.
 - **ESM-first** with CJS fallback
 - **TypeScript native** — esbuild-powered transforms, no separate compile step
 - **Familiar API** — `describe` / `it` / `expect` (Jest/Vitest compatible)
-- **Deep equality** with prototype-aware (`toStrictEqual`) and loose (`toEqual`) modes
+- **Rich matcher set** — deep equality, `toMatchObject`, `toHaveProperty`, numeric, async, and more
 - **Extensible matchers** via `expect.extend()`
-- **Async assertions** — `expect.resolves` / `expect.rejects`
+- **Async assertions** — `resolves` / `rejects` with full `.not` support
 - **Test modifiers** — `.only`, `.skip`, `.todo`
 - **Bail mode** and configurable timeouts
 - **JSON output** for CI integration
+- **Programmatic API** — `runEngine` for use in custom tooling
 - **Zero config** — works out of the box
 
 ## Install
