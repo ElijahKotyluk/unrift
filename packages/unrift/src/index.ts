@@ -9,6 +9,7 @@ export {
   test,
   expect,
   extendMatchers,
+  runEngine,
 } from "@unrift/core";
 
 export type {
