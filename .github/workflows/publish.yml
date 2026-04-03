@@ -132,35 +132,74 @@ jobs:
             bump_package "packages/unrift"
           fi
 
-          # Read the new version from whichever package was bumped (prefer core)
-          if [ "${{ steps.changes.outputs.core }}" = "true" ]; then
-            NEW_VERSION=$(node -p "require('./packages/core/package.json').version")
-          else
-            NEW_VERSION=$(node -p "require('./packages/unrift/package.json').version")
-          fi
-          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
+          # Store per-package versions for use in later steps
+          CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
+          UNRIFT_VERSION=$(node -p "require('./packages/unrift/package.json').version")
+          echo "CORE_VERSION=$CORE_VERSION" >> "$GITHUB_ENV"
+          echo "UNRIFT_VERSION=$UNRIFT_VERSION" >> "$GITHUB_ENV"
 
       - name: Update workspace dependency
         if: steps.changes.outputs.any == 'true'
         run: pnpm install --no-frozen-lockfile
 
-      - name: Check if tag already exists
+      - name: Check if tags already exist
         if: steps.changes.outputs.any == 'true'
         id: tag_check
         run: |
-          if git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag v${NEW_VERSION} already exists — skipping commit and tag (previous run may have completed partially)."
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+          CORE_TAG_EXISTS=false
+          UNRIFT_TAG_EXISTS=false
+
+          if [ "${{ steps.changes.outputs.core }}" = "true" ]; then
+            if git rev-parse "@unrift/core@${CORE_VERSION}" >/dev/null 2>&1; then
+              CORE_TAG_EXISTS=true
+              echo "Tag @unrift/core@${CORE_VERSION} already exists — skipping (previous run may have completed partially)."
+            fi
           fi
 
+          if [ "${{ steps.changes.outputs.unrift }}" = "true" ]; then
+            if git rev-parse "unrift@${UNRIFT_VERSION}" >/dev/null 2>&1; then
+              UNRIFT_TAG_EXISTS=true
+              echo "Tag unrift@${UNRIFT_VERSION} already exists — skipping (previous run may have completed partially)."
+            fi
+          fi
+
+          echo "core_exists=$CORE_TAG_EXISTS" >> "$GITHUB_OUTPUT"
+          echo "unrift_exists=$UNRIFT_TAG_EXISTS" >> "$GITHUB_OUTPUT"
+
+          # Flag used to skip the commit step only when every changed package is already tagged
+          ALL_EXIST=false
+          if [ "${{ steps.changes.outputs.core }}" = "true" ] && [ "${{ steps.changes.outputs.unrift }}" = "true" ]; then
+            [ "$CORE_TAG_EXISTS" = "true" ] && [ "$UNRIFT_TAG_EXISTS" = "true" ] && ALL_EXIST=true
+          elif [ "${{ steps.changes.outputs.core }}" = "true" ]; then
+            [ "$CORE_TAG_EXISTS" = "true" ] && ALL_EXIST=true
+          elif [ "${{ steps.changes.outputs.unrift }}" = "true" ]; then
+            [ "$UNRIFT_TAG_EXISTS" = "true" ] && ALL_EXIST=true
+          fi
+          echo "all_exist=$ALL_EXIST" >> "$GITHUB_OUTPUT"
+
       - name: Commit version bump
-        if: steps.changes.outputs.any == 'true' && steps.tag_check.outputs.exists != 'true'
+        if: steps.changes.outputs.any == 'true' && steps.tag_check.outputs.all_exist != 'true'
         run: |
+          # Build a commit message listing every package being released
+          MSG="release:"
+          if [ "${{ steps.changes.outputs.core }}" = "true" ]; then
+            MSG="$MSG @unrift/core@${CORE_VERSION}"
+          fi
+          if [ "${{ steps.changes.outputs.unrift }}" = "true" ]; then
+            MSG="$MSG unrift@${UNRIFT_VERSION}"
+          fi
+
           git add packages/*/package.json pnpm-lock.yaml
-          git commit -m "release: v${NEW_VERSION}"
-          git tag "v${NEW_VERSION}"
+          git commit -m "$MSG"
+
+          # Create a namespaced tag for each changed package (skip if it already exists)
+          if [ "${{ steps.changes.outputs.core }}" = "true" ] && [ "${{ steps.tag_check.outputs.core_exists }}" != "true" ]; then
+            git tag "@unrift/core@${CORE_VERSION}"
+          fi
+          if [ "${{ steps.changes.outputs.unrift }}" = "true" ] && [ "${{ steps.tag_check.outputs.unrift_exists }}" != "true" ]; then
+            git tag "unrift@${UNRIFT_VERSION}"
+          fi
+
           git push origin main --follow-tags
 
       - name: Publish @unrift/core
@@ -175,12 +214,20 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Create GitHub Release
-        if: steps.changes.outputs.any == 'true'
+      - name: Create GitHub Release for @unrift/core
+        if: steps.changes.outputs.core == 'true' && steps.tag_check.outputs.core_exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v${{ env.NEW_VERSION }}"
-          name: "v${{ env.NEW_VERSION }}"
+          tag_name: "@unrift/core@${{ env.CORE_VERSION }}"
+          name: "@unrift/core@${{ env.CORE_VERSION }}"
+          generate_release_notes: true
+
+      - name: Create GitHub Release for unrift
+        if: steps.changes.outputs.unrift == 'true' && steps.tag_check.outputs.unrift_exists != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "unrift@${{ env.UNRIFT_VERSION }}"
+          name: "unrift@${{ env.UNRIFT_VERSION }}"
           generate_release_notes: true
 
       - name: No packages to publish
