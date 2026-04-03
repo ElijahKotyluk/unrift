@@ -18,6 +18,7 @@ The first positional argument is a regex pattern to filter test files by path.
 | `-c, --config <path>` | Path to config file |
 | `-b, --bail` | Stop on first test failure |
 | `-t, --timeout <ms>` | Default test timeout in milliseconds |
+| `-w, --watch` | Re-run tests automatically when files change |
 | `-d, --debug` | Enable debug logging |
 | `-l, --list` | List discovered test files without running them |
 | `-j, --json` | Output results as JSON |
@@ -36,6 +37,9 @@ unrift math
 
 # Stop on first failure with a 10s timeout
 unrift --bail --timeout 10000
+
+# Watch mode — re-run on file changes
+unrift --watch
 
 # Use a specific config file
 unrift --config ./test/custom.config.ts

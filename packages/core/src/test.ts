@@ -10,18 +10,22 @@ export class Test {
   mode: TaskMode;
 
   status: TaskStatus = TaskStatus.Pending;
+  timeoutMs?: number;
 
   constructor(
     description: string,
     fn: PromisableFn<void>,
     mode: TaskMode = TaskMode.Default,
+    timeoutMs?: number,
   ) {
     this.description = description;
     this.fn = fn;
     this.mode = mode;
+    this.timeoutMs = timeoutMs;
   }
 
-  async run(timeoutMs?: number): Promise<void> {
+  async run(globalTimeoutMs?: number): Promise<void> {
+    const timeoutMs = this.timeoutMs ?? globalTimeoutMs;
     if (this.mode === TaskMode.Skip) {
       this.status = TaskStatus.Skipped;
       this.durationMs = 0;

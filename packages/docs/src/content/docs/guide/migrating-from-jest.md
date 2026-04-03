@@ -70,11 +70,11 @@ Most matchers are identical. Key differences:
 | `toBe` | `toBe` | Same (`Object.is`) |
 | `toEqual` | `toEqual` | Same (deep, prototype-insensitive) |
 | `toStrictEqual` | `toStrictEqual` | Same (deep, prototype-sensitive) |
-| `toMatchObject` | — | Not yet supported |
+| `toMatchObject` | `toMatchObject` | Same (partial recursive match) |
+| `toHaveProperty` | `toHaveProperty` | Same (dot-notation and array paths supported) |
 | `toMatchSnapshot` | — | Not yet supported |
 | `toMatchInlineSnapshot` | — | Not yet supported |
 | `toHaveBeenCalled` | — | No built-in mocking |
-| `toHaveProperty` | — | Not yet supported |
 
 ## Not yet supported
 

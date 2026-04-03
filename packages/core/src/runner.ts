@@ -1,4 +1,5 @@
-import { relative, resolve } from "node:path";
+import { watch as fsWatch, readdirSync, type FSWatcher } from "node:fs";
+import { relative, resolve, join } from "node:path";
 
 import {
   loadConfig,
@@ -12,6 +13,7 @@ import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
 
 import { normalizePath } from "./utils/normalizePath";
+import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
 import { TaskStatus } from "./types";
 
 interface RunnerOptions {
@@ -57,31 +59,19 @@ function debugLog(
   (json ? console.error : console.log)(...args);
 }
 
-function safeRegExp(source: string): RegExp {
-  try {
-    return new RegExp(source);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Invalid regex "${source}": ${msg}`);
-  }
-}
-
 const regExpCache = new Map<string, RegExp>();
 
 function getCachedRegExp(pattern: string): RegExp {
   let re = regExpCache.get(pattern);
 
   if (!re) {
-    re = safeRegExp(pattern);
+    re = isGlobPattern(pattern) ? globToRegex(pattern) : safeRegExp(pattern);
     regExpCache.set(pattern, re);
   }
 
   return re;
 }
 
-/**
- * @TODO Add glob support
- */
 function matchesAnyPattern(
   fileAbs: string,
   patterns: string[],
@@ -118,6 +108,33 @@ function filterByIncludesExcludes(
   }
 
   return filtered;
+}
+
+function filterStack(stack: string): string {
+  const lines = stack.split("\n");
+  const message: string[] = [];
+  const frames: string[] = [];
+
+  for (const line of lines) {
+    if (line.trimStart().startsWith("at ")) {
+      frames.push(line);
+    } else {
+      message.push(line);
+    }
+  }
+
+  const filtered = frames.filter((line) => {
+    if (line.includes("node:")) return false;
+    if (line.includes("/@unrift/core/dist/")) return false;
+    if (line.includes("/unrift/dist/")) return false;
+    if (line.includes("/dist/esm/")) return false;
+
+    return true;
+  });
+
+  const kept = filtered.length > 0 ? filtered : frames;
+
+  return [...message, ...kept].join("\n");
 }
 
 function formatDuration(ms: number): string {
@@ -228,6 +245,7 @@ function extractTestName(description: string): string {
 }
 
 export async function runTestsCLI(options: RunnerOptions = {}) {
+  regExpCache.clear();
   const runStart = performance.now();
 
   // Cache clean mode
@@ -271,8 +289,12 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
 
   let files = discoverTestFiles(testDir);
 
-  if (options.pattern) {
-    files = files.filter((f) => options.pattern!.test(normalizePath(f)));
+  const pattern =
+    options.pattern ??
+    (config?.pattern ? safeRegExp(config.pattern) : undefined);
+
+  if (pattern) {
+    files = files.filter((f) => pattern.test(normalizePath(f)));
   }
 
   files = filterByIncludesExcludes(
@@ -441,10 +463,10 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       const parts = testName.split(" › ");
       const leaf = parts[parts.length - 1];
       const suitePath = parts.slice(0, -1).join(" › ");
+      const depth = parts.length - 1;
 
-      // Print suite name when it changes
-      if (suitePath && suitePath !== lastSuitePath) {
-        const depth = parts.length - 1;
+      // Print suite name when it changes (depth > 0 guards against top-level it() tests)
+      if (depth > 0 && suitePath && suitePath !== lastSuitePath) {
         const suiteIndent = "   " + "  ".repeat(Math.max(0, depth - 1));
 
         console.log(
@@ -452,8 +474,6 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
         );
         lastSuitePath = suitePath;
       }
-
-      const depth = parts.length - 1;
       const indent = "   " + "  ".repeat(depth);
 
       if (result.status === TaskStatus.Pass) {
@@ -496,7 +516,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       console.log(colors.boldRed(`  ${i + 1}) ${testName}`));
 
       if (r.error) {
-        const errText = r.error.stack ?? r.error.message;
+        const errText = filterStack(r.error.stack ?? r.error.message);
         const lines = errText.split("\n");
 
         for (const line of lines) {
@@ -542,4 +562,124 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   console.log("");
 
   if (!ok) process.exitCode = 1;
+}
+
+/**
+ * Watch a directory tree for changes, calling `onChange` after a debounce.
+ * Uses individual `fs.watch()` calls per directory so it works on all
+ * platforms (Linux `fs.watch` does not support `recursive: true` before Node 22).
+ * Returns a cleanup function to stop watching.
+ */
+function watchRecursive(
+  dir: string,
+  onChange: (filename: string) => void,
+  debounceMs = 150,
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let lastFile = "";
+
+  function trigger(filename: string) {
+    lastFile = filename;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => onChange(lastFile), debounceMs);
+  }
+
+  const watchers: FSWatcher[] = [];
+
+  function watchDir(d: string) {
+    try {
+      watchers.push(fsWatch(d, (_event, filename) => trigger(filename ?? d)));
+    } catch {
+      return;
+    }
+
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (
+        entry.isDirectory() &&
+        !entry.name.startsWith(".") &&
+        entry.name !== "node_modules"
+      ) {
+        watchDir(join(d, entry.name));
+      }
+    }
+  }
+
+  watchDir(dir);
+
+  return () => {
+    if (timer) clearTimeout(timer);
+    for (const w of watchers) {
+      try {
+        w.close();
+      } catch {
+        // ignore
+      }
+    }
+  };
+}
+
+export async function watchTestsCLI(options: RunnerOptions = {}) {
+  // Run once immediately
+  await runTestsCLI(options);
+
+  // Resolve the directory to watch (same logic as runTestsCLI)
+  const loaded = options.configPath
+    ? await import("./utils/loadConfig").then((m) =>
+        m.loadConfigFromPath(options.configPath!),
+      )
+    : await import("./utils/loadConfig").then((m) =>
+        m.loadConfig(process.cwd()),
+      );
+
+  const config = loaded?.config ?? null;
+  const configDir = loaded?.configDir ?? process.cwd();
+  const testDir = resolve(
+    configDir,
+    config?.testDir ?? options.testDir ?? "test",
+  );
+
+  console.log(
+    `\n ${colors.dim("↺")} ${colors.dim("Watching")} ${colors.bold(shortenPath(testDir))} ${colors.dim("for changes…  Ctrl+C to quit")}\n`,
+  );
+
+  let running = false;
+
+  const stop = watchRecursive(testDir, async (filename) => {
+    if (running) return;
+    running = true;
+
+    const shortFile = shortenPath(filename);
+    console.log(
+      `\n${colors.dim("─".repeat(Math.min(process.stdout.columns || 80, 80)))}`,
+    );
+    console.log(
+      ` ${colors.dim("↺")} ${colors.dim(`${shortFile} changed — re-running…`)}\n`,
+    );
+
+    // Reset exit code so each run is evaluated independently
+    process.exitCode = 0;
+
+    try {
+      await runTestsCLI(options);
+    } finally {
+      running = false;
+    }
+
+    console.log(
+      ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,
+    );
+  });
+
+  // Keep process alive and clean up on exit
+  process.on("SIGINT", () => {
+    stop();
+    process.exit(0);
+  });
 }

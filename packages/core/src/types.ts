@@ -7,7 +7,6 @@ export enum TaskStatus {
   Running = "running",
   Pass = "pass",
   Fail = "fail",
-  Only = "only",
   Skipped = "skipped",
   Todo = "todo",
 }

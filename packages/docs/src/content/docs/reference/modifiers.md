@@ -63,6 +63,18 @@ describe.todo("upcoming feature");
 
 Todo tests appear in the output with a distinct indicator and don't count as failures.
 
+## Per-test timeout
+
+Pass a timeout in milliseconds as the third argument to `it()` or `test()` to override the global timeout for a specific test:
+
+```ts
+it("slow integration call", async () => {
+  await fetch("https://example.com/api");
+}, 30_000); // 30 second timeout for this test only
+```
+
+The per-test timeout takes precedence over the global `timeoutMs` config option and the `--timeout` CLI flag.
+
 ## CLI output
 
 Each status has a distinct indicator in the CLI output:
