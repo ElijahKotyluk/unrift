@@ -16,8 +16,8 @@ export default defineConfig({
   testDir: "test",
   timeoutMs: 5000,
   bail: false,
-  includes: ["\\.spec\\.ts$"],
-  excludes: ["node_modules"],
+  includes: ["**/*.spec.ts"],
+  excludes: ["**/fixtures/**"],
 });
 ```
 
@@ -28,12 +28,11 @@ Unrift searches upward from your project root for a config file named `unrift.co
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `testDir` | `string` | `"test"` | Directory to search for test files (relative to config file) |
-| `rootDir` | `string` | — | Project root directory |
 | `timeoutMs` | `number` | — | Default timeout for each test in milliseconds |
 | `bail` | `boolean` | `false` | Stop running tests after the first failure |
 | `pattern` | `string` | — | Regex pattern to filter test files by path |
-| `includes` | `string[]` | — | Regex patterns — only matching files are included |
-| `excludes` | `string[]` | — | Regex patterns — matching files are excluded |
+| `includes` | `string[]` | — | Glob or regex patterns — only matching files are included |
+| `excludes` | `string[]` | — | Glob or regex patterns — matching files are excluded |
 | `matchers` | `string[]` | — | Module specifiers for custom matcher packages |
 
 ## Test file discovery
@@ -51,13 +50,21 @@ Unrift recursively scans `testDir` for files matching these patterns:
 
 ## Includes and excludes
 
-Both `includes` and `excludes` accept an array of regex pattern strings. They are tested against both the relative path (from `testDir`) and the absolute path.
+Both `includes` and `excludes` accept glob patterns or regex strings. Patterns containing `*`, `?`, `[`, or `{` are treated as globs; everything else is treated as a raw regex for backward compatibility.
 
 ```ts
 export default defineConfig({
   testDir: "test",
-  includes: ["\\.spec\\.ts$"],          // only .spec.ts files
-  excludes: ["integration", "fixtures"], // skip these directories
+  includes: ["**/*.spec.ts"],             // glob — only .spec.ts files
+  excludes: ["**/fixtures/**", "e2e/**"], // glob — skip these directories
+});
+```
+
+Regex strings still work if you need them:
+
+```ts
+export default defineConfig({
+  excludes: ["\\.fixture\\.ts$"], // regex — exclude .fixture.ts files
 });
 ```
 
