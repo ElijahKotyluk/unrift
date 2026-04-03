@@ -228,6 +228,7 @@ function extractTestName(description: string): string {
 }
 
 export async function runTestsCLI(options: RunnerOptions = {}) {
+  regExpCache.clear();
   const runStart = performance.now();
 
   // Cache clean mode
@@ -271,8 +272,12 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
 
   let files = discoverTestFiles(testDir);
 
-  if (options.pattern) {
-    files = files.filter((f) => options.pattern!.test(normalizePath(f)));
+  const pattern =
+    options.pattern ??
+    (config?.pattern ? safeRegExp(config.pattern) : undefined);
+
+  if (pattern) {
+    files = files.filter((f) => pattern.test(normalizePath(f)));
   }
 
   files = filterByIncludesExcludes(
@@ -441,10 +446,10 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       const parts = testName.split(" › ");
       const leaf = parts[parts.length - 1];
       const suitePath = parts.slice(0, -1).join(" › ");
+      const depth = parts.length - 1;
 
-      // Print suite name when it changes
-      if (suitePath && suitePath !== lastSuitePath) {
-        const depth = parts.length - 1;
+      // Print suite name when it changes (depth > 0 guards against top-level it() tests)
+      if (depth > 0 && suitePath && suitePath !== lastSuitePath) {
         const suiteIndent = "   " + "  ".repeat(Math.max(0, depth - 1));
 
         console.log(
@@ -452,8 +457,6 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
         );
         lastSuitePath = suitePath;
       }
-
-      const depth = parts.length - 1;
       const indent = "   " + "  ".repeat(depth);
 
       if (result.status === TaskStatus.Pass) {

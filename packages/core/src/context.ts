@@ -6,11 +6,9 @@ export enum RunState {
   Idle = "idle",
 }
 
-type UnriftState = RunState;
-
 interface UnriftGlobalContext {
   currentSuite: Suite | null;
-  state: UnriftState;
+  state: RunState;
 }
 
 export const unriftGlobalContext: UnriftGlobalContext = {

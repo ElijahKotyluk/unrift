@@ -1,4 +1,5 @@
 import { toImportUrl } from "./transform";
+import { toError } from "./toError";
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -32,9 +33,9 @@ async function importConfigFile(configPath: string): Promise<unknown> {
 
       return JSON.parse(raw);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-
-      throw new Error(`Failed to parse JSON config at ${configPath}: ${msg}`);
+      throw new Error(
+        `Failed to parse JSON config at ${configPath}: ${toError(err).message}`,
+      );
     }
   }
 

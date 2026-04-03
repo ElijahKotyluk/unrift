@@ -41,6 +41,34 @@ function formatValue(value: unknown, indent: number = 2): string {
   return String(value);
 }
 
+function diffArrays(received: unknown[], expected: unknown[]): string {
+  const len = Math.max(received.length, expected.length);
+  const lines: string[] = [];
+
+  for (let i = 0; i < len; i++) {
+    const inReceived = i < received.length;
+    const inExpected = i < expected.length;
+
+    if (inReceived && inExpected) {
+      const rv = formatValue(received[i]);
+      const ev = formatValue(expected[i]);
+
+      if (rv !== ev) {
+        lines.push(colors.red(`  - [${i}]: ${rv}`));
+        lines.push(colors.green(`  + [${i}]: ${ev}`));
+      } else {
+        lines.push(`    [${i}]: ${rv}`);
+      }
+    } else if (inReceived) {
+      lines.push(colors.red(`  - [${i}]: ${formatValue(received[i])}`));
+    } else {
+      lines.push(colors.green(`  + [${i}]: ${formatValue(expected[i])}`));
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function diffObjects(
   received: Record<string, unknown>,
   expected: Record<string, unknown>,
@@ -74,6 +102,15 @@ function diffObjects(
 }
 
 export function formatDiff(received: unknown, expected: unknown): string {
+  // For arrays, provide per-element diffing
+  if (Array.isArray(received) && Array.isArray(expected)) {
+    const diff = diffArrays(received, expected);
+
+    return (
+      `\n${colors.red("- Received")} / ${colors.green("+ Expected")}\n\n` + diff
+    );
+  }
+
   // For objects, provide a structural diff
   if (
     received !== null &&

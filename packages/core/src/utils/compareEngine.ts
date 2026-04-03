@@ -192,6 +192,21 @@ export function compareInternal(
 
       if (leftSet.size !== rightSet.size) return false;
 
+      // Fast path: primitive-only sets can use has() directly — O(n) vs O(n²)
+      let allPrimitive = true;
+      for (const v of leftSet) {
+        if (!isPrimitive(v)) {
+          allPrimitive = false;
+          break;
+        }
+      }
+      if (allPrimitive) {
+        for (const v of leftSet) {
+          if (!rightSet.has(v)) return false;
+        }
+        continue;
+      }
+
       const remaining = new Set(rightSet);
 
       outer: for (const leftValue of leftSet) {
@@ -226,6 +241,22 @@ export function compareInternal(
       const rightMap = currentRight as Map<unknown, unknown>;
 
       if (leftMap.size !== rightMap.size) return false;
+
+      // Fast path: primitive-only keys can use get() directly — O(n) vs O(n²)
+      let allKeysPrimitive = true;
+      for (const k of leftMap.keys()) {
+        if (!isPrimitive(k)) {
+          allKeysPrimitive = false;
+          break;
+        }
+      }
+      if (allKeysPrimitive) {
+        for (const [leftKey, leftValue] of leftMap.entries()) {
+          if (!rightMap.has(leftKey)) return false;
+          worklist.push([leftValue, rightMap.get(leftKey)]);
+        }
+        continue;
+      }
 
       const remainingEntries = new Set(rightMap.entries());
 
