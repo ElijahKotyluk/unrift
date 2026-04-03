@@ -564,8 +564,6 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   if (!ok) process.exitCode = 1;
 }
 
-// ── Watch mode ─────────────────────────────────────────────────────────────────
-
 /**
  * Watch a directory tree for changes, calling `onChange` after a debounce.
  * Uses individual `fs.watch()` calls per directory so it works on all
