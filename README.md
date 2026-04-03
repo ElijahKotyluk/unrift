@@ -5,7 +5,6 @@
 [![CI](https://github.com/ElijahKotyluk/unrift/actions/workflows/ci.yml/badge.svg)](https://github.com/ElijahKotyluk/unrift/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/ElijahKotyluk/unrift/blob/main/LICENSE)
 [![Node](https://img.shields.io/node/v/unrift)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Docs](https://img.shields.io/badge/docs-unrift.pages.dev-00b4d8)](https://unrift.pages.dev)
 
 A lightweight, fast TypeScript test framework with ESM-first design.
