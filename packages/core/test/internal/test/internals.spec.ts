@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import { describe, it, expect, beforeEach } from "@unrift/core";
 
 describe("Sample Test Suite", () => {
@@ -72,5 +74,31 @@ describe("toThrow", () => {
       throw new Error("should pass");
     }).toThrow("should pass");
     expect(() => "no throw").not.toThrow();
+  });
+});
+
+describe("async describe guard", () => {
+  it("produces a failed test when describe callback is async", () => {
+    const configPath = resolve(
+      process.cwd(),
+      "test/internal/fixtures/unrift.config.ts",
+    );
+    const binPath = resolve(process.cwd(), "bin/unrift.mjs");
+    const proc = spawnSync(
+      process.execPath,
+      [binPath, "--config", configPath, "--json"],
+      { encoding: "utf8" },
+    );
+    const report = JSON.parse(proc.stdout);
+
+    expect(report.ok).toBe(false);
+    expect(report.failed).toBe(1);
+
+    const failed = report.results.filter(
+      (r: { status: string }) => r.status === "fail",
+    );
+    expect(failed[0].error.message).toContain(
+      "describe() callbacks must be synchronous",
+    );
   });
 });

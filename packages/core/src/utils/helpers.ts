@@ -34,6 +34,15 @@ export function isTypedArray(value: unknown): value is TypedArray {
   return ArrayBuffer.isView(value) && !(value instanceof DataView);
 }
 
+export function safeRegExp(source: string): RegExp {
+  try {
+    return new RegExp(source);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Invalid regex "${source}": ${msg}`);
+  }
+}
+
 /**
  * SameValueZero-ish semantics:
  * - NaN equals NaN

@@ -12,6 +12,7 @@ import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
 
 import { normalizePath } from "./utils/normalizePath";
+import { safeRegExp } from "./utils/helpers";
 import { TaskStatus } from "./types";
 
 interface RunnerOptions {
@@ -55,15 +56,6 @@ function debugLog(
   // Keep stdout clean for --json mode; use stderr for debug.
   if (!enabled) return;
   (json ? console.error : console.log)(...args);
-}
-
-function safeRegExp(source: string): RegExp {
-  try {
-    return new RegExp(source);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Invalid regex "${source}": ${msg}`);
-  }
 }
 
 const regExpCache = new Map<string, RegExp>();
@@ -118,6 +110,33 @@ function filterByIncludesExcludes(
   }
 
   return filtered;
+}
+
+function filterStack(stack: string): string {
+  const lines = stack.split("\n");
+  const message: string[] = [];
+  const frames: string[] = [];
+
+  for (const line of lines) {
+    if (line.trimStart().startsWith("at ")) {
+      frames.push(line);
+    } else {
+      message.push(line);
+    }
+  }
+
+  const filtered = frames.filter((line) => {
+    if (line.includes("node:")) return false;
+    if (line.includes("/@unrift/core/dist/")) return false;
+    if (line.includes("/unrift/dist/")) return false;
+    if (line.includes("/dist/esm/")) return false;
+
+    return true;
+  });
+
+  const kept = filtered.length > 0 ? filtered : frames;
+
+  return [...message, ...kept].join("\n");
 }
 
 function formatDuration(ms: number): string {
@@ -499,7 +518,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       console.log(colors.boldRed(`  ${i + 1}) ${testName}`));
 
       if (r.error) {
-        const errText = r.error.stack ?? r.error.message;
+        const errText = filterStack(r.error.stack ?? r.error.message);
         const lines = errText.split("\n");
 
         for (const line of lines) {

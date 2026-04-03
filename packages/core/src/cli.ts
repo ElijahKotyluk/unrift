@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runTestsCLI } from "./runner";
+import { safeRegExp } from "./utils/helpers";
 
 const __cliDir = dirname(fileURLToPath(import.meta.url));
 
@@ -25,16 +26,6 @@ function readVersion(): string {
 }
 
 const version = readVersion();
-
-function safeRegExp(source: string): RegExp {
-  try {
-    return new RegExp(source);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-
-    throw new Error(`Invalid pattern regex "${source}": ${msg}`);
-  }
-}
 
 function printHelp() {
   console.log(`

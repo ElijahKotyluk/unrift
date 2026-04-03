@@ -145,7 +145,7 @@ describe("async matchers", () => {
 
   it("resolves fails when promise rejects", async () => {
     try {
-      await expect(Promise.reject(new Error("oops"))).resolves.toBe(42);
+      await expect(Promise.reject<number>(new Error("oops"))).resolves.toBe(42);
       throw new Error("should not reach here");
     } catch (err) {
       expect((err as Error).message).toContain("Expected promise to resolve");
@@ -185,5 +185,168 @@ describe("async matchers", () => {
         throw new Error("x");
       }).toThrow(),
     ).toThrow("toThrow() received an async function");
+  });
+});
+
+describe("toBeGreaterThanOrEqual / toBeLessThanOrEqual", () => {
+  it("toBeGreaterThanOrEqual passes on equal value", () => {
+    expect(5).toBeGreaterThanOrEqual(5);
+  });
+
+  it("toBeGreaterThanOrEqual passes on greater value", () => {
+    expect(10).toBeGreaterThanOrEqual(5);
+  });
+
+  it("toBeGreaterThanOrEqual fails when less", () => {
+    expect(() => expect(3).toBeGreaterThanOrEqual(5)).toThrow();
+  });
+
+  it("toBeGreaterThanOrEqual with .not", () => {
+    expect(3).not.toBeGreaterThanOrEqual(5);
+    expect(() => expect(5).not.toBeGreaterThanOrEqual(5)).toThrow();
+  });
+
+  it("toBeLessThanOrEqual passes on equal value", () => {
+    expect(5).toBeLessThanOrEqual(5);
+  });
+
+  it("toBeLessThanOrEqual passes on lesser value", () => {
+    expect(3).toBeLessThanOrEqual(5);
+  });
+
+  it("toBeLessThanOrEqual fails when greater", () => {
+    expect(() => expect(10).toBeLessThanOrEqual(5)).toThrow();
+  });
+
+  it("toBeLessThanOrEqual with .not", () => {
+    expect(10).not.toBeLessThanOrEqual(5);
+    expect(() => expect(5).not.toBeLessThanOrEqual(5)).toThrow();
+  });
+});
+
+describe("toBeNaN / toBeFinite", () => {
+  it("toBeNaN passes for NaN", () => {
+    expect(NaN).toBeNaN();
+    expect(0 / 0).toBeNaN();
+  });
+
+  it("toBeNaN fails for non-NaN", () => {
+    expect(() => expect(1).toBeNaN()).toThrow();
+  });
+
+  it("toBeNaN with .not", () => {
+    expect(1).not.toBeNaN();
+    expect(() => expect(NaN).not.toBeNaN()).toThrow();
+  });
+
+  it("toBeFinite passes for finite numbers", () => {
+    expect(42).toBeFinite();
+    expect(0).toBeFinite();
+    expect(-1.5).toBeFinite();
+  });
+
+  it("toBeFinite fails for Infinity", () => {
+    expect(() => expect(Infinity).toBeFinite()).toThrow();
+    expect(() => expect(-Infinity).toBeFinite()).toThrow();
+  });
+
+  it("toBeFinite fails for NaN", () => {
+    expect(() => expect(NaN).toBeFinite()).toThrow();
+  });
+
+  it("toBeFinite with .not", () => {
+    expect(Infinity).not.toBeFinite();
+    expect(() => expect(1).not.toBeFinite()).toThrow();
+  });
+});
+
+describe("toMatchObject", () => {
+  it("exact match passes", () => {
+    expect({ a: 1, b: 2 }).toMatchObject({ a: 1, b: 2 });
+  });
+
+  it("partial match passes (extra keys in received)", () => {
+    expect({ a: 1, b: 2 }).toMatchObject({ a: 1 });
+  });
+
+  it("fails when expected has keys missing from received", () => {
+    expect(() => expect({ a: 1 }).toMatchObject({ a: 1, b: 2 })).toThrow();
+  });
+
+  it("fails when value does not match", () => {
+    expect(() => expect({ a: 1 }).toMatchObject({ a: 2 })).toThrow();
+  });
+
+  it("nested partial match", () => {
+    expect({ user: { name: "Alice", age: 30 } }).toMatchObject({
+      user: { name: "Alice" },
+    });
+  });
+
+  it("fails nested mismatch", () => {
+    expect(() =>
+      expect({ user: { name: "Alice" } }).toMatchObject({
+        user: { name: "Bob" },
+      }),
+    ).toThrow();
+  });
+
+  it("array in expected must match exactly", () => {
+    expect({ items: [1, 2, 3] }).toMatchObject({ items: [1, 2, 3] });
+    expect(() =>
+      expect({ items: [1, 2] }).toMatchObject({ items: [1, 2, 3] }),
+    ).toThrow();
+  });
+
+  it("with .not", () => {
+    expect({ a: 1 }).not.toMatchObject({ b: 2 });
+    expect(() => expect({ a: 1 }).not.toMatchObject({ a: 1 })).toThrow();
+  });
+
+  it("throws when received is not an object", () => {
+    expect(() => expect("string").toMatchObject({ a: 1 })).toThrow();
+    expect(() => expect(null).toMatchObject({ a: 1 })).toThrow();
+  });
+});
+
+describe("toHaveProperty", () => {
+  const obj = { a: 1, b: { c: 2, d: { e: 3 } } };
+
+  it("passes when property exists", () => {
+    expect(obj).toHaveProperty("a");
+    expect(obj).toHaveProperty("b");
+  });
+
+  it("fails when property is missing", () => {
+    expect(() => expect(obj).toHaveProperty("x")).toThrow();
+  });
+
+  it("dot-notation path", () => {
+    expect(obj).toHaveProperty("b.c");
+    expect(obj).toHaveProperty("b.d.e");
+  });
+
+  it("array path", () => {
+    expect(obj).toHaveProperty(["b", "c"]);
+    expect(obj).toHaveProperty(["b", "d", "e"]);
+  });
+
+  it("with value check passes", () => {
+    expect(obj).toHaveProperty("a", 1);
+    expect(obj).toHaveProperty("b.c", 2);
+  });
+
+  it("with value check fails on wrong value", () => {
+    expect(() => expect(obj).toHaveProperty("a", 99)).toThrow();
+  });
+
+  it("with .not", () => {
+    expect(obj).not.toHaveProperty("x");
+    expect(obj).not.toHaveProperty("a", 99);
+    expect(() => expect(obj).not.toHaveProperty("a")).toThrow();
+  });
+
+  it("throws when received is not an object", () => {
+    expect(() => expect(42).toHaveProperty("a")).toThrow();
   });
 });

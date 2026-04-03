@@ -33,7 +33,17 @@ function _describe(description: string, fn: () => void, mode: TaskMode) {
   unriftGlobalContext.currentSuite = suite;
 
   try {
-    fn();
+    const result = fn();
+
+    if (
+      result != null &&
+      typeof (result as { then?: unknown }).then === "function"
+    ) {
+      throw new Error(
+        `describe() callbacks must be synchronous. ` +
+          `Move async setup into beforeAll() or beforeEach().`,
+      );
+    }
   } finally {
     unriftGlobalContext.currentSuite = parent;
   }
