@@ -144,8 +144,19 @@ jobs:
         if: steps.changes.outputs.any == 'true'
         run: pnpm install --no-frozen-lockfile
 
-      - name: Commit version bump
+      - name: Check if tag already exists
         if: steps.changes.outputs.any == 'true'
+        id: tag_check
+        run: |
+          if git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag v${NEW_VERSION} already exists — skipping commit and tag (previous run may have completed partially)."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit version bump
+        if: steps.changes.outputs.any == 'true' && steps.tag_check.outputs.exists != 'true'
         run: |
           git add packages/*/package.json pnpm-lock.yaml
           git commit -m "release: v${NEW_VERSION}"
