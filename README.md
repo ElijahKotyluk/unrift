@@ -2,8 +2,8 @@
 
 [![npm version](https://img.shields.io/npm/v/unrift)](https://www.npmjs.com/package/unrift)
 [![npm downloads](https://img.shields.io/npm/dm/unrift)](https://www.npmjs.com/package/unrift)
-[![CI](https://img.shields.io/github/actions/workflow/status/ElijahKotyluk/unrift/ci.yml?branch=main)](https://github.com/ElijahKotyluk/unrift/actions)
-[![License](https://img.shields.io/github/license/ElijahKotyluk/unrift)](https://github.com/ElijahKotyluk/unrift/blob/main/LICENSE)
+[![CI](https://github.com/ElijahKotyluk/unrift/actions/workflows/ci.yml/badge.svg)](https://github.com/ElijahKotyluk/unrift/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/ElijahKotyluk/unrift/blob/main/LICENSE)
 [![Node](https://img.shields.io/node/v/unrift)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Docs](https://img.shields.io/badge/docs-unrift.pages.dev-00b4d8)](https://unrift.pages.dev)
