@@ -191,16 +191,17 @@ jobs:
 
           git add packages/*/package.json pnpm-lock.yaml
           git commit -m "$MSG"
+          git push origin main
 
-          # Create a namespaced tag for each changed package (skip if it already exists)
+          # Create and push a namespaced tag for each changed package (skip if it already exists)
           if [ "${{ steps.changes.outputs.core }}" = "true" ] && [ "${{ steps.tag_check.outputs.core_exists }}" != "true" ]; then
             git tag "@unrift/core@${CORE_VERSION}"
+            git push origin "@unrift/core@${CORE_VERSION}"
           fi
           if [ "${{ steps.changes.outputs.unrift }}" = "true" ] && [ "${{ steps.tag_check.outputs.unrift_exists }}" != "true" ]; then
             git tag "unrift@${UNRIFT_VERSION}"
+            git push origin "unrift@${UNRIFT_VERSION}"
           fi
-
-          git push origin main --follow-tags
 
       - name: Publish @unrift/core
         if: steps.changes.outputs.core == 'true'
