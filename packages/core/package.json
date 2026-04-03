@@ -1,8 +1,9 @@
 {
   "name": "@unrift/core",
   "version": "0.2.1",
-  "description": "unrift core package",
+  "description": "Core engine for the Unrift TypeScript test framework — runner, matchers, CLI, and programmatic API",
   "private": false,
+  "sideEffects": false,
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.js",
   "types": "./dist/esm/index.d.ts",
@@ -69,6 +70,9 @@
   },
   "homepage": "https://unrift.pages.dev",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
     "esbuild": "^0.27.2"
