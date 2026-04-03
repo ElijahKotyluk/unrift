@@ -1,6 +1,8 @@
 {
   "name": "@unrift/docs",
-  "private": false,
+  "version": "0.1.0",
+  "description": "Documentation site for the Unrift TypeScript test framework",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "astro dev",
