@@ -119,6 +119,46 @@ expect(5).toBeLessThan(10);
 expect(10).not.toBeLessThan(5);
 ```
 
+### `toBeGreaterThanOrEqual(expected)`
+
+Passes when the received number is greater than or equal to `expected`.
+
+```ts
+expect(10).toBeGreaterThanOrEqual(10);
+expect(11).toBeGreaterThanOrEqual(10);
+expect(9).not.toBeGreaterThanOrEqual(10);
+```
+
+### `toBeLessThanOrEqual(expected)`
+
+Passes when the received number is less than or equal to `expected`.
+
+```ts
+expect(10).toBeLessThanOrEqual(10);
+expect(9).toBeLessThanOrEqual(10);
+expect(11).not.toBeLessThanOrEqual(10);
+```
+
+### `toBeNaN()`
+
+Passes when the value is `NaN`.
+
+```ts
+expect(NaN).toBeNaN();
+expect(0 / 0).toBeNaN();
+expect(1).not.toBeNaN();
+```
+
+### `toBeFinite()`
+
+Passes when the value is a finite number (not `NaN`, `Infinity`, or `-Infinity`).
+
+```ts
+expect(42).toBeFinite();
+expect(Infinity).not.toBeFinite();
+expect(NaN).not.toBeFinite();
+```
+
 ## Strings
 
 ### `toMatch(expected)`
@@ -151,6 +191,36 @@ Checks the `.length` property of arrays, strings, or any object with a `length`.
 expect([1, 2, 3]).toHaveLength(3);
 expect("hello").toHaveLength(5);
 expect([]).toHaveLength(0);
+```
+
+## Objects
+
+### `toMatchObject(expected)`
+
+Checks that the received object contains all properties in `expected`. The received object may have additional properties — this is a partial match.
+
+```ts
+expect({ a: 1, b: 2 }).toMatchObject({ a: 1 });          // passes
+expect({ a: 1 }).not.toMatchObject({ a: 1, b: 2 });      // passes (missing b)
+
+// Nested partial matching
+expect({ user: { name: "Alice", age: 30 } }).toMatchObject({ user: { name: "Alice" } });
+```
+
+### `toHaveProperty(path, value?)`
+
+Checks that the received object has the specified property. Optionally asserts the property's value.
+
+`path` can be a dot-notation string (`"a.b.c"`) or an array of keys (`["a", "b", "c"]`).
+
+```ts
+const obj = { user: { name: "Alice", roles: ["admin"] } };
+
+expect(obj).toHaveProperty("user");
+expect(obj).toHaveProperty("user.name");
+expect(obj).toHaveProperty("user.name", "Alice");
+expect(obj).toHaveProperty(["user", "name"], "Alice");
+expect(obj).not.toHaveProperty("user.email");
 ```
 
 ## Types
