@@ -1,4 +1,5 @@
 import { expect } from "./expect";
+import { isSpy, type Spy } from "./mock/spy";
 
 import { deepEqual } from "./utils/deepEqual";
 import { looseEqual } from "./utils/looseEqual";
@@ -7,6 +8,26 @@ import { toThrow, type ToThrowExpected } from "./utils/toThrow";
 import type { MatcherContext } from "./types";
 
 let matchersRegistered = false;
+
+function ensureSpy(
+  received: unknown,
+  matcherName: string,
+): asserts received is Spy {
+  if (!isSpy(received)) {
+    throw new Error(
+      `${matcherName}() requires a spy or mock function (created via spy() or spyOn()), ` +
+        `but received ${typeof received === "object" ? Object.prototype.toString.call(received) : typeof received}`,
+    );
+  }
+}
+
+function argsEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!looseEqual(a[i], b[i])) return false;
+  }
+  return true;
+}
 
 function partialMatch(received: unknown, expected: unknown): boolean {
   if (expected === null || typeof expected !== "object") {
@@ -320,6 +341,137 @@ function registerCoreMatchers() {
 
       if (this.isNot ? pass : !pass) {
         throw new Error(this.diff(received, expected));
+      }
+    },
+
+    toHaveBeenCalled(this: MatcherContext, received: unknown) {
+      ensureSpy(received, "toHaveBeenCalled");
+
+      const pass = received.mock.calls.length > 0;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(
+          this.diff(
+            `${received.getMockName()} called ${received.mock.calls.length} time(s)`,
+            "to have been called",
+          ),
+        );
+      }
+    },
+
+    toHaveBeenCalledTimes(
+      this: MatcherContext,
+      received: unknown,
+      expected: unknown,
+    ) {
+      ensureSpy(received, "toHaveBeenCalledTimes");
+
+      if (typeof expected !== "number" || !Number.isFinite(expected)) {
+        throw new Error(
+          this.diff(
+            expected,
+            "toHaveBeenCalledTimes() requires a finite number",
+          ),
+        );
+      }
+
+      const actual = received.mock.calls.length;
+      const pass = actual === expected;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(actual, expected));
+      }
+    },
+
+    toHaveBeenCalledWith(
+      this: MatcherContext,
+      received: unknown,
+      ...expectedArgs: readonly unknown[]
+    ) {
+      ensureSpy(received, "toHaveBeenCalledWith");
+
+      const pass = received.mock.calls.some((call) =>
+        argsEqual(call, expectedArgs),
+      );
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received.mock.calls, expectedArgs));
+      }
+    },
+
+    toHaveBeenLastCalledWith(
+      this: MatcherContext,
+      received: unknown,
+      ...expectedArgs: readonly unknown[]
+    ) {
+      ensureSpy(received, "toHaveBeenLastCalledWith");
+
+      const last = received.mock.lastCall;
+      const pass = last !== undefined && argsEqual(last, expectedArgs);
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(last ?? "no calls", expectedArgs));
+      }
+    },
+
+    toHaveBeenNthCalledWith(
+      this: MatcherContext,
+      received: unknown,
+      n: unknown,
+      ...expectedArgs: readonly unknown[]
+    ) {
+      ensureSpy(received, "toHaveBeenNthCalledWith");
+
+      if (typeof n !== "number" || !Number.isInteger(n) || n < 1) {
+        throw new Error(
+          this.diff(
+            n,
+            "toHaveBeenNthCalledWith() requires a 1-indexed integer",
+          ),
+        );
+      }
+
+      const call = received.mock.calls[n - 1];
+      const pass = call !== undefined && argsEqual(call, expectedArgs);
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(
+          this.diff(call ?? `call #${n} not found`, expectedArgs),
+        );
+      }
+    },
+
+    toHaveReturned(this: MatcherContext, received: unknown) {
+      ensureSpy(received, "toHaveReturned");
+
+      const pass = received.mock.results.some((r) => r.type === "return");
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(
+          this.diff(
+            `${received.mock.results.length} result(s)`,
+            "at least one successful return",
+          ),
+        );
+      }
+    },
+
+    toHaveReturnedWith(
+      this: MatcherContext,
+      received: unknown,
+      expected: unknown,
+    ) {
+      ensureSpy(received, "toHaveReturnedWith");
+
+      const pass = received.mock.results.some(
+        (r) => r.type === "return" && looseEqual(r.value, expected),
+      );
+
+      if (this.isNot ? pass : !pass) {
+        const returnValues = received.mock.results
+          .filter((r) => r.type === "return")
+          .map((r) => r.value);
+        throw new Error(this.diff(returnValues, expected));
       }
     },
 
