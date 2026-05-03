@@ -1,6 +1,12 @@
 import { TaskMode, TaskStatus, type PromisableFn } from "./types";
 import { toError } from "./utils/toError";
 
+/**
+ * Captured at module load so the runner's own timing measurements are
+ * immune to user mocks (e.g. mock.useFakeTimers patches performance.now).
+ */
+const realPerformanceNow = performance.now.bind(performance);
+
 export class Test {
   description: string;
   durationMs: number = 0;
@@ -40,7 +46,7 @@ export class Test {
       return;
     }
 
-    const start = performance.now();
+    const start = realPerformanceNow();
     this.status = TaskStatus.Running;
 
     const exec = Promise.resolve().then(() => this.fn());
@@ -59,9 +65,11 @@ export class Test {
           }, timeoutMs);
         });
 
-        // NOTE: Promise.race does not cancel the losing promise. A timed-out test
-        // function continues running in the background. True cancellation would
-        // require AbortController integration, which is a larger future change.
+        /**
+         * NOTE: Promise.race does not cancel the losing promise. A timed-out test
+         * function continues running in the background. True cancellation would
+         * require AbortController integration, which is a larger future change.
+         */
         try {
           await Promise.race([exec, timeoutFn]);
         } finally {
@@ -76,7 +84,7 @@ export class Test {
       this.error = toError(error);
       this.status = TaskStatus.Fail;
     } finally {
-      this.durationMs = performance.now() - start;
+      this.durationMs = realPerformanceNow() - start;
     }
   }
 }
