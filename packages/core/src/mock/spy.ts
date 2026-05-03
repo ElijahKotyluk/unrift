@@ -1,0 +1,319 @@
+/**
+ * Spy / Mock function primitive.
+ *
+ * Both `spy()` and `mock.fn()` produce the same object — a callable that
+ * records every invocation, supports configurable implementations, and can
+ * be restored to the original (when created via `spyOn`).
+ */
+
+export const SPY_BRAND: unique symbol = Symbol.for("unrift.spy");
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyFn = (...args: any[]) => any;
+
+export interface MockResult {
+  type: "return" | "throw";
+  value: unknown;
+}
+
+export interface MockState {
+  // Arguments passed to each call, in invocation order.
+  calls: unknown[][];
+  // Return value or thrown error for each call, in invocation order.
+  results: MockResult[];
+  // `this` binding for each call. Lets users assert constructor / method binding.
+  contexts: unknown[];
+  // When the spy is invoked with `new`, the constructed instance. Otherwise undefined.
+  instances: unknown[];
+  // Convenience: same as `calls[calls.length - 1]`.
+  lastCall: unknown[] | undefined;
+}
+
+export interface Spy<T extends AnyFn = AnyFn> {
+  (...args: Parameters<T>): ReturnType<T>;
+
+  // Recorded state. Reset via `mockClear()` or `mockReset()`.
+  mock: MockState;
+
+  // Tag the spy so it shows up nicely in errors. Returns `this` for chaining.
+  mockName(name: string): Spy<T>;
+  // Get the assigned mock name, or "spy" if none.
+  getMockName(): string;
+
+  // Set the implementation used for every subsequent call (until reset).
+  mockImplementation(impl: T): Spy<T>;
+  // Queue a one-shot implementation. Multiple `Once` calls form a FIFO queue.
+  mockImplementationOnce(impl: T): Spy<T>;
+
+  // Always return this value. Equivalent to `mockImplementation(() => v)`.
+  mockReturnValue(value: ReturnType<T>): Spy<T>;
+  // Return this value once, then fall back to the next strategy.
+  mockReturnValueOnce(value: ReturnType<T>): Spy<T>;
+
+  // Always return `Promise.resolve(value)`.
+  mockResolvedValue(value: Awaited<ReturnType<T>>): Spy<T>;
+  // Resolve once with this value, then fall back.
+  mockResolvedValueOnce(value: Awaited<ReturnType<T>>): Spy<T>;
+
+  // Always return `Promise.reject(error)`.
+  mockRejectedValue(error: unknown): Spy<T>;
+  // Reject once with this error, then fall back.
+  mockRejectedValueOnce(error: unknown): Spy<T>;
+
+  // Clear `mock.calls`, `mock.results`, etc. Implementation is preserved.
+  mockClear(): Spy<T>;
+  // Clear state AND remove all configured implementations (revert to original / no-op).
+  mockReset(): Spy<T>;
+  // For `spyOn` only: restore the original method on the host object.
+  mockRestore(): void;
+
+  readonly [SPY_BRAND]: true;
+}
+
+/**
+ * Internal registries. Used by `mock.clearAll()`, `mock.resetAll()`,
+ * and `mock.restoreAll()` to operate on every spy created so far.
+ */
+export const activeSpies = new Set<Spy>();
+export const activeRestorers = new Set<() => void>();
+
+/**
+ * Returns true if the value is a spy created by `spy()` or `spyOn()`.
+ * Used by mock matchers to validate their `received` argument.
+ */
+export function isSpy(value: unknown): value is Spy {
+  return (
+    typeof value === "function" &&
+    (value as { [SPY_BRAND]?: true })[SPY_BRAND] === true
+  );
+}
+
+interface SpyInternalConfig {
+  // Original method when constructed via spyOn — used as fallback impl + on restore.
+  originalImpl?: AnyFn;
+  // Per-spy restore hook (runs on mockRestore). spyOn sets this; bare spy() does not.
+  restoreFn?: () => void;
+  // Default impl provided to spy(impl?). Used when no override is configured.
+  initialImpl?: AnyFn;
+}
+
+function createSpy<T extends AnyFn>(config: SpyInternalConfig): Spy<T> {
+  let mockName = "spy";
+  let currentImpl: AnyFn | undefined = config.initialImpl;
+  const onceImpls: AnyFn[] = [];
+
+  const state: MockState = {
+    calls: [],
+    results: [],
+    contexts: [],
+    instances: [],
+    lastCall: undefined,
+  };
+
+  // The callable. Defined as a regular `function` (not arrow) so it has its own
+  // `this` binding when invoked as a method, and so `new spy(...)` works.
+  function spyImpl(this: unknown, ...args: unknown[]): unknown {
+    state.calls.push(args);
+    state.contexts.push(this);
+    state.lastCall = args;
+
+    /**
+     * Resolution order:
+     *   1. queued one-shot implementations (FIFO)
+     *   2. current permanent implementation
+     *   3. original (spyOn) implementation
+     *   4. no-op returning undefined
+     */
+    const impl = onceImpls.shift() ?? currentImpl ?? config.originalImpl;
+
+    let isNewTarget = false;
+    try {
+      /**
+       * `new.target` would be cleaner, but inside this regular function we
+       * detect construction by checking whether `this` is an instance whose
+       * prototype matches the spy's prototype.
+       */
+      isNewTarget =
+        new.target !== undefined ||
+        (this !== undefined &&
+          this !== null &&
+          Object.getPrototypeOf(this) === (spyImpl as AnyFn).prototype);
+    } catch {
+      isNewTarget = false;
+    }
+
+    try {
+      let value: unknown;
+
+      if (impl) {
+        value = isNewTarget
+          ? Reflect.construct(impl, args, spyImpl as unknown as AnyFn)
+          : impl.apply(this, args);
+      } else {
+        value = undefined;
+      }
+
+      if (isNewTarget) state.instances.push(value);
+      state.results.push({ type: "return", value });
+      return value;
+    } catch (err) {
+      state.results.push({ type: "throw", value: err });
+      throw err;
+    }
+  }
+
+  // Attach state + methods.
+  const spy = spyImpl as unknown as Spy<T>;
+
+  Object.defineProperty(spy, SPY_BRAND, {
+    value: true,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  Object.defineProperty(spy, "mock", {
+    value: state,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+
+  spy.mockName = (name: string) => {
+    mockName = name;
+    return spy;
+  };
+  spy.getMockName = () => mockName;
+
+  spy.mockImplementation = (impl: AnyFn) => {
+    currentImpl = impl;
+    return spy;
+  };
+  spy.mockImplementationOnce = (impl: AnyFn) => {
+    onceImpls.push(impl);
+    return spy;
+  };
+
+  spy.mockReturnValue = (value: unknown) =>
+    spy.mockImplementation((() => value) as T);
+  spy.mockReturnValueOnce = (value: unknown) =>
+    spy.mockImplementationOnce((() => value) as T);
+
+  spy.mockResolvedValue = (value: unknown) =>
+    spy.mockImplementation((() => Promise.resolve(value)) as T);
+  spy.mockResolvedValueOnce = (value: unknown) =>
+    spy.mockImplementationOnce((() => Promise.resolve(value)) as T);
+
+  spy.mockRejectedValue = (error: unknown) =>
+    spy.mockImplementation((() => Promise.reject(error)) as T);
+  spy.mockRejectedValueOnce = (error: unknown) =>
+    spy.mockImplementationOnce((() => Promise.reject(error)) as T);
+
+  spy.mockClear = () => {
+    state.calls.length = 0;
+    state.results.length = 0;
+    state.contexts.length = 0;
+    state.instances.length = 0;
+    state.lastCall = undefined;
+    return spy;
+  };
+
+  spy.mockReset = () => {
+    spy.mockClear();
+    currentImpl = undefined;
+    onceImpls.length = 0;
+    return spy;
+  };
+
+  spy.mockRestore = () => {
+    spy.mockReset();
+    if (config.restoreFn) {
+      config.restoreFn();
+      activeRestorers.delete(config.restoreFn);
+    }
+    activeSpies.delete(spy);
+  };
+
+  activeSpies.add(spy);
+  return spy;
+}
+
+/**
+ * Creates a standalone spy / mock function. Records every invocation and
+ * supports configurable behavior via `.mockReturnValue`, `.mockImplementation`, etc.
+ */
+export function spy<T extends AnyFn = AnyFn>(impl?: T): Spy<T> {
+  return createSpy<T>({ initialImpl: impl });
+}
+
+/**
+ * Replaces `obj[key]` with a spy that wraps the original method. Calling
+ * `.mockRestore()` (or `mock.restoreAll()`) puts the original back.
+ *
+ * The original is the default implementation — calls pass through unless
+ * the user provides an override via `.mockReturnValue` / `.mockImplementation`.
+ */
+export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
+  obj: T,
+  key: K,
+): T[K] extends AnyFn ? Spy<T[K]> : never {
+  const original = obj[key];
+
+  if (typeof original !== "function") {
+    throw new Error(
+      `spyOn() requires a function property; got ${typeof original} for key "${String(key)}"`,
+    );
+  }
+
+  const descriptor = Object.getOwnPropertyDescriptor(obj, key);
+
+  if (descriptor && descriptor.configurable === false) {
+    throw new Error(
+      `spyOn() cannot wrap non-configurable property "${String(key)}"`,
+    );
+  }
+
+  const restore = () => {
+    if (descriptor) {
+      Object.defineProperty(obj, key, descriptor);
+    } else {
+      delete obj[key];
+    }
+  };
+
+  const spy = createSpy({
+    originalImpl: original as AnyFn,
+    restoreFn: restore,
+  });
+
+  Object.defineProperty(obj, key, {
+    value: spy,
+    writable: true,
+    configurable: true,
+    enumerable: descriptor?.enumerable ?? true,
+  });
+
+  activeRestorers.add(restore);
+
+  return spy as T[K] extends AnyFn ? Spy<T[K]> : never;
+}
+
+// Clear call history on every active spy. Implementations are preserved.
+export function clearAllMocks(): void {
+  for (const spy of activeSpies) spy.mockClear();
+}
+
+// Clear call history AND remove all configured implementations on every active spy.
+export function resetAllMocks(): void {
+  for (const spy of activeSpies) spy.mockReset();
+}
+
+// Restore originals for every spyOn / stub created so far, then clear all spy state.
+export function restoreAllMocks(): void {
+  // Iterate over a snapshot - restorers mutate the set as they run.
+  for (const restore of [...activeRestorers]) {
+    restore();
+    activeRestorers.delete(restore);
+  }
+  for (const spy of [...activeSpies]) spy.mockReset();
+  activeSpies.clear();
+}
