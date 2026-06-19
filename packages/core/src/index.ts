@@ -12,3 +12,42 @@ export type {
 } from "./types";
 export { runEngine } from "./run";
 export type { RunEngineResult } from "./run";
+
+// Mocking suite
+export {
+  mock,
+  spy,
+  spyOn,
+  isSpy,
+  mockObject,
+  mockClass,
+  stub,
+  mockGlobal,
+  mockFetch,
+  mockFetchOnce,
+  useFakeTimers,
+  useRealTimers,
+  advanceTimersByTime,
+  runAllTimers,
+  runOnlyPendingTimers,
+  getTimerCount,
+  setSystemTime,
+  getRealSystemTime,
+  doMock,
+  unmock,
+  listMockedSpecs,
+  clearAllMocks,
+  resetAllMocks,
+  restoreAllMocks,
+} from "./mock/index";
+export type {
+  Spy,
+  MockState,
+  MockResult,
+  MockFetch,
+  FetchMatcher,
+  MockResponseInit,
+  MockFetchResponse,
+  UseFakeTimersOptions,
+  LoaderMessage,
+} from "./mock/index";
