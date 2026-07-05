@@ -254,10 +254,65 @@ function advanceTo(target: number): void {
 
 // Public API
 
+/**
+ * Names of host APIs that `useFakeTimers` can patch. `setTimeout` implicitly
+ * pairs with `clearTimeout`, `setInterval` with `clearInterval`, and
+ * `setImmediate` with `clearImmediate` — you can't fake one half of a pair
+ * without breaking the other.
+ */
+export type FakeableApi =
+  | "setTimeout"
+  | "setInterval"
+  | "setImmediate"
+  | "queueMicrotask"
+  | "process.nextTick"
+  | "Date"
+  | "performance";
+
+const ALL_FAKEABLE: readonly FakeableApi[] = [
+  "setTimeout",
+  "setInterval",
+  "setImmediate",
+  "queueMicrotask",
+  "process.nextTick",
+  "Date",
+  "performance",
+];
+
 export interface UseFakeTimersOptions {
   // Initial system time. Accepts a Date, ISO string, or epoch milliseconds.
   now?: Date | string | number;
+  /**
+   * Opt-in: only the listed APIs are faked; everything else stays real.
+   * Mutually exclusive with `doNotFake`.
+   */
+  toFake?: readonly FakeableApi[];
+  /**
+   * Opt-out: everything is faked except the listed APIs.
+   * Mutually exclusive with `toFake`.
+   */
+  doNotFake?: readonly FakeableApi[];
 }
+
+function resolveFakedSet(options: UseFakeTimersOptions): Set<FakeableApi> {
+  if (options.toFake !== undefined && options.doNotFake !== undefined) {
+    throw new Error(
+      "mock.useFakeTimers(): `toFake` and `doNotFake` are mutually exclusive",
+    );
+  }
+  if (options.toFake !== undefined) {
+    return new Set(options.toFake);
+  }
+  if (options.doNotFake !== undefined) {
+    const excluded = new Set(options.doNotFake);
+    return new Set(ALL_FAKEABLE.filter((api) => !excluded.has(api)));
+  }
+  return new Set(ALL_FAKEABLE);
+}
+
+// Tracks what was actually patched on the most recent useFakeTimers call,
+// so useRealTimers knows which originals to restore.
+let fakedApis: Set<FakeableApi> = new Set();
 
 function ensureInstalled(method: string): void {
   if (!installed) {
@@ -275,7 +330,12 @@ function toMillis(value: Date | string | number): number {
 
 export function useFakeTimers(options: UseFakeTimersOptions = {}): void {
   if (installed) return;
+
+  // Resolve which APIs to fake BEFORE flipping `installed` — that way an
+  // invalid options throw doesn't leave us in a half-installed state.
+  const toFake = resolveFakedSet(options);
   installed = true;
+  fakedApis = toFake;
 
   originals = {
     setTimeout: globalThis.setTimeout,
@@ -306,24 +366,34 @@ export function useFakeTimers(options: UseFakeTimersOptions = {}): void {
   now = options.now !== undefined ? toMillis(options.now) : 0;
   queue.length = 0;
 
-  // Patch globals
-  globalThis.setTimeout =
-    fakeSetTimeout as unknown as typeof globalThis.setTimeout;
-  globalThis.clearTimeout =
-    fakeClearTimeout as unknown as typeof globalThis.clearTimeout;
-  globalThis.setInterval =
-    fakeSetInterval as unknown as typeof globalThis.setInterval;
-  globalThis.clearInterval =
-    fakeClearTimeout as unknown as typeof globalThis.clearInterval;
-  if (originals.setImmediate) {
+  // Patch globals — each pair gated on the resolved fake set.
+  if (toFake.has("setTimeout")) {
+    globalThis.setTimeout =
+      fakeSetTimeout as unknown as typeof globalThis.setTimeout;
+    globalThis.clearTimeout =
+      fakeClearTimeout as unknown as typeof globalThis.clearTimeout;
+  }
+  if (toFake.has("setInterval")) {
+    globalThis.setInterval =
+      fakeSetInterval as unknown as typeof globalThis.setInterval;
+    globalThis.clearInterval =
+      fakeClearTimeout as unknown as typeof globalThis.clearInterval;
+  }
+  if (toFake.has("setImmediate") && originals.setImmediate) {
     globalThis.setImmediate =
       fakeSetImmediate as unknown as typeof globalThis.setImmediate;
     globalThis.clearImmediate =
       fakeClearTimeout as unknown as typeof globalThis.clearImmediate;
   }
-  globalThis.queueMicrotask = fakeQueueMicrotask;
+  if (toFake.has("queueMicrotask")) {
+    globalThis.queueMicrotask = fakeQueueMicrotask;
+  }
 
-  if (originals.processNextTick && typeof process !== "undefined") {
+  if (
+    toFake.has("process.nextTick") &&
+    originals.processNextTick &&
+    typeof process !== "undefined"
+  ) {
     /**
      * process.nextTick has the highest priority in Node. schedule with
      * microtask priority so it fires before macrotasks at the same time.
@@ -345,9 +415,15 @@ export function useFakeTimers(options: UseFakeTimersOptions = {}): void {
     }) as unknown as typeof fakeQueueMicrotask;
   }
 
-  globalThis.Date = makeFakeDate();
+  if (toFake.has("Date")) {
+    globalThis.Date = makeFakeDate();
+  }
 
-  if (originals.performanceNow && globalThis.performance) {
+  if (
+    toFake.has("performance") &&
+    originals.performanceNow &&
+    globalThis.performance
+  ) {
     globalThis.performance.now = (() => now) as typeof performance.now;
   }
 
@@ -357,29 +433,48 @@ export function useFakeTimers(options: UseFakeTimersOptions = {}): void {
 export function useRealTimers(): void {
   if (!installed || !originals) return;
 
-  globalThis.setTimeout = originals.setTimeout;
-  globalThis.clearTimeout = originals.clearTimeout;
-  globalThis.setInterval = originals.setInterval;
-  globalThis.clearInterval = originals.clearInterval;
-  if (originals.setImmediate) {
-    globalThis.setImmediate = originals.setImmediate;
+  // Only restore the APIs that were actually patched. Touching globals
+  // we didn't touch would clobber user-set values or other mocks.
+  if (fakedApis.has("setTimeout")) {
+    globalThis.setTimeout = originals.setTimeout;
+    globalThis.clearTimeout = originals.clearTimeout;
   }
-  if (originals.clearImmediate) {
-    globalThis.clearImmediate = originals.clearImmediate;
+  if (fakedApis.has("setInterval")) {
+    globalThis.setInterval = originals.setInterval;
+    globalThis.clearInterval = originals.clearInterval;
   }
-  globalThis.queueMicrotask = originals.queueMicrotask;
-  if (originals.processNextTick && typeof process !== "undefined") {
+  if (fakedApis.has("setImmediate")) {
+    if (originals.setImmediate)
+      globalThis.setImmediate = originals.setImmediate;
+    if (originals.clearImmediate)
+      globalThis.clearImmediate = originals.clearImmediate;
+  }
+  if (fakedApis.has("queueMicrotask")) {
+    globalThis.queueMicrotask = originals.queueMicrotask;
+  }
+  if (
+    fakedApis.has("process.nextTick") &&
+    originals.processNextTick &&
+    typeof process !== "undefined"
+  ) {
     (process as { nextTick: typeof originals.processNextTick }).nextTick =
       originals.processNextTick;
   }
-  globalThis.Date = originals.Date;
-  if (originals.performanceNow && globalThis.performance) {
+  if (fakedApis.has("Date")) {
+    globalThis.Date = originals.Date;
+  }
+  if (
+    fakedApis.has("performance") &&
+    originals.performanceNow &&
+    globalThis.performance
+  ) {
     globalThis.performance.now =
       originals.performanceNow as typeof performance.now;
   }
 
   installed = false;
   originals = undefined;
+  fakedApis = new Set();
   queue.length = 0;
   now = 0;
 
@@ -421,6 +516,107 @@ export function runOnlyPendingTimers(): void {
     if (++iterations > MAX_DRAIN_ITERATIONS) {
       throw new Error(
         "runOnlyPendingTimers exceeded the maximum drain iterations",
+      );
+    }
+  }
+}
+
+/**
+ * Like `pumpOne`, but if the callback returns a thenable, awaits it before
+ * resolving, and yields to the real microtask queue afterward so any
+ * microtasks the callback queued can settle before the next pump.
+ *
+ * The `await Promise.resolve()` at the end is the key. It lets pending
+ * microtasks (resolved Promises, queued `.then` handlers) flush. Real
+ * `Promise.resolve()` is unaffected by `mock.useFakeTimers()` — the engine
+ * uses its internal microtask queue, not our fake `queueMicrotask`.
+ */
+async function pumpOneAsync(): Promise<boolean> {
+  while (queue.length > 0 && queue[0].cancelled) queue.shift();
+  if (queue.length === 0) return false;
+
+  const task = queue.shift()!;
+  now = Math.max(now, task.fireAt);
+
+  if (task.kind === "interval") {
+    const next: FakeTask = {
+      ...task,
+      seq: nextSeq++,
+      fireAt: now + (task.periodMs ?? 1),
+    };
+    enqueue(next);
+  }
+
+  const result = task.callback(...task.args);
+  if (
+    result !== undefined &&
+    result !== null &&
+    typeof (result as { then?: unknown }).then === "function"
+  ) {
+    await (result as Promise<unknown>);
+  }
+
+  // Yield once more so microtasks scheduled by the callback (after any
+  // awaited promise resolved) can run before we move on.
+  await Promise.resolve();
+
+  return true;
+}
+
+/**
+ * Like `advanceTimersByTime`, but awaits Promise return values from
+ * timer callbacks and yields to microtasks between pumps. Use this when
+ * the code under test does `await` work inside a `setTimeout` callback.
+ */
+export async function advanceTimersByTimeAsync(ms: number): Promise<void> {
+  ensureInstalled("advanceTimersByTimeAsync");
+  const target = now + Math.max(0, ms);
+  let iterations = 0;
+  while (queue.length > 0) {
+    while (queue.length > 0 && queue[0].cancelled) queue.shift();
+    if (queue.length === 0) break;
+    if (queue[0].fireAt > target) break;
+    await pumpOneAsync();
+    if (++iterations > MAX_DRAIN_ITERATIONS) {
+      throw new Error(
+        "advanceTimersByTimeAsync exceeded the maximum drain iterations — " +
+          "is a timer scheduling itself in a loop?",
+      );
+    }
+  }
+  if (target > now) now = target;
+}
+
+/** Async sibling of `runAllTimers`. */
+export async function runAllTimersAsync(): Promise<void> {
+  ensureInstalled("runAllTimersAsync");
+  let iterations = 0;
+  while (queue.length > 0) {
+    while (queue.length > 0 && queue[0].cancelled) queue.shift();
+    if (queue.length === 0) break;
+    await pumpOneAsync();
+    if (++iterations > MAX_DRAIN_ITERATIONS) {
+      throw new Error(
+        "runAllTimersAsync exceeded the maximum drain iterations — " +
+          "is a timer scheduling itself in a loop?",
+      );
+    }
+  }
+}
+
+/** Async sibling of `runOnlyPendingTimers`. */
+export async function runOnlyPendingTimersAsync(): Promise<void> {
+  ensureInstalled("runOnlyPendingTimersAsync");
+  const targetIds = new Set<number>(queue.map((t) => t.id));
+  let iterations = 0;
+  while (queue.length > 0) {
+    while (queue.length > 0 && queue[0].cancelled) queue.shift();
+    if (queue.length === 0) break;
+    if (!targetIds.has(queue[0].id)) break;
+    await pumpOneAsync();
+    if (++iterations > MAX_DRAIN_ITERATIONS) {
+      throw new Error(
+        "runOnlyPendingTimersAsync exceeded the maximum drain iterations",
       );
     }
   }

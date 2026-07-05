@@ -25,7 +25,7 @@
  * message types without breaking the existing surface.
  */
 
-import { activeRestorers } from "./spy";
+import { activeRestorers, spy } from "./spy";
 
 /**
  * Sentinel field name on globalThis. Loader-generated synthetic source
@@ -218,4 +218,47 @@ export function unmock(spec: string): void {
 /** Returns the current set of mocked specs. Useful for tests / debugging. */
 export function listMockedSpecs(): readonly string[] {
   return [...mockedSpecs];
+}
+
+/**
+ * Convenience helper: imports the real module, builds a version with every
+ * function export wrapped in a spy, registers it via `mock.doMock`, and
+ * returns the mocked exports.
+ *
+ * Non-function exports are passed through unchanged. Tests can customize
+ * individual spies with `.mockReturnValue`, `.mockImplementation`, etc.
+ *
+ * Subject to the same Tier A limits as `doMock` — only affects
+ * `await import(spec)` after the call. Static imports of `spec` see the
+ * real module.
+ *
+ * @example
+ *   const fs = await mock.fromModule("node:fs");
+ *   fs.readFileSync.mockReturnValue("fake content");
+ *   // ... test code that does `await import("node:fs")` now gets the spies
+ */
+export async function fromModule<T extends Record<string, unknown>>(
+  spec: string,
+): Promise<T> {
+  if (typeof spec !== "string" || spec.length === 0) {
+    throw new TypeError(
+      "mock.fromModule() requires a non-empty string specifier",
+    );
+  }
+
+  const real = (await import(spec)) as Record<string, unknown>;
+  const mocked: Record<string, unknown> = {};
+
+  for (const key of Object.keys(real)) {
+    const value = real[key];
+    if (typeof value === "function") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mocked[key] = spy(value as (...args: any[]) => any);
+    } else {
+      mocked[key] = value;
+    }
+  }
+
+  doMock(spec, () => mocked);
+  return mocked as T;
 }

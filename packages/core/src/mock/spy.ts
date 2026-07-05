@@ -246,16 +246,104 @@ export function spy<T extends AnyFn = AnyFn>(impl?: T): Spy<T> {
 }
 
 /**
+ * Walks the prototype chain to find the descriptor for `key` — needed
+ * because accessor properties (getter/setter) usually live on a prototype,
+ * not on the instance itself.
+ */
+function findDescriptor(
+  obj: object,
+  key: string | symbol,
+): { host: object; descriptor: PropertyDescriptor } | undefined {
+  let current: object | null = obj;
+  while (current !== null) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, key);
+    if (descriptor) return { host: current, descriptor };
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+  return undefined;
+}
+
+/**
  * Replaces `obj[key]` with a spy that wraps the original method. Calling
  * `.mockRestore()` (or `mock.restoreAll()`) puts the original back.
  *
  * The original is the default implementation — calls pass through unless
  * the user provides an override via `.mockReturnValue` / `.mockImplementation`.
+ *
+ * The 3-arg form `spyOn(obj, "prop", "get")` / `spyOn(obj, "prop", "set")`
+ * wraps the accessor instead of a method. Setter spies record the assigned
+ * value as the first call argument; getter spies record the returned value
+ * in `mock.results`.
  */
 export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
   obj: T,
   key: K,
-): T[K] extends AnyFn ? Spy<T[K]> : never {
+): T[K] extends AnyFn ? Spy<T[K]> : never;
+export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
+  obj: T,
+  key: K,
+  accessor: "get",
+): Spy<() => T[K]>;
+export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
+  obj: T,
+  key: K,
+  accessor: "set",
+): Spy<(value: T[K]) => void>;
+export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
+  obj: T,
+  key: K,
+  accessor?: "get" | "set",
+): Spy {
+  // Accessor (getter/setter) path — 3-arg form.
+  if (accessor === "get" || accessor === "set") {
+    const found = findDescriptor(obj, key);
+    if (!found) {
+      throw new Error(
+        `spyOn() could not find property "${String(key)}" on the target or its prototype chain`,
+      );
+    }
+    const { host, descriptor } = found;
+    if (descriptor.configurable === false) {
+      throw new Error(
+        `spyOn() cannot wrap non-configurable property "${String(key)}"`,
+      );
+    }
+    const original = descriptor[accessor];
+    if (typeof original !== "function") {
+      throw new Error(
+        `spyOn(..., "${accessor}") requires "${String(key)}" to have a ${accessor}ter`,
+      );
+    }
+
+    // If the spy is on a prototype, restoring needs to put back the
+    // *prototype's* descriptor at the *prototype* level — not on `obj`.
+    const restore = () => {
+      Object.defineProperty(host, key, descriptor);
+    };
+
+    const accessorSpy = createSpy({
+      originalImpl: original as AnyFn,
+      restoreFn: restore,
+    });
+
+    const newDescriptor: PropertyDescriptor = {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      [accessor]: accessorSpy,
+    };
+    // Preserve the other half of the pair (the unspied accessor stays put).
+    if (accessor === "get" && descriptor.set)
+      newDescriptor.set = descriptor.set;
+    if (accessor === "set" && descriptor.get)
+      newDescriptor.get = descriptor.get;
+
+    Object.defineProperty(host, key, newDescriptor);
+    activeRestorers.add(restore);
+
+    return accessorSpy as Spy;
+  }
+
+  // Method path — original 2-arg behavior.
   const original = obj[key];
 
   if (typeof original !== "function") {
@@ -294,7 +382,7 @@ export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
 
   activeRestorers.add(restore);
 
-  return spy as T[K] extends AnyFn ? Spy<T[K]> : never;
+  return spy as Spy;
 }
 
 // Clear call history on every active spy. Implementations are preserved.

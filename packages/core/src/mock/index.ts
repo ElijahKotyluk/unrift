@@ -27,13 +27,17 @@ import {
   useFakeTimers,
   useRealTimers,
   advanceTimersByTime,
+  advanceTimersByTimeAsync,
   runAllTimers,
+  runAllTimersAsync,
   runOnlyPendingTimers,
+  runOnlyPendingTimersAsync,
   getTimerCount,
   setSystemTime,
   getRealSystemTime,
 } from "./timers";
-import { doMock, unmock, listMockedSpecs } from "./module";
+import { doMock, unmock, listMockedSpecs, fromModule } from "./module";
+import { fs as mockFs, getActiveFsHandle } from "./fs";
 
 export {
   spy,
@@ -48,14 +52,20 @@ export {
   useFakeTimers,
   useRealTimers,
   advanceTimersByTime,
+  advanceTimersByTimeAsync,
   runAllTimers,
+  runAllTimersAsync,
   runOnlyPendingTimers,
+  runOnlyPendingTimersAsync,
   getTimerCount,
   setSystemTime,
   getRealSystemTime,
   doMock,
   unmock,
   listMockedSpecs,
+  fromModule,
+  mockFs,
+  getActiveFsHandle,
   clearAllMocks,
   resetAllMocks,
   restoreAllMocks,
@@ -68,8 +78,9 @@ export type {
   MockResponseInit,
   MockFetchResponse,
 } from "./fetch";
-export type { UseFakeTimersOptions } from "./timers";
+export type { UseFakeTimersOptions, FakeableApi } from "./timers";
 export type { LoaderMessage } from "./module";
+export type { FakeFsHandle, FakeFsState } from "./fs";
 
 /**
  * Unified mock namespace. Mirrors Jest / Vitest naming so existing test
@@ -97,8 +108,11 @@ export const mock = {
   useFakeTimers,
   useRealTimers,
   advanceTimersByTime,
+  advanceTimersByTimeAsync,
   runAllTimers,
+  runAllTimersAsync,
   runOnlyPendingTimers,
+  runOnlyPendingTimersAsync,
   getTimerCount,
   setSystemTime,
   getRealSystemTime,
@@ -107,6 +121,11 @@ export const mock = {
   // planned for Tier B and intentionally not exposed yet.
   doMock,
   unmock,
+  fromModule,
+  // File system mocking — backed by memfs, layered on Tier A module
+  // mocking. Works with `await import("node:fs")`; static imports of
+  // node:fs are not intercepted yet (planned for Tier B).
+  fs: mockFs,
   clearAll: clearAllMocks,
   resetAll: resetAllMocks,
   restoreAll: restoreAllMocks,

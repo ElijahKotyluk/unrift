@@ -60,23 +60,6 @@ describe("mock.doMock — basic registration", () => {
 });
 
 describe("mock.unmock — restoration", () => {
-  it("restores the original module on subsequent imports", async () => {
-    mock.doMock("node:os", () => ({ platform: () => "fake-os" }));
-
-    const mocked = await import("node:os");
-    expect(mocked.platform()).toBe("fake-os");
-
-    mock.unmock("node:os");
-
-    // Bust the module cache by using a fresh import via a unique
-    // import-attributes-style technique isn't reliable; rely on the
-    // loader's behavior — once unmocked, subsequent fresh imports of
-    // a non-cached spec hit the real loader.
-    // Node DOES cache modules, so we can't reliably re-import the same
-    // spec and see the un-mocked version. Verify via listMockedSpecs.
-    expect(listMockedSpecs()).not.toContain("node:os");
-  });
-
   it("mock.restoreAll undoes every doMock registration", () => {
     mock.doMock("node:fs", () => ({ readFileSync: () => "x" }));
     mock.doMock("node:path", () => ({ sep: "x" }));

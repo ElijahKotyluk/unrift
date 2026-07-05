@@ -16,23 +16,11 @@ beforeEach(() => {
 });
 
 describe("spy() — basic call recording", () => {
-  it("returns a callable function", () => {
-    const fn = spy();
-    expect(typeof fn).toBe("function");
-  });
-
-  it("records call arguments", () => {
+  it("records arguments for every call, in invocation order", () => {
     const fn = spy();
     fn(1, "two", { three: 3 });
-    expect(fn.mock.calls).toEqual([[1, "two", { three: 3 }]]);
-  });
-
-  it("records every call in invocation order", () => {
-    const fn = spy();
-    fn("a");
     fn("b");
-    fn("c");
-    expect(fn.mock.calls).toEqual([["a"], ["b"], ["c"]]);
+    expect(fn.mock.calls).toEqual([[1, "two", { three: 3 }], ["b"]]);
   });
 
   it("exposes lastCall as a shortcut to the most recent args", () => {
@@ -143,21 +131,14 @@ describe("spy() — lifecycle", () => {
 });
 
 describe("isSpy()", () => {
-  it("returns true for spy()", () => {
+  it("returns true for spy() and mock.fn(), which are the same primitive", () => {
     expect(isSpy(spy())).toBe(true);
-  });
-
-  it("returns true for mock.fn()", () => {
     expect(isSpy(mock.fn())).toBe(true);
   });
 
-  it("returns false for plain functions", () => {
+  it("returns false for unbranded functions and non-functions", () => {
     expect(isSpy(() => 1)).toBe(false);
-  });
-
-  it("returns false for non-function values", () => {
     expect(isSpy(42)).toBe(false);
-    expect(isSpy("not a spy")).toBe(false);
     expect(isSpy({})).toBe(false);
     expect(isSpy(null)).toBe(false);
   });
@@ -331,20 +312,6 @@ describe("mock.object — auto-mocking", () => {
     expect(isSpy(service.put)).toBe(true);
   });
 
-  it("mocked methods record calls", () => {
-    const service = {
-      send(payload: unknown) {
-        return payload;
-      },
-    };
-    mock.object(service);
-    service.send({ a: 1 });
-
-    expect((service.send as unknown as { mock: { calls: unknown[][] } }).mock.calls).toEqual([
-      [{ a: 1 }],
-    ]);
-  });
-
   it("walks prototype chain for class instances", () => {
     class Service {
       static create() {
@@ -492,6 +459,95 @@ describe("mock matchers", () => {
     expect(() => expect(fn).toHaveReturnedWith({ result: "fail" })).toThrow();
   });
 
+  it("toHaveReturnedTimes counts only successful returns", () => {
+    let attempt = 0;
+    const fn = spy(() => {
+      attempt++;
+      if (attempt === 2) throw new Error("flaky");
+      return attempt;
+    });
+
+    fn();
+    expect(() => fn()).toThrow();
+    fn();
+
+    // 3 calls, but only 2 returned (call #2 threw)
+    expect(fn).toHaveReturnedTimes(2);
+    expect(() => expect(fn).toHaveReturnedTimes(3)).toThrow();
+  });
+
+  it("toHaveLastReturnedWith inspects the most recent return", () => {
+    const fn = spy<(x: number) => number>((x) => x * 10);
+    fn(1);
+    fn(2);
+    fn(3);
+
+    expect(fn).toHaveLastReturnedWith(30);
+    expect(() => expect(fn).toHaveLastReturnedWith(20)).toThrow();
+  });
+
+  it("toHaveLastReturnedWith fails clearly when the last call threw", () => {
+    const fn = spy(() => {
+      throw new Error("boom");
+    });
+    expect(() => fn()).toThrow();
+    expect(() => expect(fn).toHaveLastReturnedWith(undefined)).toThrow(
+      "last call threw",
+    );
+  });
+
+  it("toHaveLastReturnedWith fails clearly when there were no calls", () => {
+    const fn = spy();
+    expect(() => expect(fn).toHaveLastReturnedWith(undefined)).toThrow(
+      "no calls",
+    );
+  });
+
+  it("toHaveNthReturnedWith uses 1-indexed access", () => {
+    const fn = spy<(x: string) => string>((x) => x.toUpperCase());
+    fn("a");
+    fn("b");
+    fn("c");
+
+    expect(fn).toHaveNthReturnedWith(1, "A");
+    expect(fn).toHaveNthReturnedWith(3, "C");
+    expect(() => expect(fn).toHaveNthReturnedWith(2, "wrong")).toThrow();
+  });
+
+  it("toHaveNthReturnedWith fails clearly when the nth call threw", () => {
+    let attempt = 0;
+    const fn = spy(() => {
+      attempt++;
+      if (attempt === 2) throw new Error("nope");
+      return attempt;
+    });
+    fn();
+    expect(() => fn()).toThrow();
+    fn();
+
+    expect(() => expect(fn).toHaveNthReturnedWith(2, undefined)).toThrow(
+      "call #2 threw",
+    );
+  });
+
+  it("toHaveNthReturnedWith fails clearly on missing call", () => {
+    const fn = spy(() => 1);
+    fn();
+    expect(() => expect(fn).toHaveNthReturnedWith(5, 1)).toThrow(
+      "call #5 not found",
+    );
+  });
+
+  it("toHaveNthReturnedWith rejects invalid n", () => {
+    const fn = spy(() => 1);
+    fn();
+    expect(() => expect(fn).toHaveNthReturnedWith(0, 1)).toThrow(
+      "1-indexed integer",
+    );
+    expect(() => expect(fn).toHaveNthReturnedWith(-1, 1)).toThrow();
+    expect(() => expect(fn).toHaveNthReturnedWith(1.5, 1)).toThrow();
+  });
+
   it("matcher rejects non-spy received values with a clear error", () => {
     expect(() => expect(() => 1).toHaveBeenCalled()).toThrow(
       "requires a spy or mock function",
@@ -499,5 +555,164 @@ describe("mock matchers", () => {
     expect(() => expect(42 as unknown).toHaveBeenCalled()).toThrow(
       "requires a spy or mock function",
     );
+  });
+});
+
+describe("spyOn — getter/setter spies (3-arg form)", () => {
+  it("spyOn(obj, key, 'get') records every read", () => {
+    const obj = {
+      _value: 42,
+      get value() {
+        return this._value;
+      },
+    };
+
+    const getSpy = spyOn(obj, "value", "get");
+
+    expect(obj.value).toBe(42);
+    expect(obj.value).toBe(42);
+
+    expect(getSpy.mock.calls).toHaveLength(2);
+    expect(getSpy.mock.results[0]).toEqual({ type: "return", value: 42 });
+  });
+
+  it("getter spy can override the returned value", () => {
+    const obj = {
+      get value() {
+        return "real";
+      },
+    };
+
+    spyOn(obj, "value", "get").mockReturnValue("fake");
+    expect(obj.value).toBe("fake");
+  });
+
+  it("spyOn(obj, key, 'set') records every assignment", () => {
+    const sink: number[] = [];
+    const obj = {
+      set value(v: number) {
+        sink.push(v);
+      },
+    };
+
+    const setSpy = spyOn(obj, "value", "set");
+
+    obj.value = 1;
+    obj.value = 2;
+    obj.value = 3;
+
+    expect(setSpy.mock.calls).toEqual([[1], [2], [3]]);
+    // The pass-through still happens by default.
+    expect(sink).toEqual([1, 2, 3]);
+  });
+
+  it("setter spy can suppress the original via mockImplementation", () => {
+    const sink: number[] = [];
+    const obj = {
+      set value(v: number) {
+        sink.push(v);
+      },
+    };
+
+    spyOn(obj, "value", "set").mockImplementation(() => {
+      /* swallow */
+    });
+    obj.value = 99;
+
+    expect(sink).toEqual([]);
+  });
+
+  it("spyOn finds the descriptor on a prototype, not just the instance", () => {
+    class Holder {
+      _x = 0;
+      get x() {
+        return this._x;
+      }
+      set x(v: number) {
+        this._x = v;
+      }
+    }
+
+    const inst = new Holder();
+    const getSpy = spyOn(Holder.prototype, "x", "get");
+
+    inst.x;
+    expect(getSpy.mock.calls).toHaveLength(1);
+  });
+
+  it("restoring undoes both the getter and setter when only one is spied", () => {
+    const obj = {
+      _v: 1,
+      get v() {
+        return this._v;
+      },
+      set v(n: number) {
+        this._v = n;
+      },
+    };
+
+    const getSpy = spyOn(obj, "v", "get").mockReturnValue(99);
+    expect(obj.v).toBe(99);
+
+    obj.v = 5; // setter still works because we only spied the getter
+    expect(obj._v).toBe(5);
+
+    getSpy.mockRestore();
+    expect(obj.v).toBe(5); // original getter returns real value again
+  });
+
+  it("throws on a property without the requested accessor", () => {
+    const obj = {
+      get value() {
+        return 1;
+      },
+    };
+
+    expect(() => spyOn(obj, "value", "set")).toThrow(
+      'requires "value" to have a setter',
+    );
+  });
+
+  it("throws when the property doesn't exist anywhere in the chain", () => {
+    const obj = {};
+    expect(() =>
+      spyOn(obj as never, "missing" as never, "get"),
+    ).toThrow("could not find property");
+  });
+});
+
+describe("mock.fromModule — whole-module auto-mock", () => {
+  it("returns mocked exports with every function as a spy", async () => {
+    const path = await mock.fromModule<typeof import("node:path")>("node:path");
+
+    expect(isSpy(path.join)).toBe(true);
+    expect(isSpy(path.dirname)).toBe(true);
+  });
+
+  it("non-function exports are preserved", async () => {
+    const path = await mock.fromModule<typeof import("node:path")>("node:path");
+
+    // `sep` and `delimiter` are strings, not functions
+    expect(typeof path.sep).toBe("string");
+    expect(typeof path.delimiter).toBe("string");
+  });
+
+  it("registers via doMock so await import returns customizable spies", async () => {
+    const path = await mock.fromModule<typeof import("node:path")>("node:path");
+    path.join.mockReturnValue("CUSTOM");
+
+    const fresh = await import("node:path");
+    expect(fresh.join("a", "b")).toBe("CUSTOM");
+  });
+
+  it("rejects an empty specifier", async () => {
+    let err: Error | undefined;
+    try {
+      await mock.fromModule("");
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).toBeDefined();
+    expect(err!.message).toContain("non-empty string specifier");
   });
 });

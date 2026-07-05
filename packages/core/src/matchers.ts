@@ -1,5 +1,6 @@
 import { expect } from "./expect";
 import { isSpy, type Spy } from "./mock/spy";
+import { isFetchMock, type MockFetch } from "./mock/fetch";
 
 import { deepEqual } from "./utils/deepEqual";
 import { looseEqual } from "./utils/looseEqual";
@@ -19,6 +20,26 @@ function ensureSpy(
         `but received ${typeof received === "object" ? Object.prototype.toString.call(received) : typeof received}`,
     );
   }
+}
+
+function ensureFetchMock(
+  received: unknown,
+  matcherName: string,
+): asserts received is MockFetch {
+  if (!isFetchMock(received)) {
+    throw new Error(
+      `${matcherName}() requires \`mock.fetch\` as the received value, ` +
+        `but received ${typeof received === "object" ? Object.prototype.toString.call(received) : typeof received}`,
+    );
+  }
+}
+
+function matchesFetchTarget(req: Request, target: unknown): boolean {
+  if (typeof target === "string") return req.url === target;
+  if (target instanceof RegExp) return target.test(req.url);
+  if (typeof target === "function")
+    return Boolean((target as (r: Request) => boolean)(req));
+  return false;
 }
 
 function argsEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
@@ -456,6 +477,29 @@ function registerCoreMatchers() {
       }
     },
 
+    toHaveReturnedTimes(
+      this: MatcherContext,
+      received: unknown,
+      expected: unknown,
+    ) {
+      ensureSpy(received, "toHaveReturnedTimes");
+
+      if (typeof expected !== "number" || !Number.isFinite(expected)) {
+        throw new Error(
+          this.diff(expected, "toHaveReturnedTimes() requires a finite number"),
+        );
+      }
+
+      const actual = received.mock.results.filter(
+        (r) => r.type === "return",
+      ).length;
+      const pass = actual === expected;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(actual, expected));
+      }
+    },
+
     toHaveReturnedWith(
       this: MatcherContext,
       received: unknown,
@@ -472,6 +516,96 @@ function registerCoreMatchers() {
           .filter((r) => r.type === "return")
           .map((r) => r.value);
         throw new Error(this.diff(returnValues, expected));
+      }
+    },
+
+    toHaveLastReturnedWith(
+      this: MatcherContext,
+      received: unknown,
+      expected: unknown,
+    ) {
+      ensureSpy(received, "toHaveLastReturnedWith");
+
+      const results = received.mock.results;
+      const last = results[results.length - 1];
+      const pass =
+        last !== undefined &&
+        last.type === "return" &&
+        looseEqual(last.value, expected);
+
+      if (this.isNot ? pass : !pass) {
+        if (last === undefined) {
+          throw new Error(this.diff("no calls", expected));
+        }
+        if (last.type === "throw") {
+          throw new Error(this.diff("last call threw", expected));
+        }
+        throw new Error(this.diff(last.value, expected));
+      }
+    },
+
+    toHaveNthReturnedWith(
+      this: MatcherContext,
+      received: unknown,
+      n: unknown,
+      expected: unknown,
+    ) {
+      ensureSpy(received, "toHaveNthReturnedWith");
+
+      if (typeof n !== "number" || !Number.isInteger(n) || n < 1) {
+        throw new Error(
+          this.diff(n, "toHaveNthReturnedWith() requires a 1-indexed integer"),
+        );
+      }
+
+      const result = received.mock.results[n - 1];
+      const pass =
+        result !== undefined &&
+        result.type === "return" &&
+        looseEqual(result.value, expected);
+
+      if (this.isNot ? pass : !pass) {
+        if (result === undefined) {
+          throw new Error(this.diff(`call #${n} not found`, expected));
+        }
+        if (result.type === "throw") {
+          throw new Error(this.diff(`call #${n} threw`, expected));
+        }
+        throw new Error(this.diff(result.value, expected));
+      }
+    },
+
+    toHaveFetched(this: MatcherContext, received: unknown, target: unknown) {
+      ensureFetchMock(received, "toHaveFetched");
+
+      const pass = received.calls.some((req) =>
+        matchesFetchTarget(req, target),
+      );
+
+      if (this.isNot ? pass : !pass) {
+        const urls = received.calls.map((r) => `${r.method} ${r.url}`);
+        throw new Error(this.diff(urls, target));
+      }
+    },
+
+    toHaveFetchedTimes(
+      this: MatcherContext,
+      received: unknown,
+      expected: unknown,
+    ) {
+      ensureFetchMock(received, "toHaveFetchedTimes");
+
+      if (typeof expected !== "number" || !Number.isFinite(expected)) {
+        throw new Error(
+          this.diff(expected, "toHaveFetchedTimes() requires a finite number"),
+        );
+      }
+
+      const actual = received.calls.length;
+      const pass = actual === expected;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(actual, expected));
       }
     },
 

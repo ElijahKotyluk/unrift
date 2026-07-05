@@ -12,6 +12,9 @@
 
 import { activeRestorers } from "./spy";
 
+/** Brand applied to `mock.fetch` so matchers can verify their received value. */
+export const FETCH_MOCK_BRAND: unique symbol = Symbol.for("unrift.fetchMock");
+
 /**
  * Derive WebFetch helper types from the runtime constructors so we don't
  * have to widen the project's `lib` config to include `dom` types. These
@@ -177,6 +180,16 @@ export interface MockFetch {
   reset(): void;
   // Unpatch global fetch, clear handlers, clear calls.
   restore(): void;
+  // Brand for matcher type-checking.
+  readonly [FETCH_MOCK_BRAND]: true;
+}
+
+// Type guard used by toHaveFetched / toHaveFetchedTimes matchers.
+export function isFetchMock(value: unknown): value is MockFetch {
+  return (
+    typeof value === "function" &&
+    (value as { [FETCH_MOCK_BRAND]?: true })[FETCH_MOCK_BRAND] === true
+  );
 }
 
 const mockFetchImpl = ((matcher: FetchMatcher, response: MockFetchResponse) =>
@@ -193,6 +206,13 @@ Object.defineProperty(mockFetchImpl, "calls", {
   get: () => calls,
   enumerable: true,
   configurable: false,
+});
+
+Object.defineProperty(mockFetchImpl, FETCH_MOCK_BRAND, {
+  value: true,
+  enumerable: false,
+  configurable: false,
+  writable: false,
 });
 
 export const mockFetch: MockFetch = mockFetchImpl;

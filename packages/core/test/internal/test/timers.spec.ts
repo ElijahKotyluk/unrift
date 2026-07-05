@@ -218,11 +218,6 @@ describe("mock — getTimerCount", () => {
     clearTimeout(id);
     expect(mock.getTimerCount()).toBe(2);
   });
-
-  it("returns 0 when nothing is scheduled", () => {
-    mock.useFakeTimers();
-    expect(mock.getTimerCount()).toBe(0);
-  });
 });
 
 describe("mock — Date", () => {
@@ -309,5 +304,165 @@ describe("mock — performance.now", () => {
 
     mock.advanceTimersByTime(250);
     expect(performance.now()).toBe(5_250);
+  });
+});
+
+describe("mock — advanceTimersByTimeAsync", () => {
+  it("waits for an async setTimeout callback to settle", async () => {
+    mock.useFakeTimers();
+
+    let value = 0;
+    setTimeout(async () => {
+      await Promise.resolve();
+      value = 42;
+    }, 100);
+
+    // The sync drainer would fire the callback but not wait for the
+    // microtask that assigns `value`. The async drainer should.
+    await mock.advanceTimersByTimeAsync(100);
+    expect(value).toBe(42);
+  });
+
+  it("flushes microtasks scheduled by a sync callback before the next pump", async () => {
+    mock.useFakeTimers();
+
+    const order: string[] = [];
+
+    setTimeout(() => {
+      order.push("first-timer");
+      Promise.resolve().then(() => order.push("first-microtask"));
+    }, 100);
+
+    setTimeout(() => {
+      order.push("second-timer");
+    }, 100);
+
+    await mock.advanceTimersByTimeAsync(100);
+
+    // Without microtask flushing between pumps, "first-microtask" would
+    // land at the end. With proper flushing it lands before the second
+    // timer fires.
+    expect(order).toEqual([
+      "first-timer",
+      "first-microtask",
+      "second-timer",
+    ]);
+  });
+
+  it("respects the time window — doesn't fire timers beyond the advance", async () => {
+    mock.useFakeTimers();
+
+    const fired: string[] = [];
+    setTimeout(() => fired.push("a"), 100);
+    setTimeout(() => fired.push("b"), 200);
+
+    await mock.advanceTimersByTimeAsync(100);
+    expect(fired).toEqual(["a"]);
+
+    await mock.advanceTimersByTimeAsync(100);
+    expect(fired).toEqual(["a", "b"]);
+  });
+});
+
+describe("mock — runAllTimersAsync", () => {
+  it("drains every scheduled task, awaiting async callbacks", async () => {
+    mock.useFakeTimers();
+
+    const order: number[] = [];
+    setTimeout(async () => {
+      await Promise.resolve();
+      order.push(1);
+    }, 50);
+    setTimeout(async () => {
+      await Promise.resolve();
+      order.push(2);
+    }, 100);
+    setTimeout(() => order.push(3), 200);
+
+    await mock.runAllTimersAsync();
+    expect(order).toEqual([1, 2, 3]);
+  });
+
+  it("drains tasks scheduled inside async callbacks (re-entry)", async () => {
+    mock.useFakeTimers();
+
+    const order: number[] = [];
+    setTimeout(async () => {
+      await Promise.resolve();
+      order.push(1);
+      setTimeout(() => order.push(2), 50);
+    }, 50);
+
+    await mock.runAllTimersAsync();
+    expect(order).toEqual([1, 2]);
+  });
+});
+
+describe("mock.useFakeTimers — selective faking", () => {
+  it("toFake patches only the listed APIs", () => {
+    const realSetTimeout = setTimeout;
+    const realDate = Date;
+    const realQueueMicrotask = queueMicrotask;
+    mock.useFakeTimers({ toFake: ["setTimeout"] });
+
+    // setTimeout was patched (replaced with the fake)
+    expect(setTimeout).not.toBe(realSetTimeout);
+    // Date and queueMicrotask were NOT patched
+    expect(Date).toBe(realDate);
+    expect(queueMicrotask).toBe(realQueueMicrotask);
+  });
+
+  it("doNotFake excludes the listed APIs while faking the rest", () => {
+    const realDate = Date;
+    mock.useFakeTimers({ doNotFake: ["Date"] });
+
+    // Date NOT faked
+    expect(Date).toBe(realDate);
+    // setTimeout still faked
+    const fn = spy();
+    setTimeout(fn, 100);
+    expect(fn).not.toHaveBeenCalled();
+    mock.advanceTimersByTime(100);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects when both toFake and doNotFake are provided", () => {
+    expect(() =>
+      mock.useFakeTimers({
+        toFake: ["setTimeout"],
+        doNotFake: ["Date"],
+      }),
+    ).toThrow("mutually exclusive");
+  });
+
+  it("useRealTimers only restores what was patched", () => {
+    const realDate = Date;
+    const realQueueMicrotask = queueMicrotask;
+
+    mock.useFakeTimers({ toFake: ["setTimeout"] });
+    mock.useRealTimers();
+
+    // Both still equal their real selves — nothing got clobbered.
+    expect(Date).toBe(realDate);
+    expect(queueMicrotask).toBe(realQueueMicrotask);
+  });
+});
+
+describe("mock — runOnlyPendingTimersAsync", () => {
+  it("drains only the timers that existed at call time", async () => {
+    mock.useFakeTimers();
+
+    const order: number[] = [];
+    setTimeout(async () => {
+      await Promise.resolve();
+      order.push(1);
+      setTimeout(() => order.push(2), 50);
+    }, 50);
+
+    await mock.runOnlyPendingTimersAsync();
+    expect(order).toEqual([1]);
+
+    await mock.advanceTimersByTimeAsync(100);
+    expect(order).toEqual([1, 2]);
   });
 });

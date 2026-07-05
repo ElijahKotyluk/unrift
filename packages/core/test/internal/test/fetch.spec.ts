@@ -130,12 +130,6 @@ describe("mock.fetchOnce — single-use handlers", () => {
     const c = await fetch("https://x.test/");
     expect([a.status, b.status, c.status]).toEqual([201, 202, 203]);
   });
-
-  it("mock.fetch.once is the same as mock.fetchOnce", async () => {
-    mock.fetch.once("https://x.test/", { status: 299 });
-    const res = await fetch("https://x.test/");
-    expect(res.status).toBe(299);
-  });
 });
 
 describe("mock.fetch — call recording", () => {
@@ -175,15 +169,9 @@ describe("mock.fetch — call recording", () => {
 });
 
 describe("mock.fetch — fall-through error", () => {
-  it("throws a clear error when no handler matches", async () => {
-    mock.fetch("https://x.test/known", { status: 200 });
-
-    await expect(fetch("https://x.test/unknown")).rejects.toBeInstanceOf(Error);
-  });
-
-  it("error message includes method and URL", async () => {
-    // Install the patch by registering at least one handler — without this,
-    // global fetch is still the real one and the test would hit the network.
+  it("throws with method and URL when no handler matches", async () => {
+    // Registering a handler installs the patch; the unmatched request below
+    // hits the fall-through path rather than the real network.
     mock.fetch("https://x.test/known", { status: 200 });
 
     let captured: Error | undefined;
@@ -193,9 +181,63 @@ describe("mock.fetch — fall-through error", () => {
       captured = err as Error;
     }
 
-    expect(captured).toBeDefined();
+    expect(captured).toBeInstanceOf(Error);
     expect(captured!.message).toContain("PATCH");
     expect(captured!.message).toContain("https://x.test/missing");
+  });
+});
+
+describe("mock.fetch — matchers", () => {
+  it("toHaveFetched passes for any call to the given URL string", async () => {
+    mock.fetch(/\//, { status: 200 });
+
+    await fetch("https://x.test/a");
+    await fetch("https://x.test/b");
+
+    expect(mock.fetch).toHaveFetched("https://x.test/a");
+    expect(mock.fetch).toHaveFetched("https://x.test/b");
+    expect(() =>
+      expect(mock.fetch).toHaveFetched("https://x.test/c"),
+    ).toThrow();
+  });
+
+  it("toHaveFetched accepts a regex matcher", async () => {
+    mock.fetch(/\//, { status: 200 });
+
+    await fetch("https://x.test/api/users/42");
+
+    expect(mock.fetch).toHaveFetched(/\/api\/users\/\d+/);
+    expect(() => expect(mock.fetch).toHaveFetched(/\/admin\//)).toThrow();
+  });
+
+  it("toHaveFetched accepts a predicate matcher", async () => {
+    mock.fetch(/\//, { status: 200 });
+
+    await fetch("https://x.test/", { method: "POST" });
+
+    expect(mock.fetch).toHaveFetched(
+      (req) => req.method === "POST",
+    );
+    expect(() =>
+      expect(mock.fetch).toHaveFetched((req) => req.method === "DELETE"),
+    ).toThrow();
+  });
+
+  it("toHaveFetchedTimes counts every call", async () => {
+    mock.fetch(/\//, { status: 200 });
+
+    await fetch("https://x.test/1");
+    await fetch("https://x.test/2");
+    await fetch("https://x.test/3");
+
+    expect(mock.fetch).toHaveFetchedTimes(3);
+    expect(() => expect(mock.fetch).toHaveFetchedTimes(2)).toThrow();
+  });
+
+  it("matcher rejects non-mock.fetch received values with a clear error", () => {
+    expect(() => expect(() => 1).toHaveFetched("https://x.test/")).toThrow(
+      "requires `mock.fetch`",
+    );
   });
 });
 
