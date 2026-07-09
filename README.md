@@ -20,6 +20,8 @@ A lightweight, fast TypeScript test framework with ESM-first design.
 - **Extensible matchers** via `expect.extend()`
 - **Async assertions** — `resolves` / `rejects` with full `.not` support
 - **Test modifiers** — `.only`, `.skip`, `.todo`
+- **Built-in mocking suite** — spies, `mock.fetch`, fake timers and `Date`, an in-memory `mock.fs`, plus Tier A module mocking
+- **Watch mode** — re-runs tests on file changes (`--watch`)
 - **Bail mode** and configurable timeouts
 - **JSON output** for CI integration
 - **Programmatic API** — `runEngine` for use in custom tooling
