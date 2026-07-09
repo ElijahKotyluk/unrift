@@ -50,11 +50,13 @@ describe("mock.doMock - basic registration", () => {
     expect(qs.stringify()).toBe("mocked=1");
   });
 
-  it("listMockedSpecs reports the currently mocked specs", async () => {
+  it("mock.listMockedSpecs reports the currently mocked specs", async () => {
     mock.doMock("node:zlib", () => ({ compress: () => "z" }));
     mock.doMock("node:dns", () => ({ resolve: () => "d" }));
 
-    const specs = listMockedSpecs().slice().sort();
+    // Exercise the namespace member (not just the named export) so the two
+    // stay in sync — the namespace omission is exactly what regressed here.
+    const specs = mock.listMockedSpecs().slice().sort();
     expect(specs).toEqual(["node:dns", "node:zlib"]);
   });
 });

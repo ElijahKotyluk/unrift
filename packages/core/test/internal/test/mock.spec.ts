@@ -15,6 +15,45 @@ beforeEach(() => {
   mock.restoreAll();
 });
 
+describe("mock namespace surface", () => {
+  it("exposes every documented member (pins the public API shape)", () => {
+    // A missing key here means the docs reference `mock.x` but users get
+    // undefined — exactly the listMockedSpecs regression. An extra key means
+    // something shipped undocumented. Update deliberately, with docs.
+    expect(Object.keys(mock).sort()).toEqual(
+      [
+        "advanceTimersByTime",
+        "advanceTimersByTimeAsync",
+        "class",
+        "clearAll",
+        "doMock",
+        "fetch",
+        "fetchOnce",
+        "fn",
+        "fromModule",
+        "fs",
+        "getRealSystemTime",
+        "getTimerCount",
+        "global",
+        "listMockedSpecs",
+        "object",
+        "resetAll",
+        "restoreAll",
+        "runAllTimers",
+        "runAllTimersAsync",
+        "runOnlyPendingTimers",
+        "runOnlyPendingTimersAsync",
+        "setSystemTime",
+        "spyOn",
+        "stub",
+        "unmock",
+        "useFakeTimers",
+        "useRealTimers",
+      ].sort(),
+    );
+  });
+});
+
 describe("spy() - basic call recording", () => {
   it("records arguments for every call, in invocation order", () => {
     const fn = spy();

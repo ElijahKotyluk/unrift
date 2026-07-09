@@ -122,6 +122,7 @@ export const mock = {
   doMock,
   unmock,
   fromModule,
+  listMockedSpecs,
   // File system mocking - backed by memfs, layered on Tier A module
   // mocking. Works with `await import("node:fs")`; static imports of
   // node:fs are not intercepted yet (planned for Tier B).
