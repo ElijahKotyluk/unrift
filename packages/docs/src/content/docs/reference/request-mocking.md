@@ -3,7 +3,7 @@ title: Request Mocking
 description: Stub global fetch with mock.fetch and mock.fetchOnce.
 ---
 
-`mock.fetch` patches `globalThis.fetch` so tests can return canned responses without hitting the network. Handlers are matched against requests in registration order — the first match wins. Single-use handlers come from `mock.fetchOnce`.
+`mock.fetch` patches `globalThis.fetch` so tests can return canned responses without hitting the network. Handlers are matched against requests in registration order - the first match wins. Single-use handlers come from `mock.fetchOnce`.
 
 ```ts
 import { mock, afterEach } from "unrift";
@@ -50,8 +50,8 @@ mock.fetch(
 The second argument can be:
 
 - A plain object with `status`, `statusText`, `headers`, `body`, and/or `json`
-- A real `Response` instance — passed through verbatim
-- A function `(req: Request) => Response | object | Promise<...>` — invoked per request
+- A real `Response` instance - passed through verbatim
+- A function `(req: Request) => Response | object | Promise<...>` - invoked per request
 
 When `json` is set, the body is `JSON.stringify`-ed and `Content-Type: application/json` is added automatically unless you've set it yourself.
 
@@ -116,7 +116,7 @@ The recorded values are real `Request` objects, so you can call `.json()`, `.tex
 
 ## Matchers
 
-Two matchers operate on `mock.fetch` directly — pass `mock.fetch` as the `expect` value:
+Two matchers operate on `mock.fetch` directly - pass `mock.fetch` as the `expect` value:
 
 | Matcher | Pass condition |
 | --- | --- |
@@ -147,7 +147,7 @@ If no handler matches, the patched fetch throws:
 No mock.fetch handler matched: PATCH https://x.test/unknown
 ```
 
-This is intentional — tests should declare what they expect to send, and a missing handler is almost always a bug rather than something to fall through silently.
+This is intentional - tests should declare what they expect to send, and a missing handler is almost always a bug rather than something to fall through silently.
 
 ## Lifecycle
 
@@ -171,4 +171,4 @@ afterEach(() => {
 - `XMLHttpRequest`
 - WebSocket / EventSource traffic
 
-If you need full HTTP interception across libraries — including database clients, `axios` with the http agent, and the `node:http` low-level surface — use [MSW](https://mswjs.io/) alongside Unrift. `mock.fetch` is intentionally focused on the 90% case where the code under test calls `fetch` directly.
+If you need full HTTP interception across libraries - including database clients, `axios` with the http agent, and the `node:http` low-level surface - use [MSW](https://mswjs.io/) alongside Unrift. `mock.fetch` is intentionally focused on the 90% case where the code under test calls `fetch` directly.

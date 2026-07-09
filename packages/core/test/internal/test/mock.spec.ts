@@ -15,7 +15,7 @@ beforeEach(() => {
   mock.restoreAll();
 });
 
-describe("spy() — basic call recording", () => {
+describe("spy() - basic call recording", () => {
   it("records arguments for every call, in invocation order", () => {
     const fn = spy();
     fn(1, "two", { three: 3 });
@@ -56,7 +56,7 @@ describe("spy() — basic call recording", () => {
   });
 });
 
-describe("spy() — implementation control", () => {
+describe("spy() - implementation control", () => {
   it("mockReturnValue sets a permanent return value", () => {
     const fn = spy();
     fn.mockReturnValue("hello");
@@ -108,7 +108,7 @@ describe("spy() — implementation control", () => {
   });
 });
 
-describe("spy() — lifecycle", () => {
+describe("spy() - lifecycle", () => {
   it("mockClear wipes call state but preserves implementation", () => {
     const fn = spy<() => string>().mockReturnValue("kept");
     fn();
@@ -144,7 +144,7 @@ describe("isSpy()", () => {
   });
 });
 
-describe("spyOn() — method wrapping", () => {
+describe("spyOn() - method wrapping", () => {
   it("wraps an object method while preserving behavior", () => {
     const obj = {
       greet(name: string) {
@@ -296,7 +296,7 @@ describe("mock.stub / mock.global", () => {
   });
 });
 
-describe("mock.object — auto-mocking", () => {
+describe("mock.object - auto-mocking", () => {
   it("replaces every method with a spy", () => {
     const service = {
       get() {
@@ -352,7 +352,7 @@ describe("mock.object — auto-mocking", () => {
   });
 });
 
-describe("mock.class — auto-mocking constructors", () => {
+describe("mock.class - auto-mocking constructors", () => {
   it("auto-spies static methods on the constructor", () => {
     class Service {
       static factory() {
@@ -388,7 +388,7 @@ describe("mock.class — auto-mocking constructors", () => {
 });
 
 describe("mock matchers", () => {
-  it("toHaveBeenCalled — pass and fail paths", () => {
+  it("toHaveBeenCalled - pass and fail paths", () => {
     const fn = spy();
     expect(() => expect(fn).toHaveBeenCalled()).toThrow();
 
@@ -558,7 +558,7 @@ describe("mock matchers", () => {
   });
 });
 
-describe("spyOn — getter/setter spies (3-arg form)", () => {
+describe("spyOn - getter/setter spies (3-arg form)", () => {
   it("spyOn(obj, key, 'get') records every read", () => {
     const obj = {
       _value: 42,
@@ -681,7 +681,7 @@ describe("spyOn — getter/setter spies (3-arg form)", () => {
   });
 });
 
-describe("mock.fromModule — whole-module auto-mock", () => {
+describe("mock.fromModule - whole-module auto-mock", () => {
   it("returns mocked exports with every function as a spy", async () => {
     const path = await mock.fromModule<typeof import("node:path")>("node:path");
 

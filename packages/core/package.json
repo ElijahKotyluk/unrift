@@ -1,7 +1,7 @@
 {
   "name": "@unrift/core",
   "version": "0.3.0",
-  "description": "Core engine for the Unrift TypeScript test framework — runner, matchers, CLI, and programmatic API",
+  "description": "Core engine for the Unrift TypeScript test framework - runner, matchers, CLI, and programmatic API",
   "private": false,
   "sideEffects": false,
   "main": "./dist/cjs/index.cjs",

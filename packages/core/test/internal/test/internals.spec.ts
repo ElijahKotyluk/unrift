@@ -97,7 +97,7 @@ describe("per-test timeout", () => {
       TaskMode.Default,
       50, // 50ms per-test timeout
     );
-    await t.run(5000); // global is generous — per-test should win
+    await t.run(5000); // global is generous - per-test should win
     expect(t.status).toBe(TaskStatus.Fail);
     expect(t.error?.message).toContain("timed out");
     expect(t.error?.message).toContain("50 ms");
@@ -134,7 +134,7 @@ describe("per-test timeout", () => {
       TaskMode.Default,
       500, // per-test is generous
     );
-    await t.run(50); // global is strict — per-test should win
+    await t.run(50); // global is strict - per-test should win
     expect(t.status).toBe(TaskStatus.Pass);
   });
 });

@@ -9,12 +9,12 @@ import {
 
 // Restore module mocks (and everything else) after every test so they
 // don't leak. afterEach is used over beforeEach so the last test in the
-// file is cleaned up too — same reason as timers.spec.ts.
+// file is cleaned up too - same reason as timers.spec.ts.
 afterEach(() => {
   mock.restoreAll();
 });
 
-describe("mock.doMock — basic registration", () => {
+describe("mock.doMock - basic registration", () => {
   it("returns the factory's exports via await import", async () => {
     mock.doMock("node:os", () => ({
       platform: () => "linux-mocked",
@@ -59,7 +59,7 @@ describe("mock.doMock — basic registration", () => {
   });
 });
 
-describe("mock.unmock — restoration", () => {
+describe("mock.unmock - restoration", () => {
   it("mock.restoreAll undoes every doMock registration", () => {
     mock.doMock("node:fs", () => ({ readFileSync: () => "x" }));
     mock.doMock("node:path", () => ({ sep: "x" }));
@@ -72,7 +72,7 @@ describe("mock.unmock — restoration", () => {
   });
 });
 
-describe("mock.doMock — input validation", () => {
+describe("mock.doMock - input validation", () => {
   it("throws on empty specifier", () => {
     expect(() => mock.doMock("", () => ({}))).toThrow(
       "non-empty string specifier",
@@ -95,7 +95,7 @@ describe("mock.doMock — input validation", () => {
   });
 });
 
-describe("mock.doMock — non-identifier export keys", () => {
+describe("mock.doMock - non-identifier export keys", () => {
   it("warns and skips keys that aren't valid JS identifiers", async () => {
     const originalWarn = console.warn;
     const warnings: string[] = [];

@@ -1,7 +1,7 @@
 /**
  * Spy / Mock function primitive.
  *
- * Both `spy()` and `mock.fn()` produce the same object — a callable that
+ * Both `spy()` and `mock.fn()` produce the same object - a callable that
  * records every invocation, supports configurable implementations, and can
  * be restored to the original (when created via `spyOn`).
  */
@@ -89,7 +89,7 @@ export function isSpy(value: unknown): value is Spy {
 }
 
 interface SpyInternalConfig {
-  // Original method when constructed via spyOn — used as fallback impl + on restore.
+  // Original method when constructed via spyOn - used as fallback impl + on restore.
   originalImpl?: AnyFn;
   // Per-spy restore hook (runs on mockRestore). spyOn sets this; bare spy() does not.
   restoreFn?: () => void;
@@ -246,7 +246,7 @@ export function spy<T extends AnyFn = AnyFn>(impl?: T): Spy<T> {
 }
 
 /**
- * Walks the prototype chain to find the descriptor for `key` — needed
+ * Walks the prototype chain to find the descriptor for `key` - needed
  * because accessor properties (getter/setter) usually live on a prototype,
  * not on the instance itself.
  */
@@ -267,7 +267,7 @@ function findDescriptor(
  * Replaces `obj[key]` with a spy that wraps the original method. Calling
  * `.mockRestore()` (or `mock.restoreAll()`) puts the original back.
  *
- * The original is the default implementation — calls pass through unless
+ * The original is the default implementation - calls pass through unless
  * the user provides an override via `.mockReturnValue` / `.mockImplementation`.
  *
  * The 3-arg form `spyOn(obj, "prop", "get")` / `spyOn(obj, "prop", "set")`
@@ -294,7 +294,7 @@ export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
   key: K,
   accessor?: "get" | "set",
 ): Spy {
-  // Accessor (getter/setter) path — 3-arg form.
+  // Accessor (getter/setter) path - 3-arg form.
   if (accessor === "get" || accessor === "set") {
     const found = findDescriptor(obj, key);
     if (!found) {
@@ -316,7 +316,7 @@ export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
     }
 
     // If the spy is on a prototype, restoring needs to put back the
-    // *prototype's* descriptor at the *prototype* level — not on `obj`.
+    // *prototype's* descriptor at the *prototype* level - not on `obj`.
     const restore = () => {
       Object.defineProperty(host, key, descriptor);
     };
@@ -343,7 +343,7 @@ export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
     return accessorSpy as Spy;
   }
 
-  // Method path — original 2-arg behavior.
+  // Method path - original 2-arg behavior.
   const original = obj[key];
 
   if (typeof original !== "function") {

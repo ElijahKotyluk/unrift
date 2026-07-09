@@ -109,7 +109,7 @@ const obj = {
 const getSpy = spyOn(obj, "value", "get").mockReturnValue(99);
 expect(obj.value).toBe(99);
 
-// Spy the setter — assigned values become spy call arguments
+// Spy the setter - assigned values become spy call arguments
 const setSpy = spyOn(obj, "value", "set");
 obj.value = 42;
 expect(setSpy.mock.calls).toEqual([[42]]);
@@ -167,7 +167,7 @@ expect(instance instanceof Service).toBe(true);
 
 ## Stubbing arbitrary properties
 
-`mock.stub(target, key, value)` replaces any property — function or non-function — and returns a restore function. `mock.global(key, value)` is shorthand for `mock.stub(globalThis, key, value)`.
+`mock.stub(target, key, value)` replaces any property - function or non-function - and returns a restore function. `mock.global(key, value)` is shorthand for `mock.stub(globalThis, key, value)`.
 
 ```ts
 const restore = mock.stub(process, "platform", "linux");
@@ -198,7 +198,7 @@ The full matcher set, all of which require `received` to be a spy/mock:
 | `.toHaveLastReturnedWith(value)` | The most recent call returned a value deeply equal to `value` |
 | `.toHaveNthReturnedWith(n, value)` | The `n`th call (1-indexed) returned a value deeply equal to `value` |
 
-For `mock.fetch` specifically there are two additional matchers — see [Request Mocking](./request-mocking#matchers).
+For `mock.fetch` specifically there are two additional matchers - see [Request Mocking](./request-mocking#matchers).
 
 All matchers support `.not`:
 
@@ -214,7 +214,7 @@ Passing a non-spy throws a clear error explaining the matcher needs a spy or moc
 | --- | --- |
 | `spy.mockClear()` | Wipe call state, keep the implementation |
 | `spy.mockReset()` | Wipe state and remove all configured implementations |
-| `spy.mockRestore()` | For `spyOn` only — restore the original method on the host object |
+| `spy.mockRestore()` | For `spyOn` only - restore the original method on the host object |
 | `mock.clearAll()` | `mockClear` every active spy |
 | `mock.resetAll()` | `mockReset` every active spy |
 | `mock.restoreAll()` | Restore every `spyOn`/`stub`/`fetch`/`useFakeTimers`/`doMock` registration, then reset every spy |
@@ -231,7 +231,7 @@ afterEach(() => {
 
 ## When to use which
 
-- **`spy()`** — standalone callable for tests that don't have an object to spy on (e.g. callback invocation count).
-- **`spyOn(obj, method)`** — assert that real code called a specific method, optionally pass through to the real implementation.
-- **`mock.object` / `mock.class`** — replace an entire dependency at once, then customize individual methods with `.mockReturnValue`.
-- **`mock.stub` / `mock.global`** — swap non-function values or temporarily set globals like `process.env.NODE_ENV` or `globalThis.fetch`.
+- **`spy()`** - standalone callable for tests that don't have an object to spy on (e.g. callback invocation count).
+- **`spyOn(obj, method)`** - assert that real code called a specific method, optionally pass through to the real implementation.
+- **`mock.object` / `mock.class`** - replace an entire dependency at once, then customize individual methods with `.mockReturnValue`.
+- **`mock.stub` / `mock.global`** - swap non-function values or temporarily set globals like `process.env.NODE_ENV` or `globalThis.fetch`.

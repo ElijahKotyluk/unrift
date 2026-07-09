@@ -1,5 +1,5 @@
 /**
- * Module mocking — main-thread registry and public API (Tier A).
+ * Module mocking - main-thread registry and public API (Tier A).
  *
  * Tier A scope:
  *   - `mock.doMock(spec, factory)` registers a mock for an external module
@@ -20,7 +20,7 @@
  *     resolve() and short-circuits matched specs to a synthetic module that
  *     reads back from `globalThis.__unriftMocks`.
  *
- * Future tiers will reuse the same registry shape and IPC protocol —
+ * Future tiers will reuse the same registry shape and IPC protocol -
  * adding `register-hoisted` (Tier B) and `register-relative` (Tier C)
  * message types without breaking the existing surface.
  */
@@ -41,7 +41,7 @@ export const MOCK_URL_PREFIX = "unrift-mock:";
 
 /**
  * Message contract between main thread and loader thread. Stable across
- * future tiers — new message types extend this union.
+ * future tiers - new message types extend this union.
  *
  * `registrationId` is a monotonically increasing number embedded in the
  * synthetic mock URL. It defeats Node's URL-keyed module cache so that
@@ -128,7 +128,7 @@ function partitionExportKeys(
 const mockedSpecs = new Set<string>();
 
 /**
- * Monotonically increasing counter — every `doMock()` call gets a unique
+ * Monotonically increasing counter - every `doMock()` call gets a unique
  * ID embedded in its synthetic module URL, defeating Node's module cache
  * across re-registrations.
  */
@@ -153,7 +153,7 @@ const restoreAllMockedSpecs = (): void => {
  *   - Only **dynamic** imports (`await import(spec)`) hit the mock; static
  *     `import { x } from "spec"` is hoisted by ESM above this call and
  *     will see the real module.
- *   - Only **external** specifiers work — bare package names (`"react"`)
+ *   - Only **external** specifiers work - bare package names (`"react"`)
  *     and Node built-ins (`"node:fs"`). Relative specs (`"./bar"`) are
  *     bundled inline by esbuild and can't be intercepted at runtime.
  *   - The factory is invoked **once** at registration time. Its return
@@ -228,7 +228,7 @@ export function listMockedSpecs(): readonly string[] {
  * Non-function exports are passed through unchanged. Tests can customize
  * individual spies with `.mockReturnValue`, `.mockImplementation`, etc.
  *
- * Subject to the same Tier A limits as `doMock` — only affects
+ * Subject to the same Tier A limits as `doMock` - only affects
  * `await import(spec)` after the call. Static imports of `spec` see the
  * real module.
  *

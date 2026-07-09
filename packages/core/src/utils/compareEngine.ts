@@ -192,7 +192,7 @@ export function compareInternal(
 
       if (leftSet.size !== rightSet.size) return false;
 
-      // Fast path: primitive-only sets can use has() directly — O(n) vs O(n²)
+      // Fast path: primitive-only sets can use has() directly - O(n) vs O(n²)
       let allPrimitive = true;
       for (const v of leftSet) {
         if (!isPrimitive(v)) {
@@ -242,7 +242,7 @@ export function compareInternal(
 
       if (leftMap.size !== rightMap.size) return false;
 
-      // Fast path: primitive-only keys can use get() directly — O(n) vs O(n²)
+      // Fast path: primitive-only keys can use get() directly - O(n) vs O(n²)
       let allKeysPrimitive = true;
       for (const k of leftMap.keys()) {
         if (!isPrimitive(k)) {
@@ -314,7 +314,7 @@ export function compareInternal(
         worklist.push([leftRecord[key], rightRecord[key]]);
       }
     } else {
-      // Prototype-insensitive (looseEqual) — union-of-keys, missing ≈ undefined
+      // Prototype-insensitive (looseEqual) - union-of-keys, missing ≈ undefined
       const leftKeys = Object.keys(currentLeft as Record<string, unknown>);
       const rightKeys = Object.keys(currentRight as Record<string, unknown>);
       const allKeys = new Set<string>([...leftKeys, ...rightKeys]);

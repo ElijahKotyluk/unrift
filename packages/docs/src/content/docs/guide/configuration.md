@@ -28,12 +28,12 @@ Unrift searches upward from your project root for a config file named `unrift.co
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `testDir` | `string` | `"test"` | Directory to search for test files (relative to config file) |
-| `timeoutMs` | `number` | — | Default timeout for each test in milliseconds |
+| `timeoutMs` | `number` | - | Default timeout for each test in milliseconds |
 | `bail` | `boolean` | `false` | Stop running tests after the first failure |
-| `pattern` | `string` | — | Regex pattern to filter test files by path |
-| `includes` | `string[]` | — | Glob or regex patterns — only matching files are included |
-| `excludes` | `string[]` | — | Glob or regex patterns — matching files are excluded |
-| `matchers` | `string[]` | — | Module specifiers for custom matcher packages |
+| `pattern` | `string` | - | Regex pattern to filter test files by path |
+| `includes` | `string[]` | - | Glob or regex patterns - only matching files are included |
+| `excludes` | `string[]` | - | Glob or regex patterns - matching files are excluded |
+| `matchers` | `string[]` | - | Module specifiers for custom matcher packages |
 
 ## Test file discovery
 
@@ -55,8 +55,8 @@ Both `includes` and `excludes` accept glob patterns or regex strings. Patterns c
 ```ts
 export default defineConfig({
   testDir: "test",
-  includes: ["**/*.spec.ts"],             // glob — only .spec.ts files
-  excludes: ["**/fixtures/**", "e2e/**"], // glob — skip these directories
+  includes: ["**/*.spec.ts"],             // glob - only .spec.ts files
+  excludes: ["**/fixtures/**", "e2e/**"], // glob - skip these directories
 });
 ```
 
@@ -64,7 +64,7 @@ Regex strings still work if you need them:
 
 ```ts
 export default defineConfig({
-  excludes: ["\\.fixture\\.ts$"], // regex — exclude .fixture.ts files
+  excludes: ["\\.fixture\\.ts$"], // regex - exclude .fixture.ts files
 });
 ```
 

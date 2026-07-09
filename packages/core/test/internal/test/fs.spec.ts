@@ -4,7 +4,7 @@ afterEach(() => {
   mock.restoreAll();
 });
 
-describe("mock.fs — handle API", () => {
+describe("mock.fs - handle API", () => {
   it("starts empty when called with no initial state", () => {
     const fs = mock.fs();
     expect(fs.exists("/anything")).toBe(false);
@@ -69,7 +69,7 @@ describe("mock.fs — handle API", () => {
   });
 });
 
-describe("mock.fs — module interception", () => {
+describe("mock.fs - module interception", () => {
   it("await import('node:fs') returns the fake", async () => {
     mock.fs({ "/tmp/x": "from fake" });
 
@@ -78,7 +78,7 @@ describe("mock.fs — module interception", () => {
   });
 
   it("writeFileSync through the fake updates the volume", async () => {
-    // memfs starts empty — no /tmp like real Node. Write to root-level
+    // memfs starts empty - no /tmp like real Node. Write to root-level
     // or seed the dir first.
     const handle = mock.fs();
     const fs = await import("node:fs");
@@ -97,7 +97,7 @@ describe("mock.fs — module interception", () => {
   });
 });
 
-describe("mock.fs — lifecycle", () => {
+describe("mock.fs - lifecycle", () => {
   it("handle.restore tears down the module-mocking registration", async () => {
     const handle = mock.fs({ "/x": "from fake" });
 
@@ -108,7 +108,7 @@ describe("mock.fs — lifecycle", () => {
 
     // The backend volume stays alive intentionally so users can post-mortem
     // inspect via handle.toJSON(). What restore() actually undoes is the
-    // module-mocking registration — a fresh mock.fs() now sees a blank
+    // module-mocking registration - a fresh mock.fs() now sees a blank
     // volume rather than the previous one.
     expect(handle.read("/x")).toBe("from fake");
 
@@ -120,7 +120,7 @@ describe("mock.fs — lifecycle", () => {
     mock.fs({ "/tmp/x": "y" });
     mock.restoreAll();
 
-    // The fake is gone — re-calling mock.fs creates a fresh, empty one.
+    // The fake is gone - re-calling mock.fs creates a fresh, empty one.
     const fresh = mock.fs();
     expect(fresh.exists("/tmp/x")).toBe(false);
   });

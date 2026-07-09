@@ -265,7 +265,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       const lines: string[] = [];
       if (result.projectCacheDeleted) lines.push("✔ deleted project cache");
       if (result.tempCacheDeleted) lines.push("✔ deleted temp cache");
-      if (lines.length === 0) lines.push("— nothing to clean");
+      if (lines.length === 0) lines.push("- nothing to clean");
       console.log(lines.join("\n"));
     }
 
@@ -666,7 +666,7 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
       `\n${colors.dim("─".repeat(Math.min(process.stdout.columns || 80, 80)))}`,
     );
     console.log(
-      ` ${colors.dim("↺")} ${colors.dim(`${shortFile} changed — re-running…`)}\n`,
+      ` ${colors.dim("↺")} ${colors.dim(`${shortFile} changed - re-running…`)}\n`,
     );
 
     // Reset exit code so each run is evaluated independently

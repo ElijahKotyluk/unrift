@@ -26,10 +26,10 @@ console.log(`Failed: ${result.results.filter(r => r.status === "fail").length}`)
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `files` | `string[]` | — | **Required.** Absolute or relative paths to test files |
-| `timeoutMs` | `number` | — | Timeout per test in milliseconds |
+| `files` | `string[]` | - | **Required.** Absolute or relative paths to test files |
+| `timeoutMs` | `number` | - | Timeout per test in milliseconds |
 | `bail` | `boolean` | `false` | Stop after first failure |
-| `matchers` | `string[]` | — | Module specifiers for custom matchers to load |
+| `matchers` | `string[]` | - | Module specifiers for custom matchers to load |
 
 ## Return value
 

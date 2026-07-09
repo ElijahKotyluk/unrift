@@ -43,7 +43,7 @@ describe("globToRegex", () => {
 
   it("** matches across path separators including the root level", () => {
     const re = globToRegex("**/*.ts");
-    expect(re.test("file.ts")).toBe(true); // root — **/ is optional
+    expect(re.test("file.ts")).toBe(true); // root - **/ is optional
     expect(re.test("a/file.ts")).toBe(true);
     expect(re.test("a/b/c/file.ts")).toBe(true);
     expect(re.test("a/b/file.js")).toBe(false); // wrong extension

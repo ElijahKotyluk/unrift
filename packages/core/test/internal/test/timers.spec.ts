@@ -7,7 +7,7 @@ afterEach(() => {
   mock.restoreAll();
 });
 
-describe("mock.useFakeTimers — install / uninstall", () => {
+describe("mock.useFakeTimers - install / uninstall", () => {
   it("install/uninstall is idempotent across multiple calls", () => {
     mock.useFakeTimers();
     mock.useFakeTimers(); // second call is a no-op
@@ -40,7 +40,7 @@ describe("mock.useFakeTimers — install / uninstall", () => {
   });
 });
 
-describe("mock — setTimeout", () => {
+describe("mock - setTimeout", () => {
   it("does not fire before time advances", () => {
     mock.useFakeTimers();
     const fn = spy();
@@ -95,7 +95,7 @@ describe("mock — setTimeout", () => {
   });
 });
 
-describe("mock — setInterval", () => {
+describe("mock - setInterval", () => {
   it("fires every period until cleared", () => {
     mock.useFakeTimers();
     const fn = spy();
@@ -131,7 +131,7 @@ describe("mock — setInterval", () => {
   });
 });
 
-describe("mock — queueMicrotask and process.nextTick", () => {
+describe("mock - queueMicrotask and process.nextTick", () => {
   it("microtasks fire before macrotasks scheduled at the same time", () => {
     mock.useFakeTimers();
     const order: string[] = [];
@@ -155,7 +155,7 @@ describe("mock — queueMicrotask and process.nextTick", () => {
   });
 });
 
-describe("mock — runAllTimers", () => {
+describe("mock - runAllTimers", () => {
   it("drains every scheduled task in order", () => {
     mock.useFakeTimers();
     const order: number[] = [];
@@ -188,7 +188,7 @@ describe("mock — runAllTimers", () => {
   });
 });
 
-describe("mock — runOnlyPendingTimers", () => {
+describe("mock - runOnlyPendingTimers", () => {
   it("drains only the timers that existed at call time", () => {
     mock.useFakeTimers();
     const order: number[] = [];
@@ -206,7 +206,7 @@ describe("mock — runOnlyPendingTimers", () => {
   });
 });
 
-describe("mock — getTimerCount", () => {
+describe("mock - getTimerCount", () => {
   it("counts only non-cancelled pending timers", () => {
     mock.useFakeTimers();
     setTimeout(() => {}, 100);
@@ -220,7 +220,7 @@ describe("mock — getTimerCount", () => {
   });
 });
 
-describe("mock — Date", () => {
+describe("mock - Date", () => {
   it("Date.now() returns the fake clock", () => {
     mock.useFakeTimers({ now: 1_000_000 });
     expect(Date.now()).toBe(1_000_000);
@@ -297,7 +297,7 @@ describe("mock.setSystemTime / getRealSystemTime", () => {
   });
 });
 
-describe("mock — performance.now", () => {
+describe("mock - performance.now", () => {
   it("returns the fake clock value", () => {
     mock.useFakeTimers({ now: 5_000 });
     expect(performance.now()).toBe(5_000);
@@ -307,7 +307,7 @@ describe("mock — performance.now", () => {
   });
 });
 
-describe("mock — advanceTimersByTimeAsync", () => {
+describe("mock - advanceTimersByTimeAsync", () => {
   it("waits for an async setTimeout callback to settle", async () => {
     mock.useFakeTimers();
 
@@ -349,7 +349,7 @@ describe("mock — advanceTimersByTimeAsync", () => {
     ]);
   });
 
-  it("respects the time window — doesn't fire timers beyond the advance", async () => {
+  it("respects the time window - doesn't fire timers beyond the advance", async () => {
     mock.useFakeTimers();
 
     const fired: string[] = [];
@@ -364,7 +364,7 @@ describe("mock — advanceTimersByTimeAsync", () => {
   });
 });
 
-describe("mock — runAllTimersAsync", () => {
+describe("mock - runAllTimersAsync", () => {
   it("drains every scheduled task, awaiting async callbacks", async () => {
     mock.useFakeTimers();
 
@@ -398,7 +398,7 @@ describe("mock — runAllTimersAsync", () => {
   });
 });
 
-describe("mock.useFakeTimers — selective faking", () => {
+describe("mock.useFakeTimers - selective faking", () => {
   it("toFake patches only the listed APIs", () => {
     const realSetTimeout = setTimeout;
     const realDate = Date;
@@ -442,13 +442,13 @@ describe("mock.useFakeTimers — selective faking", () => {
     mock.useFakeTimers({ toFake: ["setTimeout"] });
     mock.useRealTimers();
 
-    // Both still equal their real selves — nothing got clobbered.
+    // Both still equal their real selves - nothing got clobbered.
     expect(Date).toBe(realDate);
     expect(queueMicrotask).toBe(realQueueMicrotask);
   });
 });
 
-describe("mock — runOnlyPendingTimersAsync", () => {
+describe("mock - runOnlyPendingTimersAsync", () => {
   it("drains only the timers that existed at call time", async () => {
     mock.useFakeTimers();
 

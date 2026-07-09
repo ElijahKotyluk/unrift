@@ -1,12 +1,12 @@
 /**
- * File system mocking — `mock.fs()`.
+ * File system mocking - `mock.fs()`.
  *
  * Backed by `memfs` today (private implementation detail behind the
  * `FakeFsBackend` interface). The plan is to swap memfs for a hand-rolled
  * package later; consumers of this module should only depend on the public
  * `FakeFsHandle` surface, not on memfs types directly.
  *
- * Interception is layered on Tier A module mocking — `mock.doMock` is
+ * Interception is layered on Tier A module mocking - `mock.doMock` is
  * called for `node:fs` and `node:fs/promises`, so the fake takes effect
  * when test code does `await import("node:fs")` or `await import("node:fs/promises")`.
  * Static `import { readFileSync } from "node:fs"` is NOT intercepted in
@@ -26,7 +26,7 @@ import { activeRestorers } from "./spy";
 export type FakeFsState = Record<string, string | null>;
 
 /**
- * Internal abstraction — anything that satisfies this can back `mock.fs`.
+ * Internal abstraction - anything that satisfies this can back `mock.fs`.
  * Hides memfs entirely so future implementations can drop in without
  * touching the public API.
  */
@@ -53,7 +53,7 @@ interface FakeFsBackend {
 
 /**
  * The current implementation factory. Swap this single line when replacing
- * memfs with a hand-rolled backend — no other code changes needed.
+ * memfs with a hand-rolled backend - no other code changes needed.
  */
 function createBackend(initial?: FakeFsState): FakeFsBackend {
   const vol = Volume.fromJSON(initial ?? {});
@@ -146,7 +146,7 @@ const restoreFakeFs = (): void => {
  * calls return the fake.
  *
  * Calling `mock.fs()` while a fake is already installed swaps in a fresh
- * volume — the previous handle's references stop receiving updates.
+ * volume - the previous handle's references stop receiving updates.
  */
 export function fs(initial?: FakeFsState): FakeFsHandle {
   // Tear down any existing fake before installing the new one so the

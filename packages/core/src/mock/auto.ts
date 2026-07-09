@@ -55,7 +55,7 @@ function* enumerableMethodKeys(
  * Replace every method on `obj` (own + inherited, excluding Object.prototype)
  * with a spy. Returns the same reference, mutated in place.
  *
- * Cleanup happens via `mock.restoreAll()` — auto-mock spies share the same
+ * Cleanup happens via `mock.restoreAll()` - auto-mock spies share the same
  * restorer registry as `spyOn`.
  */
 export function mockObject<T extends object>(obj: T): T {

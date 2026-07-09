@@ -24,7 +24,7 @@ export function discoverTestFiles(dir: string): string[] {
           files.push(fullPath);
         }
       } catch {
-        // Broken symlink — skip silently
+        // Broken symlink - skip silently
       }
 
       continue;

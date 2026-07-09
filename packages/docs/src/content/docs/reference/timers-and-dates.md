@@ -49,7 +49,7 @@ Pumps every task whose scheduled time is ≤ `now + ms`, in priority order, then
 mock.runAllTimers();
 ```
 
-Drains every pending task — including ones scheduled by other tasks — until the queue is empty.
+Drains every pending task - including ones scheduled by other tasks - until the queue is empty.
 
 ```ts
 mock.runOnlyPendingTimers();
@@ -76,11 +76,11 @@ setTimeout(async () => {
   value = 42;
 }, 100);
 
-// ❌ Sync — fires the callback but doesn't wait for the await chain.
+// ❌ Sync - fires the callback but doesn't wait for the await chain.
 mock.advanceTimersByTime(100);
 expect(value).toBe(0);  // wrong order: passes here but breaks later
 
-// ✅ Async — awaits the promise and flushes microtasks.
+// ✅ Async - awaits the promise and flushes microtasks.
 await mock.advanceTimersByTimeAsync(100);
 expect(value).toBe(42);
 ```
@@ -93,7 +93,7 @@ The three async drainers mirror their sync siblings:
 | `mock.runAllTimersAsync()` | `runAllTimers()` |
 | `mock.runOnlyPendingTimersAsync()` | `runOnlyPendingTimers()` |
 
-What "yielding to microtasks" means concretely: between pumping each timer, the drainer does an internal `await Promise.resolve()`. Real `Promise.resolve()` is unaffected by fake timers — the engine uses its own internal microtask queue, not the fake `queueMicrotask` we patched. So pending `.then` handlers, `await` continuations, and `async` function tails all get a chance to settle between timer fires.
+What "yielding to microtasks" means concretely: between pumping each timer, the drainer does an internal `await Promise.resolve()`. Real `Promise.resolve()` is unaffected by fake timers - the engine uses its own internal microtask queue, not the fake `queueMicrotask` we patched. So pending `.then` handlers, `await` continuations, and `async` function tails all get a chance to settle between timer fires.
 
 ```ts
 mock.useFakeTimers();
@@ -112,11 +112,11 @@ await mock.advanceTimersByTimeAsync(100);
 expect(order).toEqual(["first-timer", "first-microtask", "second-timer"]);
 ```
 
-The infinite-loop guard from the sync drainers still applies — a callback that always schedules another timer at the same priority will hit the 10,000-iteration cap.
+The infinite-loop guard from the sync drainers still applies - a callback that always schedules another timer at the same priority will hit the 10,000-iteration cap.
 
 ## Priority and microtasks
 
-When tasks share the same `fireAt`, microtasks fire before macrotasks. `process.nextTick` is treated as microtask-priority — it runs before any `setTimeout`, even at the same scheduled time.
+When tasks share the same `fireAt`, microtasks fire before macrotasks. `process.nextTick` is treated as microtask-priority - it runs before any `setTimeout`, even at the same scheduled time.
 
 ```ts
 mock.useFakeTimers();
@@ -149,7 +149,7 @@ mock.useFakeTimers({ doNotFake: ["process.nextTick"] });
 // Everything except process.nextTick is faked
 ```
 
-The two options are mutually exclusive — passing both throws.
+The two options are mutually exclusive - passing both throws.
 
 | `FakeableApi` value | What gets patched |
 | --- | --- |
@@ -161,9 +161,9 @@ The two options are mutually exclusive — passing both throws.
 | `"Date"` | `Date` constructor, `Date.now`, `Date.parse`, `Date.UTC` |
 | `"performance"` | `performance.now` |
 
-Pair fakes are forced together — you can't fake `setTimeout` without also faking `clearTimeout`, because half-faked timers would be unusable (you'd schedule a fake and try to clear it with the real clearer).
+Pair fakes are forced together - you can't fake `setTimeout` without also faking `clearTimeout`, because half-faked timers would be unusable (you'd schedule a fake and try to clear it with the real clearer).
 
-`useRealTimers()` only restores the APIs that were actually patched, so leaving some real means leaving them truly real — they're not touched at any point.
+`useRealTimers()` only restores the APIs that were actually patched, so leaving some real means leaving them truly real - they're not touched at any point.
 
 ## Initializing the clock
 

@@ -82,10 +82,10 @@ Most matchers are identical. Key differences:
 | `toHaveReturnedTimes(n)` | `toHaveReturnedTimes(n)` | Same |
 | `toHaveLastReturnedWith(v)` | `toHaveLastReturnedWith(v)` | Same |
 | `toHaveNthReturnedWith(n, v)` | `toHaveNthReturnedWith(n, v)` | Same |
-| (no equivalent — manual `expect(spy).toHaveBeenCalled()` on fetch wrapper) | `expect(mock.fetch).toHaveFetched(url)` | Convenience matcher unique to unrift |
+| (no equivalent - manual `expect(spy).toHaveBeenCalled()` on fetch wrapper) | `expect(mock.fetch).toHaveFetched(url)` | Convenience matcher unique to unrift |
 | (no equivalent) | `expect(mock.fetch).toHaveFetchedTimes(n)` | Convenience matcher unique to unrift |
-| `toMatchSnapshot` | — | Not yet supported |
-| `toMatchInlineSnapshot` | — | Not yet supported |
+| `toMatchSnapshot` | - | Not yet supported |
+| `toMatchInlineSnapshot` | - | Not yet supported |
 
 ## Mocking
 
@@ -110,7 +110,7 @@ Unrift ships a built-in mocking suite. Drop the `jest.` prefix:
 | `jest.clearAllMocks()` | `mock.clearAll()` |
 | `jest.resetAllMocks()` | `mock.resetAll()` |
 | `jest.restoreAllMocks()` | `mock.restoreAll()` |
-| `jest.mock("path", factory)` | `mock.doMock("path", factory)` (Tier A — see below) |
+| `jest.mock("path", factory)` | `mock.doMock("path", factory)` (Tier A - see below) |
 | `jest.createMockFromModule("path")` | `await mock.fromModule("path")` |
 | `jest.spyOn(obj, "prop", "get")` | `mock.spyOn(obj, "prop", "get")` |
 | `jest.spyOn(obj, "prop", "set")` | `mock.spyOn(obj, "prop", "set")` |
@@ -119,16 +119,16 @@ The full mock API is documented in [Spies and Mocks](../../reference/spies-and-m
 
 ### Module mocking is partial
 
-Module mocking ships in tiers. Tier A — currently shipped — handles **dynamic** imports (`await import(spec)`) of **external** specifiers only (bare package names, `node:*` built-ins). Static `import` statements and relative paths are not yet intercepted.
+Module mocking ships in tiers. Tier A - currently shipped - handles **dynamic** imports (`await import(spec)`) of **external** specifiers only (bare package names, `node:*` built-ins). Static `import` statements and relative paths are not yet intercepted.
 
 ```diff
-- // Jest — hoisted, works with static imports
+- // Jest - hoisted, works with static imports
 - jest.mock("./userService", () => ({
 -   getUser: jest.fn().mockReturnValue({ id: 1 }),
 - }));
 - import { getUser } from "./userService";
 
-+ // Unrift Tier A — dynamic import only
++ // Unrift Tier A - dynamic import only
 + mock.doMock("node:fs", () => ({
 +   readFileSync: () => "MOCK CONTENT",
 + }));
@@ -141,9 +141,9 @@ The hoisted `mock.module` API for static imports is on the roadmap (Tier B). See
 
 These Jest features are planned but not yet available:
 
-- **Snapshot testing** — `toMatchSnapshot`, `toMatchInlineSnapshot`
-- **Hoisted `jest.mock`** for static imports — `mock.doMock` covers dynamic imports today; the hoisted variant is planned (Tier B)
-- **Coverage** — `--coverage` flag
-- **Parallel execution** — tests run sequentially
-- **Custom reporters** — only built-in pretty and JSON output
-- **Browser/DOM environment** — Node.js only
+- **Snapshot testing** - `toMatchSnapshot`, `toMatchInlineSnapshot`
+- **Hoisted `jest.mock`** for static imports - `mock.doMock` covers dynamic imports today; the hoisted variant is planned (Tier B)
+- **Coverage** - `--coverage` flag
+- **Parallel execution** - tests run sequentially
+- **Custom reporters** - only built-in pretty and JSON output
+- **Browser/DOM environment** - Node.js only

@@ -37,7 +37,7 @@ export interface Matchers<T> {
     value?: unknown,
   ): void | Promise<void>;
 
-  // Spy / mock matchers — `received` must be a value created by spy() or spyOn().
+  // Spy / mock matchers - `received` must be a value created by spy() or spyOn().
   toHaveBeenCalled(): void | Promise<void>;
   toHaveBeenCalledTimes(expected: number): void | Promise<void>;
   toHaveBeenCalledWith(...args: unknown[]): void | Promise<void>;
@@ -49,7 +49,7 @@ export interface Matchers<T> {
   toHaveLastReturnedWith(expected: unknown): void | Promise<void>;
   toHaveNthReturnedWith(n: number, expected: unknown): void | Promise<void>;
 
-  // Fetch matchers — `received` must be `mock.fetch`.
+  // Fetch matchers - `received` must be `mock.fetch`.
   toHaveFetched(
     urlOrMatcher: string | RegExp | ((req: Request) => boolean),
   ): void | Promise<void>;

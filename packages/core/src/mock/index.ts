@@ -1,5 +1,5 @@
 /**
- * `mock` namespace — single entry point for all mocking utilities.
+ * `mock` namespace - single entry point for all mocking utilities.
  *
  * Both forms are supported:
  *   import { mock } from "unrift";
@@ -116,13 +116,13 @@ export const mock = {
   getTimerCount,
   setSystemTime,
   getRealSystemTime,
-  // Tier A module mocking — dynamic imports of external specs only.
+  // Tier A module mocking - dynamic imports of external specs only.
   // The hoisted `mock.module(spec, factory)` for static imports is
   // planned for Tier B and intentionally not exposed yet.
   doMock,
   unmock,
   fromModule,
-  // File system mocking — backed by memfs, layered on Tier A module
+  // File system mocking - backed by memfs, layered on Tier A module
   // mocking. Works with `await import("node:fs")`; static imports of
   // node:fs are not intercepted yet (planned for Tier B).
   fs: mockFs,

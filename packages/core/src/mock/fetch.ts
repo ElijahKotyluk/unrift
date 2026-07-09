@@ -1,5 +1,5 @@
 /**
- * `mock.fetch` — stub `globalThis.fetch` for HTTP testing.
+ * `mock.fetch` - stub `globalThis.fetch` for HTTP testing.
  *
  * Handlers are matched against requests in registration order; the first
  * matching handler wins. `mock.fetchOnce()` registers a single-use handler
@@ -172,7 +172,7 @@ function register(
 export interface MockFetch {
   // Register a permanent handler
   (matcher: FetchMatcher, response: MockFetchResponse): void;
-  // Register a single-use handler — consumed on first match.
+  // Register a single-use handler - consumed on first match.
   once(matcher: FetchMatcher, response: MockFetchResponse): void;
   // Every Request received by the patched fetch, in order.
   readonly calls: Request[];

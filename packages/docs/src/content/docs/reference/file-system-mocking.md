@@ -3,7 +3,7 @@ title: File System Mocking
 description: Replace node:fs with an in-memory volume via mock.fs.
 ---
 
-`mock.fs()` patches `node:fs` and `node:fs/promises` with an in-memory file system, so tests can write, read, list, and delete files without touching disk. The fake is backed by [`memfs`](https://github.com/streamich/memfs) internally — that's an implementation detail behind a clean interface, and is intended to be swappable later.
+`mock.fs()` patches `node:fs` and `node:fs/promises` with an in-memory file system, so tests can write, read, list, and delete files without touching disk. The fake is backed by [`memfs`](https://github.com/streamich/memfs) internally - that's an implementation detail behind a clean interface, and is intended to be swappable later.
 
 ```ts
 import { mock, afterEach } from "unrift";
@@ -21,7 +21,7 @@ it("reads config from disk", async () => {
 });
 ```
 
-`mock.fs()` is layered on the [Tier A module-mocking](./module-mocking) machinery, which means it inherits Tier A's limits — see [Supported and not-yet-supported](#supported-and-not-yet-supported) below.
+`mock.fs()` is layered on the [Tier A module-mocking](./module-mocking) machinery, which means it inherits Tier A's limits - see [Supported and not-yet-supported](#supported-and-not-yet-supported) below.
 
 ## The handle
 
@@ -51,7 +51,7 @@ fs.restore();                          // unpatch (idempotent)
 | `fromJSON(state)` | Wipes the volume and reseeds from the given map |
 | `restore()` | Tears down the module-mocking registration |
 
-The handle's helpers are deliberately small and storage-agnostic — they don't depend on memfs's exact API, so the backend can be swapped without breaking your tests.
+The handle's helpers are deliberately small and storage-agnostic - they don't depend on memfs's exact API, so the backend can be swapped without breaking your tests.
 
 ## Initial state
 
@@ -90,7 +90,7 @@ const content = await fsp.readFile("/x", "utf8"); // → "hello"
 
 ## Replacing the volume
 
-Calling `mock.fs()` again while a fake is installed replaces the previous volume with a fresh one. The previous handle still references its old (now-orphaned) volume — useful for tests that snapshot intermediate state.
+Calling `mock.fs()` again while a fake is installed replaces the previous volume with a fresh one. The previous handle still references its old (now-orphaned) volume - useful for tests that snapshot intermediate state.
 
 ```ts
 const first = mock.fs({ "/a": "1" });
@@ -127,7 +127,7 @@ afterEach(() => {
 - `await import("node:fs")` returns the fake
 - `await import("node:fs/promises")` returns the fake
 - Reading, writing, listing, stat-ing, existence checks
-- The whole memfs surface — streams, file descriptors, `cpSync`, `mkdtempSync`, etc.
+- The whole memfs surface - streams, file descriptors, `cpSync`, `mkdtempSync`, etc.
 
 ### Not yet supported
 
@@ -135,16 +135,16 @@ afterEach(() => {
 | --- | --- | --- |
 | **Static** imports of `node:fs` (`import { readFileSync } from "node:fs"`) see the real fs. ESM hoists static imports above your test body, so `mock.fs()` runs too late. | Use `await import("node:fs")` for the call sites you want to mock. Other static imports in the same file are unaffected. | Tier B module mocking |
 | Code under test compiled by a bundler that **inlines** `node:fs` access | Refactor the code to import `node:fs` at runtime, or skip mocking and use real temp dirs. | n/a (bundler concern, not unrift's) |
-| Reading from / writing to the **real** filesystem alongside the fake | After `mock.fs()`, `node:fs` IS the fake — temporarily call `mock.restoreAll()` if you need real-fs access mid-test. | n/a (intentional) |
+| Reading from / writing to the **real** filesystem alongside the fake | After `mock.fs()`, `node:fs` IS the fake - temporarily call `mock.restoreAll()` if you need real-fs access mid-test. | n/a (intentional) |
 
 ## Backend implementation notes
 
-The current backend is `memfs`. It's wrapped behind an internal `FakeFsBackend` interface so the dependency can be swapped without breaking user code. If you're depending on memfs-specific behavior (e.g. internal `Volume` mutation), prefer the `FakeFsHandle` methods documented above — those are guaranteed stable across backend changes.
+The current backend is `memfs`. It's wrapped behind an internal `FakeFsBackend` interface so the dependency can be swapped without breaking user code. If you're depending on memfs-specific behavior (e.g. internal `Volume` mutation), prefer the `FakeFsHandle` methods documented above - those are guaranteed stable across backend changes.
 
 A hand-rolled replacement is planned eventually. The contract on the public side won't change.
 
 ## When to use which
 
-- **`mock.fs()`** — code under test reads/writes via `await import("node:fs")` or `node:fs/promises`, and you want a clean, isolated, mutable filesystem per test.
-- **Real `node:fs` with `mkdtempSync`** — code under test uses static imports of `node:fs`, AND/OR depends on filesystem semantics that memfs doesn't perfectly emulate (e.g., specific `inode` numbers, `chmod` bits propagating through directories, real symlinks).
-- **Pass an `fs`-shaped object as a constructor argument** — code under test already takes its fs dependency via DI. In this case `mock.fs()` is still useful: pass `mock.fs().toJSON` or wire up the handle's helpers.
+- **`mock.fs()`** - code under test reads/writes via `await import("node:fs")` or `node:fs/promises`, and you want a clean, isolated, mutable filesystem per test.
+- **Real `node:fs` with `mkdtempSync`** - code under test uses static imports of `node:fs`, AND/OR depends on filesystem semantics that memfs doesn't perfectly emulate (e.g., specific `inode` numbers, `chmod` bits propagating through directories, real symlinks).
+- **Pass an `fs`-shaped object as a constructor argument** - code under test already takes its fs dependency via DI. In this case `mock.fs()` is still useful: pass `mock.fs().toJSON` or wire up the handle's helpers.

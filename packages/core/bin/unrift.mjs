@@ -5,7 +5,7 @@
 //
 // Before loading the test runner, register the Node module customization
 // hook that powers `mock.doMock()` / `mock.unmock()` (Tier A module
-// mocking — see packages/core/src/mock/module-loader.ts).
+// mocking - see packages/core/src/mock/module-loader.ts).
 //
 // The loader runs in a worker thread (Node 20.6+ / 18.19+ behavior) and
 // receives a `MessagePort` over which the main thread posts
@@ -35,7 +35,7 @@ if (typeof register === "function") {
       transferList: [port2],
     });
   } catch (err) {
-    // Loader registration is best-effort — failing here shouldn't kill
+    // Loader registration is best-effort - failing here shouldn't kill
     // the test run for users who don't use mock.doMock(). doMock()
     // itself throws a clear error if the port isn't available.
     if (process.env.UNRIFT_DEBUG === "1") {

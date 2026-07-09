@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, mock } from "@unrift/core";
 
-// Always start each test with a clean slate — `mock.restoreAll()` undoes
+// Always start each test with a clean slate - `mock.restoreAll()` undoes
 // any patched fetch from the previous test.
 beforeEach(() => {
   mock.restoreAll();
 });
 
-describe("mock.fetch — string URL matcher", () => {
+describe("mock.fetch - string URL matcher", () => {
   it("returns the configured response for an exact URL match", async () => {
     mock.fetch("https://api.example.com/users", {
       status: 200,
@@ -56,7 +56,7 @@ describe("mock.fetch — string URL matcher", () => {
   });
 });
 
-describe("mock.fetch — regex and function matchers", () => {
+describe("mock.fetch - regex and function matchers", () => {
   it("regex matcher matches by URL pattern", async () => {
     mock.fetch(/\/api\/users\/\d+/, { status: 200, json: { id: 1 } });
 
@@ -86,7 +86,7 @@ describe("mock.fetch — regex and function matchers", () => {
   });
 });
 
-describe("mock.fetch — function response", () => {
+describe("mock.fetch - function response", () => {
   it("invokes a response factory with the Request", async () => {
     mock.fetch(/\//, async (req) => ({
       status: 200,
@@ -108,7 +108,7 @@ describe("mock.fetch — function response", () => {
   });
 });
 
-describe("mock.fetchOnce — single-use handlers", () => {
+describe("mock.fetchOnce - single-use handlers", () => {
   it("consumes the handler after a single match", async () => {
     mock.fetchOnce("https://x.test/", { status: 500 });
     mock.fetch("https://x.test/", { status: 200 });
@@ -132,7 +132,7 @@ describe("mock.fetchOnce — single-use handlers", () => {
   });
 });
 
-describe("mock.fetch — call recording", () => {
+describe("mock.fetch - call recording", () => {
   it("records every Request that hits the patched fetch", async () => {
     mock.fetch(/\//, { status: 200 });
 
@@ -168,7 +168,7 @@ describe("mock.fetch — call recording", () => {
   });
 });
 
-describe("mock.fetch — fall-through error", () => {
+describe("mock.fetch - fall-through error", () => {
   it("throws with method and URL when no handler matches", async () => {
     // Registering a handler installs the patch; the unmatched request below
     // hits the fall-through path rather than the real network.
@@ -187,7 +187,7 @@ describe("mock.fetch — fall-through error", () => {
   });
 });
 
-describe("mock.fetch — matchers", () => {
+describe("mock.fetch - matchers", () => {
   it("toHaveFetched passes for any call to the given URL string", async () => {
     mock.fetch(/\//, { status: 200 });
 
@@ -241,7 +241,7 @@ describe("mock.fetch — matchers", () => {
   });
 });
 
-describe("mock.fetch — lifecycle", () => {
+describe("mock.fetch - lifecycle", () => {
   it("reset() clears handlers and calls but keeps fetch patched", async () => {
     mock.fetch("https://x.test/", { status: 200 });
     await fetch("https://x.test/");
@@ -249,7 +249,7 @@ describe("mock.fetch — lifecycle", () => {
     mock.fetch.reset();
 
     expect(mock.fetch.calls).toEqual([]);
-    // After reset, no handler matches — should fall through and throw.
+    // After reset, no handler matches - should fall through and throw.
     await expect(fetch("https://x.test/")).rejects.toBeInstanceOf(Error);
   });
 

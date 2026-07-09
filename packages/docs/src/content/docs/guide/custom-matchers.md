@@ -53,7 +53,7 @@ Inside a matcher function, `this` is a `MatcherContext` with:
 | `isNot` | `boolean` | `true` when called via `.not` |
 | `diff(received, expected)` | `(a, b) => string` | Formats a diff message for the error |
 
-The `isNot` flag is critical — your matcher must handle both the normal and negated case:
+The `isNot` flag is critical - your matcher must handle both the normal and negated case:
 
 ```ts
 if (this.isNot ? pass : !pass) {
