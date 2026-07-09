@@ -55,7 +55,7 @@ describe("mock.doMock - basic registration", () => {
     mock.doMock("node:dns", () => ({ resolve: () => "d" }));
 
     // Exercise the namespace member (not just the named export) so the two
-    // stay in sync — the namespace omission is exactly what regressed here.
+    // stay in sync - the namespace omission is exactly what regressed here.
     const specs = mock.listMockedSpecs().slice().sort();
     expect(specs).toEqual(["node:dns", "node:zlib"]);
   });
