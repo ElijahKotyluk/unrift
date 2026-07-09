@@ -1,5 +1,5 @@
 /**
- * Fake clock — controllable replacements for `setTimeout`, `setInterval`,
+ * Fake clock - controllable replacements for `setTimeout`, `setInterval`,
  * `setImmediate`, `process.nextTick`, `queueMicrotask`, `Date`, `Date.now`,
  * and `performance.now`.
  *
@@ -27,7 +27,7 @@ interface FakeTask {
   args: unknown[];
   // For intervals: re-schedule with this period after firing.
   periodMs?: number;
-  // Cleared via clearTimeout/clearInterval/clearImmediate — drained but not run.
+  // Cleared via clearTimeout/clearInterval/clearImmediate - drained but not run.
   cancelled: boolean;
 }
 
@@ -179,7 +179,7 @@ function makeFakeDate(): typeof globalThis.Date {
   const FakeDate = function (this: unknown, ...args: any[]) {
     if (!new.target) {
       /**
-       * Date(...) without `new` returns a string of the *current* time —
+       * Date(...) without `new` returns a string of the *current* time -
        * which when faked should reflect the fake clock.
        */
       return new realDate(now).toString();
@@ -244,7 +244,7 @@ function advanceTo(target: number): void {
     pumpOne();
     if (++iterations > MAX_DRAIN_ITERATIONS) {
       throw new Error(
-        "advanceTimersByTime exceeded the maximum drain iterations — " +
+        "advanceTimersByTime exceeded the maximum drain iterations - " +
           "is a timer scheduling itself in a loop?",
       );
     }
@@ -257,7 +257,7 @@ function advanceTo(target: number): void {
 /**
  * Names of host APIs that `useFakeTimers` can patch. `setTimeout` implicitly
  * pairs with `clearTimeout`, `setInterval` with `clearInterval`, and
- * `setImmediate` with `clearImmediate` — you can't fake one half of a pair
+ * `setImmediate` with `clearImmediate` - you can't fake one half of a pair
  * without breaking the other.
  */
 export type FakeableApi =
@@ -314,10 +314,59 @@ function resolveFakedSet(options: UseFakeTimersOptions): Set<FakeableApi> {
 // so useRealTimers knows which originals to restore.
 let fakedApis: Set<FakeableApi> = new Set();
 
+// The own descriptor `performance` had for `now` before we shadowed it
+// (undefined if `now` was inherited from the prototype).
+let originalPerfNowDescriptor: PropertyDescriptor | undefined;
+
+/**
+ * Patch `performance.now` to read the fake clock. Uses `defineProperty`
+ * rather than assignment because on Node 18 `performance.now` is a
+ * non-writable prototype method - plain assignment throws. Defining an own
+ * property on the instance shadows it safely.
+ *
+ * Returns false (without throwing) if the platform won't allow it, so a
+ * failure here never aborts the rest of the timer install.
+ */
+function patchPerformanceNow(): boolean {
+  const perf = globalThis.performance as { now?: unknown } | undefined;
+  if (!perf || typeof perf.now !== "function") return false;
+
+  try {
+    originalPerfNowDescriptor = Object.getOwnPropertyDescriptor(perf, "now");
+    Object.defineProperty(perf, "now", {
+      configurable: true,
+      writable: true,
+      value: () => now,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Reverse `patchPerformanceNow`. Best-effort - never throws. */
+function restorePerformanceNow(): void {
+  const perf = globalThis.performance as { now?: unknown } | undefined;
+  if (!perf) return;
+
+  try {
+    if (originalPerfNowDescriptor) {
+      Object.defineProperty(perf, "now", originalPerfNowDescriptor);
+    } else {
+      // We added a shadow own property; deleting it reveals the real
+      // prototype method again.
+      delete perf.now;
+    }
+  } catch {
+    // ignore - leaving the fake in place is better than throwing on cleanup
+  }
+  originalPerfNowDescriptor = undefined;
+}
+
 function ensureInstalled(method: string): void {
   if (!installed) {
     throw new Error(
-      `mock.${method}() requires fake timers — call mock.useFakeTimers() first`,
+      `mock.${method}() requires fake timers - call mock.useFakeTimers() first`,
     );
   }
 }
@@ -331,7 +380,7 @@ function toMillis(value: Date | string | number): number {
 export function useFakeTimers(options: UseFakeTimersOptions = {}): void {
   if (installed) return;
 
-  // Resolve which APIs to fake BEFORE flipping `installed` — that way an
+  // Resolve which APIs to fake BEFORE flipping `installed` - that way an
   // invalid options throw doesn't leave us in a half-installed state.
   const toFake = resolveFakedSet(options);
   installed = true;
@@ -366,7 +415,13 @@ export function useFakeTimers(options: UseFakeTimersOptions = {}): void {
   now = options.now !== undefined ? toMillis(options.now) : 0;
   queue.length = 0;
 
-  // Patch globals — each pair gated on the resolved fake set.
+  // Register the restorer BEFORE patching anything, so even a mid-install
+  // failure leaves a globally-installed fake that restoreAll can undo.
+  // Without this, a throw between here and the end would strand the real
+  // timers permanently - see the Node 18 performance.now issue.
+  activeRestorers.add(useRealTimers);
+
+  // Patch globals - each pair gated on the resolved fake set.
   if (toFake.has("setTimeout")) {
     globalThis.setTimeout =
       fakeSetTimeout as unknown as typeof globalThis.setTimeout;
@@ -419,15 +474,14 @@ export function useFakeTimers(options: UseFakeTimersOptions = {}): void {
     globalThis.Date = makeFakeDate();
   }
 
-  if (
-    toFake.has("performance") &&
-    originals.performanceNow &&
-    globalThis.performance
-  ) {
-    globalThis.performance.now = (() => now) as typeof performance.now;
+  if (toFake.has("performance")) {
+    // If the platform won't let us patch performance.now (e.g. it's a
+    // non-configurable accessor), drop it from the faked set so restore
+    // doesn't try to undo something we never did.
+    if (!patchPerformanceNow()) {
+      fakedApis.delete("performance");
+    }
   }
-
-  activeRestorers.add(useRealTimers);
 }
 
 export function useRealTimers(): void {
@@ -463,13 +517,8 @@ export function useRealTimers(): void {
   if (fakedApis.has("Date")) {
     globalThis.Date = originals.Date;
   }
-  if (
-    fakedApis.has("performance") &&
-    originals.performanceNow &&
-    globalThis.performance
-  ) {
-    globalThis.performance.now =
-      originals.performanceNow as typeof performance.now;
+  if (fakedApis.has("performance")) {
+    restorePerformanceNow();
   }
 
   installed = false;
@@ -495,7 +544,7 @@ export function runAllTimers(): void {
     pumpOne();
     if (++iterations > MAX_DRAIN_ITERATIONS) {
       throw new Error(
-        "runAllTimers exceeded the maximum drain iterations — " +
+        "runAllTimers exceeded the maximum drain iterations - " +
           "is a timer scheduling itself in a loop?",
       );
     }
@@ -528,7 +577,7 @@ export function runOnlyPendingTimers(): void {
  *
  * The `await Promise.resolve()` at the end is the key. It lets pending
  * microtasks (resolved Promises, queued `.then` handlers) flush. Real
- * `Promise.resolve()` is unaffected by `mock.useFakeTimers()` — the engine
+ * `Promise.resolve()` is unaffected by `mock.useFakeTimers()` - the engine
  * uses its internal microtask queue, not our fake `queueMicrotask`.
  */
 async function pumpOneAsync(): Promise<boolean> {
@@ -579,7 +628,7 @@ export async function advanceTimersByTimeAsync(ms: number): Promise<void> {
     await pumpOneAsync();
     if (++iterations > MAX_DRAIN_ITERATIONS) {
       throw new Error(
-        "advanceTimersByTimeAsync exceeded the maximum drain iterations — " +
+        "advanceTimersByTimeAsync exceeded the maximum drain iterations - " +
           "is a timer scheduling itself in a loop?",
       );
     }
@@ -597,7 +646,7 @@ export async function runAllTimersAsync(): Promise<void> {
     await pumpOneAsync();
     if (++iterations > MAX_DRAIN_ITERATIONS) {
       throw new Error(
-        "runAllTimersAsync exceeded the maximum drain iterations — " +
+        "runAllTimersAsync exceeded the maximum drain iterations - " +
           "is a timer scheduling itself in a loop?",
       );
     }
