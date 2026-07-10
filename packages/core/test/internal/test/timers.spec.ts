@@ -204,6 +204,22 @@ describe("mock - runOnlyPendingTimers", () => {
     mock.advanceTimersByTime(100);
     expect(order).toEqual([1, 2]);
   });
+
+  it("fires a pending interval exactly once, leaving future ticks pending", () => {
+    // An interval re-enqueues itself (same id, new seq) each time it fires.
+    // runOnlyPendingTimers must fire it once and stop - not loop until the
+    // max-iteration guard.
+    mock.useFakeTimers();
+    const fn = spy();
+    setInterval(fn, 100);
+
+    mock.runOnlyPendingTimers();
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    // The next tick is still scheduled; advancing fires it again.
+    mock.advanceTimersByTime(100);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("mock - getTimerCount", () => {
@@ -499,5 +515,17 @@ describe("mock - runOnlyPendingTimersAsync", () => {
 
     await mock.advanceTimersByTimeAsync(100);
     expect(order).toEqual([1, 2]);
+  });
+
+  it("fires a pending interval exactly once, leaving future ticks pending", async () => {
+    mock.useFakeTimers();
+    const fn = spy();
+    setInterval(fn, 100);
+
+    await mock.runOnlyPendingTimersAsync();
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    await mock.advanceTimersByTimeAsync(100);
+    expect(fn).toHaveBeenCalledTimes(2);
   });
 });

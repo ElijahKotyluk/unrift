@@ -252,8 +252,11 @@ export async function fromModule<T extends Record<string, unknown>>(
   for (const key of Object.keys(real)) {
     const value = real[key];
     if (typeof value === "function") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      mocked[key] = spy(value as (...args: any[]) => any);
+      // Auto-mock: create a spy with NO implementation, so unconfigured
+      // exports record calls and return undefined rather than executing the
+      // real function (which could fire real side effects). Tests opt in to
+      // behavior per export via .mockReturnValue / .mockImplementation.
+      mocked[key] = spy();
     } else {
       mocked[key] = value;
     }

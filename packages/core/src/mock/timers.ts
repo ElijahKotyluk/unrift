@@ -570,14 +570,18 @@ export function runAllTimers(): void {
 
 export function runOnlyPendingTimers(): void {
   ensureInstalled("runOnlyPendingTimers");
-  // Snapshot ids that exist NOW; only drain those, even if they schedule new ones.
-  const targetIds = new Set<number>(queue.map((t) => t.id));
+  // Snapshot by `seq`, not `id`: a re-fired interval re-enqueues itself with
+  // the SAME id but a fresh seq (see pumpOne). Snapshotting ids would keep the
+  // interval "in scope" forever and drain it every tick until the guard trips.
+  // seq is unique per enqueue, so the re-scheduled tick counts as newly
+  // scheduled and is left pending.
+  const targetSeqs = new Set<number>(queue.map((t) => t.seq));
   let iterations = 0;
 
   while (queue.length > 0) {
     while (queue.length > 0 && queue[0].cancelled) queue.shift();
     if (queue.length === 0) break;
-    if (!targetIds.has(queue[0].id)) break;
+    if (!targetSeqs.has(queue[0].seq)) break;
     pumpOne();
     if (++iterations > MAX_DRAIN_ITERATIONS) {
       throw new Error(
@@ -673,12 +677,15 @@ export async function runAllTimersAsync(): Promise<void> {
 /** Async sibling of `runOnlyPendingTimers`. */
 export async function runOnlyPendingTimersAsync(): Promise<void> {
   ensureInstalled("runOnlyPendingTimersAsync");
-  const targetIds = new Set<number>(queue.map((t) => t.id));
+  // Snapshot by `seq` for the same reason as the sync variant: a re-fired
+  // interval re-enqueues with the same id but a fresh seq, so id-based
+  // snapshotting would drain it every tick until the guard trips.
+  const targetSeqs = new Set<number>(queue.map((t) => t.seq));
   let iterations = 0;
   while (queue.length > 0) {
     while (queue.length > 0 && queue[0].cancelled) queue.shift();
     if (queue.length === 0) break;
-    if (!targetIds.has(queue[0].id)) break;
+    if (!targetSeqs.has(queue[0].seq)) break;
     await pumpOneAsync();
     if (++iterations > MAX_DRAIN_ITERATIONS) {
       throw new Error(

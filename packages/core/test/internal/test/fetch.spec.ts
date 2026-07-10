@@ -256,7 +256,7 @@ describe("mock.fetch - matchers", () => {
     mock.fetch(/\//, { status: 200 });
     await fetch("https://x.test/api/users");
 
-    // Same stateful regex object used twice — the second assertion must not
+    // Same stateful regex object used twice - the second assertion must not
     // start from a leftover lastIndex and miss.
     const re = /users/g;
     expect(mock.fetch).toHaveFetched(re);
@@ -309,7 +309,7 @@ describe("mock.fetch - lifecycle", () => {
 
       mock.fetch.restore();
 
-      // Must be fully reversed — not left pointing at the stale patch.
+      // Must be fully reversed - not left pointing at the stale patch.
       expect(globalThis.fetch).toBe(undefined);
       expect("fetch" in globalThis).toBe(false);
     } finally {

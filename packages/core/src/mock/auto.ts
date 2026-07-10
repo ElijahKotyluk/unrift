@@ -6,7 +6,7 @@
  * cleans up auto mocks too.
  */
 
-import { spyOn, type AnyFn } from "./spy";
+import { spy, spyOn, type AnyFn } from "./spy";
 
 /**
  * Walks the chain from `target` up to (but not including) the built in
@@ -77,18 +77,42 @@ export function mockObject<T extends object>(obj: T): T {
  * Wrap a constructor so every instance is auto-mocked, and so static
  * methods on the constructor itself are spied too. Returns a Proxy that
  * is `instanceof`-compatible with the original.
+ *
+ * Instance methods are spied as OWN properties on each instance (shadowing
+ * the prototype), NOT by mutating the shared prototype. This keeps call
+ * state per-instance (a.run and b.run are separate spies) and leaves the
+ * class prototype untouched - nothing to restore, nothing to leak.
  */
 export function mockClass<
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   T extends new (...args: any[]) => any,
 >(Ctor: T): T {
-  // Spy static methods on the constructor itself (mutates Ctor in place).
+  // Spy static methods on the constructor itself (mutates Ctor in place;
+  // statics are own properties of Ctor, so spyOn restores them normally).
   mockObject(Ctor);
 
   return new Proxy(Ctor, {
     construct(target, args, newTarget) {
-      const instance = Reflect.construct(target, args, newTarget);
-      mockObject(instance as object);
+      const instance = Reflect.construct(target, args, newTarget) as object;
+
+      for (const { host, key } of enumerableMethodKeys(instance)) {
+        if (host === instance) {
+          // Own method (assigned in the constructor): spy in place.
+          spyOn(instance as Record<string | symbol, AnyFn>, key);
+        } else {
+          // Inherited method: shadow it with an own-property spy that passes
+          // through to the prototype implementation. The prototype itself is
+          // never modified.
+          const protoMethod = (host as Record<string | symbol, AnyFn>)[key];
+          Object.defineProperty(instance, key, {
+            value: spy(protoMethod),
+            writable: true,
+            configurable: true,
+            enumerable: false,
+          });
+        }
+      }
+
       return instance;
     },
   });

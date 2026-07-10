@@ -157,13 +157,16 @@ class Service {
 }
 
 const MockedService = mock.class(Service);
-const instance = new MockedService();
+const a = new MockedService();
+const b = new MockedService();
 
-expect(instance.run).toHaveBeenCalledTimes(0);
-instance.run();
-expect(instance.run).toHaveBeenCalledTimes(1);
-expect(instance instanceof Service).toBe(true);
+a.run();
+expect(a.run).toHaveBeenCalledTimes(1);
+expect(b.run).toHaveBeenCalledTimes(0); // per-instance spies - not shared
+expect(a instanceof Service).toBe(true);
 ```
+
+Instance methods are spied as own properties on each instance, so call state is per-instance and the class prototype is never modified - un-mocked instances of the same class are unaffected, and there's nothing to restore. Repeated `spyOn` on an already-spied method returns the existing spy rather than double-wrapping it, and re-stubbing a stubbed property keeps the original value for restore.
 
 ## Stubbing arbitrary properties
 

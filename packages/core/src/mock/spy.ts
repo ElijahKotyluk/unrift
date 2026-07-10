@@ -333,12 +333,21 @@ export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
       );
     }
     const { host, descriptor } = found;
+    const original = descriptor[accessor];
+
+    // Repeat spyOn on an already-spied accessor returns the existing spy.
+    // Wrapping a spy in a spy would capture the first spy as the "original",
+    // and restoring would then put the first spy back instead of the real
+    // accessor - leaking a mock past restoreAll().
+    if (isSpy(original)) {
+      return original;
+    }
+
     if (descriptor.configurable === false) {
       throw new Error(
         `spyOn() cannot wrap non-configurable property "${String(key)}"`,
       );
     }
-    const original = descriptor[accessor];
     if (typeof original !== "function") {
       throw new Error(
         `spyOn(..., "${accessor}") requires "${String(key)}" to have a ${accessor}ter`,
@@ -347,7 +356,11 @@ export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
 
     // If the spy is on a prototype, restoring needs to put back the
     // *prototype's* descriptor at the *prototype* level - not on `obj`.
+    // Idempotent: a second run (mockRestore + restoreAll) is a no-op.
+    let restored = false;
     const restore = () => {
+      if (restored) return;
+      restored = true;
       Object.defineProperty(host, key, descriptor);
     };
 
@@ -376,6 +389,14 @@ export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
   // Method path - original 2-arg behavior.
   const original = obj[key];
 
+  // Repeat spyOn on an already-spied method returns the existing spy rather
+  // than wrapping it. A spy-wrapping-a-spy would capture the first spy as its
+  // "original", so restore order could put the first spy back after the real
+  // method - leaking a mock past restoreAll().
+  if (isSpy(original)) {
+    return original;
+  }
+
   if (typeof original !== "function") {
     throw new Error(
       `spyOn() requires a function property; got ${typeof original} for key "${String(key)}"`,
@@ -390,7 +411,11 @@ export function spyOn<T extends object, K extends keyof T & (string | symbol)>(
     );
   }
 
+  // Idempotent: mockRestore() followed by restoreAll() must not re-apply.
+  let restored = false;
   const restore = () => {
+    if (restored) return;
+    restored = true;
     if (descriptor) {
       Object.defineProperty(obj, key, descriptor);
     } else {

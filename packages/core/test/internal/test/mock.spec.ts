@@ -290,6 +290,56 @@ describe("spyOn() - method wrapping", () => {
       "spyOn() requires a function property",
     );
   });
+
+  it("repeat spyOn on the same method returns the existing spy", () => {
+    const obj = {
+      m() {
+        return "REAL";
+      },
+    };
+    const realFn = obj.m;
+
+    const first = spyOn(obj, "m").mockReturnValue("s1");
+    const second = spyOn(obj, "m");
+
+    // Same spy object - not a spy wrapping a spy.
+    expect(second).toBe(first);
+
+    // And restoreAll puts the REAL method back, not the first spy.
+    mock.restoreAll();
+    expect(obj.m).toBe(realFn);
+    expect(obj.m()).toBe("REAL");
+  });
+
+  it("repeat spyOn on the same getter returns the existing spy", () => {
+    const obj = {
+      get v() {
+        return "REAL";
+      },
+    };
+
+    const first = spyOn(obj, "v", "get").mockReturnValue("fake");
+    const second = spyOn(obj, "v", "get");
+    expect(second).toBe(first);
+
+    mock.restoreAll();
+    expect(obj.v).toBe("REAL");
+  });
+
+  it("mockRestore followed by restoreAll does not clobber the method (idempotent)", () => {
+    const obj = {
+      m() {
+        return "REAL";
+      },
+    };
+    const realFn = obj.m;
+
+    const s = spyOn(obj, "m");
+    s.mockRestore();
+    mock.restoreAll(); // second restore of the same registration - must no-op
+
+    expect(obj.m).toBe(realFn);
+  });
 });
 
 describe("mock.restoreAll / clearAll / resetAll", () => {
@@ -378,6 +428,18 @@ describe("mock.stub / mock.global", () => {
 
     mock.restoreAll();
     expect(obj.value).toBe(1);
+  });
+
+  it("re-stubbing the same key keeps the true original for restore", () => {
+    const obj = { k: "REAL" };
+
+    mock.stub(obj, "k", "v1");
+    mock.stub(obj, "k", "v2"); // must not capture "v1" as the original
+
+    expect(obj.k).toBe("v2");
+
+    mock.restoreAll();
+    expect(obj.k).toBe("REAL");
   });
 
   it("throws when the property is non-configurable", () => {
@@ -482,6 +544,49 @@ describe("mock.class - auto-mocking constructors", () => {
     const Mocked = mock.class(Service);
     const instance = new Mocked();
     expect(instance instanceof Service).toBe(true);
+  });
+
+  it("each instance gets its own spy with per-instance call state", () => {
+    class Service {
+      run() {
+        return "REAL";
+      }
+    }
+    const Mocked = mock.class(Service);
+    const a = new Mocked();
+    const b = new Mocked();
+
+    a.run();
+    a.run();
+    b.run();
+
+    // Separate spies - a's calls must not include b's.
+    expect(a.run).not.toBe(b.run);
+    expect(a.run).toHaveBeenCalledTimes(2);
+    expect(b.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("never mutates the class prototype (nothing to restore or leak)", () => {
+    class Service {
+      run() {
+        return "REAL";
+      }
+    }
+    const realRun = Service.prototype.run;
+
+    const Mocked = mock.class(Service);
+    new Mocked();
+    new Mocked(); // second construction must not re-spy anything shared
+
+    // Prototype untouched even before restore...
+    expect(Service.prototype.run).toBe(realRun);
+
+    mock.restoreAll();
+
+    // ...and after. Un-mocked instances are unaffected throughout.
+    expect(Service.prototype.run).toBe(realRun);
+    expect(isSpy(Service.prototype.run)).toBe(false);
+    expect(new Service().run()).toBe("REAL");
   });
 });
 
@@ -793,6 +898,15 @@ describe("mock.fromModule - whole-module auto-mock", () => {
     // `sep` and `delimiter` are strings, not functions
     expect(typeof path.sep).toBe("string");
     expect(typeof path.delimiter).toBe("string");
+  });
+
+  it("auto-mocked functions return undefined by default (no call-through)", async () => {
+    const path = await mock.fromModule<typeof import("node:path")>("node:path");
+
+    // Must NOT execute the real path.join - an unconfigured export records
+    // the call and returns undefined, so real side effects never fire.
+    expect(path.join("a", "b")).toBe(undefined);
+    expect(path.join).toHaveBeenCalledWith("a", "b");
   });
 
   it("registers via doMock so await import returns customizable spies", async () => {
