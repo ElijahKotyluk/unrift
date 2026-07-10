@@ -18,7 +18,7 @@
     "skipDefaultLibCheck": true
     // Note: no `paths` here on purpose. Per-package build configs inherit this
     // base and must resolve `@unrift/core` from node_modules (the built
-    // package), not from source — otherwise the wrapper build drags core's
+    // package), not from source - otherwise the wrapper build drags core's
     // source in, outside its rootDir. Editor/dev path mapping lives in the
     // root tsconfig.json instead.
     // "moduleDetection": "force",

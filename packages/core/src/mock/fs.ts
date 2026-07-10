@@ -124,7 +124,12 @@ export interface FakeFsHandle {
   delete(path: string): boolean;
   /** List entries in a directory. Returns an empty array if missing. */
   list(dir: string): string[];
-  /** Unpatch node:fs and node:fs/promises. Idempotent. */
+  /**
+   * Unpatch node:fs and node:fs/promises for this handle's interception.
+   * Idempotent, and a no-op if a later mock.fs() call has already superseded
+   * this handle - so holding an old handle for snapshotting can't tear down
+   * the current volume's interception.
+   */
   restore(): void;
 }
 
@@ -171,7 +176,14 @@ export function fs(initial?: FakeFsState): FakeFsHandle {
     exists: (path) => backend.exists(path),
     delete: (path) => backend.remove(path),
     list: (dir) => backend.list(dir),
-    restore: restoreFakeFs,
+    // Only tear down the interception if THIS handle still owns it. A later
+    // mock.fs() call orphans this handle - its volume lives on for snapshot
+    // inspection, but restoring it must not rip out the newer volume's
+    // interception. On an orphaned handle this is a no-op (also makes restore
+    // idempotent: a second call finds activeBackend already cleared).
+    restore: () => {
+      if (activeBackend === backend) restoreFakeFs();
+    },
   };
 
   activeHandle = handle;

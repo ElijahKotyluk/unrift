@@ -134,4 +134,17 @@ describe("mock.fs - lifecycle", () => {
     // The first handle still references its (now-orphaned) volume.
     expect(first.exists("/file1")).toBe(true);
   });
+
+  it("restore() on a superseded handle does not tear down the newer interception", async () => {
+    const first = mock.fs({ "/a": "1" });
+    mock.fs({ "/b": "2" }); // supersedes `first`
+
+    // Holding `first` for snapshotting and restoring it must NOT rip out the
+    // active (second) volume - this is the flakiness guard.
+    first.restore();
+
+    const fs = await import("node:fs");
+    expect(fs.existsSync("/b")).toBe(true);
+    expect(fs.existsSync("/a")).toBe(false);
+  });
 });

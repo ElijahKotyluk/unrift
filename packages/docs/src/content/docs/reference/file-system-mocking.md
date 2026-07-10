@@ -99,13 +99,18 @@ const second = mock.fs({ "/b": "2" });
 second.exists("/a");  // → false (fresh volume)
 second.exists("/b");  // → true
 first.exists("/a");   // → true (handle still points at the old volume)
+
+first.restore();      // → no-op: `first` no longer owns the interception,
+                      //   so this can't tear down `second`'s volume
 ```
+
+Calling `restore()` on a superseded handle is a safe no-op - only the handle that currently owns the interception can tear it down. This means you can keep an old handle around for snapshotting without risking that a later `restore()` rips out the active volume.
 
 ## Lifecycle
 
 | Call | Effect |
 | --- | --- |
-| `handle.restore()` | Tears down `node:fs` / `node:fs/promises` registrations. The backend volume stays alive so `handle.toJSON()` still works for post-mortem inspection. |
+| `handle.restore()` | Tears down `node:fs` / `node:fs/promises` registrations **for this handle**. No-op if a later `mock.fs()` superseded it. The backend volume stays alive so `handle.toJSON()` still works for post-mortem inspection. |
 | `mock.restoreAll()` | Unpatches everything (fs included) as part of bulk cleanup. |
 
 Idiomatic cleanup pattern:
