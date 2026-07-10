@@ -103,7 +103,7 @@ afterEach(() => {
 
 A short tour, since the implementation crosses thread boundaries:
 
-1. **bin/unrift.mjs** calls `module.register("./dist/esm/mock/module-loader.js", ...)` before importing the runner. This needs Node 18.19+ / 20.6+ - older Node falls back gracefully (no mocking, but the rest of unrift still works).
+1. **The CLI** (`src/cli.ts`) calls `registerModuleLoader()` (from `src/mock/register-loader.ts`) once at startup, before any test file is imported. That helper does the `module.register("./module-loader.js", ...)`. Registration lives in the shared CLI — not the bins — so both the `@unrift/core` bin and the `unrift` wrapper bin are thin entrypoints that get module mocking for free by running the same CLI. This needs Node 18.19+ / 20.6+ - older Node falls back gracefully (no mocking, but the rest of unrift still works).
 2. `module.register()` creates a worker thread for the loader. A `MessagePort` is passed in so the main thread can talk to it.
 3. The main-side port is stashed on `globalThis.__unriftLoaderPort` so `mock.doMock` can reach it without circular imports.
 4. When `mock.doMock(spec, factory)` runs:
