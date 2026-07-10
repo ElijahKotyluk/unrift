@@ -372,17 +372,34 @@ function ensureInstalled(method: string): void {
 }
 
 function toMillis(value: Date | string | number): number {
-  if (value instanceof realDate) return value.getTime();
-  if (typeof value === "number") return value;
-  return new realDate(value).getTime();
+  let ms: number;
+  if (value instanceof realDate) ms = value.getTime();
+  else if (typeof value === "number") ms = value;
+  else ms = new realDate(value).getTime();
+
+  // Reject NaN (invalid Date / unparseable string) and ±Infinity up front.
+  // Letting a non-finite value become the fake clock would silently break
+  // every scheduling and drain comparison (now + ms, fireAt > target, …).
+  if (!Number.isFinite(ms)) {
+    const shown =
+      typeof value === "string" ? JSON.stringify(value) : String(value);
+    throw new TypeError(
+      `mock fake-timers: invalid time value ${shown} - expected a valid Date, ` +
+        `a parseable date string, or finite epoch milliseconds`,
+    );
+  }
+  return ms;
 }
 
 export function useFakeTimers(options: UseFakeTimersOptions = {}): void {
   if (installed) return;
 
-  // Resolve which APIs to fake BEFORE flipping `installed` - that way an
-  // invalid options throw doesn't leave us in a half-installed state.
+  // Resolve options that can throw BEFORE flipping `installed` or touching
+  // any global - so an invalid `toFake`/`doNotFake` combo or a bad `now`
+  // leaves useFakeTimers a clean no-op rather than a half-installed state.
   const toFake = resolveFakedSet(options);
+  const initialNow = options.now !== undefined ? toMillis(options.now) : 0;
+
   installed = true;
   fakedApis = toFake;
 
@@ -412,7 +429,7 @@ export function useFakeTimers(options: UseFakeTimersOptions = {}): void {
         : undefined,
   };
 
-  now = options.now !== undefined ? toMillis(options.now) : 0;
+  now = initialNow;
   queue.length = 0;
 
   // Register the restorer BEFORE patching anything, so even a mid-install

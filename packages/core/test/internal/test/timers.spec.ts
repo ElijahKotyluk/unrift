@@ -297,6 +297,41 @@ describe("mock.setSystemTime / getRealSystemTime", () => {
   });
 });
 
+describe("mock fake-timers - invalid time values", () => {
+  it("useFakeTimers rejects an unparseable now, as a clean no-op", () => {
+    const realSetTimeout = setTimeout;
+
+    expect(() => mock.useFakeTimers({ now: "not a date" })).toThrow(
+      "invalid time value",
+    );
+
+    // No half-install: timers were never faked, and fake-timer ops still
+    // report as uninstalled.
+    expect(setTimeout).toBe(realSetTimeout);
+    expect(() => mock.advanceTimersByTime(0)).toThrow("requires fake timers");
+  });
+
+  it("useFakeTimers rejects NaN and non-finite numbers", () => {
+    expect(() => mock.useFakeTimers({ now: NaN })).toThrow("invalid time value");
+    expect(() => mock.useFakeTimers({ now: Infinity })).toThrow(
+      "invalid time value",
+    );
+    expect(() => mock.useFakeTimers({ now: new Date("garbage") })).toThrow(
+      "invalid time value",
+    );
+  });
+
+  it("setSystemTime rejects an invalid value without moving the clock", () => {
+    mock.useFakeTimers({ now: 1_000 });
+
+    expect(() => mock.setSystemTime("nope")).toThrow("invalid time value");
+    expect(() => mock.setSystemTime(NaN)).toThrow("invalid time value");
+
+    // The clock is untouched after a rejected update.
+    expect(Date.now()).toBe(1_000);
+  });
+});
+
 describe("mock - performance.now", () => {
   it("returns the fake clock value", () => {
     mock.useFakeTimers({ now: 5_000 });

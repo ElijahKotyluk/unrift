@@ -176,6 +176,8 @@ expect(new Date().toISOString()).toBe("2024-01-01T00:00:00.000Z");
 
 `now` accepts a `Date`, an ISO string, or epoch milliseconds. If omitted, the fake clock starts at `0`.
 
+An invalid value - an unparseable string, an invalid `Date`, or a non-finite number (`NaN` / `Infinity`) - throws a clear error up front rather than silently setting the clock to `NaN` (which would break every scheduling and drain comparison). The same validation applies to [`setSystemTime`](#jumping-the-wall-clock-without-firing-timers). When `useFakeTimers` rejects the value, it's a clean no-op - no globals are patched.
+
 ## Jumping the wall clock without firing timers
 
 `setSystemTime` advances `Date.now()` without draining any scheduled tasks. Useful when the code under test reads `Date.now()` directly but you don't want pending timeouts to fire just because the clock moved.
