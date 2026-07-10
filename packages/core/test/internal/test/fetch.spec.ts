@@ -272,4 +272,25 @@ describe("mock.fetch - lifecycle", () => {
 
     expect(globalThis.fetch).toBe(real);
   });
+
+  it("restores to absent when fetch did not exist originally", () => {
+    // Simulate an older Node / custom runtime with no global fetch.
+    const realFetch = globalThis.fetch;
+    delete (globalThis as { fetch?: unknown }).fetch;
+
+    try {
+      expect(globalThis.fetch).toBe(undefined);
+
+      mock.fetch("https://x.test/", { status: 200 });
+      expect(typeof globalThis.fetch).toBe("function"); // patched in
+
+      mock.fetch.restore();
+
+      // Must be fully reversed — not left pointing at the stale patch.
+      expect(globalThis.fetch).toBe(undefined);
+      expect("fetch" in globalThis).toBe(false);
+    } finally {
+      globalThis.fetch = realFetch; // restore for the rest of the suite
+    }
+  });
 });

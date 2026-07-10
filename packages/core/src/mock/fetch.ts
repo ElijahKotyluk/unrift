@@ -57,6 +57,11 @@ interface Handler {
 const handlers: Handler[] = [];
 const calls: Request[] = [];
 let originalFetch: typeof globalThis.fetch | undefined;
+// Whether globalThis had a `fetch` at install time. If it didn't (older Node,
+// custom runtimes), restore must DELETE our patch rather than leave it — the
+// original state was "fetch is absent", and `originalFetch` being undefined
+// must not be mistaken for "nothing to restore".
+let fetchWasDefined = false;
 let installed = false;
 
 function urlOf(req: Request): string {
@@ -136,6 +141,8 @@ function install(): void {
   if (installed) return;
 
   installed = true;
+  // `in` checks presence without triggering Node's lazy fetch getter.
+  fetchWasDefined = "fetch" in globalThis;
   originalFetch = globalThis.fetch;
   globalThis.fetch = patchedFetch as typeof globalThis.fetch;
 
@@ -146,10 +153,15 @@ function restoreFetch(): void {
   if (!installed) return;
 
   installed = false;
-  if (originalFetch !== undefined) {
-    globalThis.fetch = originalFetch;
+  if (fetchWasDefined) {
+    globalThis.fetch = originalFetch as typeof globalThis.fetch;
+  } else {
+    // fetch didn't exist before we patched it — remove our patch so the
+    // environment reads `undefined` again, rather than leaking the stale mock.
+    delete (globalThis as { fetch?: unknown }).fetch;
   }
   originalFetch = undefined;
+  fetchWasDefined = false;
   handlers.length = 0;
   calls.length = 0;
 
