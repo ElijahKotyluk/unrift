@@ -4,6 +4,7 @@ import { isFetchMock, type MockFetch } from "./mock/fetch";
 
 import { deepEqual } from "./utils/deepEqual";
 import { looseEqual } from "./utils/looseEqual";
+import { regexTest } from "./utils/helpers";
 import { toThrow, type ToThrowExpected } from "./utils/toThrow";
 
 import type { MatcherContext } from "./types";
@@ -36,7 +37,7 @@ function ensureFetchMock(
 
 function matchesFetchTarget(req: Request, target: unknown): boolean {
   if (typeof target === "string") return req.url === target;
-  if (target instanceof RegExp) return target.test(req.url);
+  if (target instanceof RegExp) return regexTest(target, req.url);
   if (typeof target === "function")
     return Boolean((target as (r: Request) => boolean)(req));
   return false;
@@ -272,7 +273,7 @@ function registerCoreMatchers() {
       const pass =
         typeof expected === "string"
           ? received.includes(expected)
-          : expected.test(received);
+          : regexTest(expected, received);
 
       if (this.isNot ? pass : !pass)
         throw new Error(this.diff(received, expected));

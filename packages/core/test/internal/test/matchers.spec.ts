@@ -350,3 +350,23 @@ describe("toHaveProperty", () => {
     expect(() => expect(42).toHaveProperty("a")).toThrow();
   });
 });
+
+describe("stateful regex matchers (/g, /y)", () => {
+  // RegExp.test advances lastIndex for /g and /y; reusing the same regex
+  // object across assertions must not make the matcher flaky.
+  it("toMatch is stable when the same /g regex is reused", () => {
+    const re = /\d+/g;
+    expect("a1").toMatch(re);
+    expect("b2").toMatch(re);
+    expect("c3").toMatch(re);
+  });
+
+  it("toThrow is stable when the same /g regex is reused", () => {
+    const re = /boom/g;
+    const throwBoom = () => {
+      throw new Error("boom happened");
+    };
+    expect(throwBoom).toThrow(re);
+    expect(throwBoom).toThrow(re);
+  });
+});

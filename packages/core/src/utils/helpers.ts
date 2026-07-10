@@ -115,6 +115,20 @@ export function safeRegExp(source: string): RegExp {
 }
 
 /**
+ * Stateless RegExp match for user-supplied patterns.
+ *
+ * `RegExp.prototype.test` advances `lastIndex` for `/g` and `/y` regexes, so
+ * reusing the same regex object across calls (a matcher tested against several
+ * requests, or the same assertion run twice) can start mid-string and miss.
+ * Resetting `lastIndex` first makes every test independent — "does this pattern
+ * match the string" regardless of prior calls.
+ */
+export function regexTest(re: RegExp, value: string): boolean {
+  re.lastIndex = 0;
+  return re.test(value);
+}
+
+/**
  * SameValueZero-ish semantics:
  * - NaN equals NaN
  * - +0 and -0 are equal

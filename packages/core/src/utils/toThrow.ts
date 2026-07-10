@@ -1,3 +1,5 @@
+import { regexTest } from "./helpers";
+
 export type ToThrowExpected =
   | undefined
   | string
@@ -43,7 +45,7 @@ function matchThrown(thrown: unknown, expected: ToThrowExpected): boolean {
 
   // toThrow(/regex/)
   if (expected instanceof RegExp) {
-    return expected.test(msg);
+    return regexTest(expected, msg);
   }
 
   // toThrow(ErrorClass)

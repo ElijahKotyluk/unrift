@@ -5,8 +5,12 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ESM_DIST = resolve(__dirname, "../dist/esm");
 
-const importRegex = /(?<=import\s.+?from\s+['"])(\.\/[^'"]+)(?=['"])/g;
-const exportRegex = /(?<=export\s.+?from\s+['"])(\.\/[^'"]+)(?=['"])/g;
+// Match relative specifiers starting with `./` OR `../`, so cross-directory
+// imports like `../utils/helpers` also get a `.js` extension. `\.\.?\/` matches
+// the leading `./` or `../`; `[^'"]+` then greedily grabs the rest (covering
+// deeper `../../` paths too).
+const importRegex = /(?<=import\s.+?from\s+['"])(\.\.?\/[^'"]+)(?=['"])/g;
+const exportRegex = /(?<=export\s.+?from\s+['"])(\.\.?\/[^'"]+)(?=['"])/g;
 
 // Recursively find all `.js` files in target directory.
 async function findJsFiles(dir) {

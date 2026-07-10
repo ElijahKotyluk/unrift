@@ -11,6 +11,7 @@
  */
 
 import { activeRestorers } from "./spy";
+import { regexTest } from "../utils/helpers";
 
 /** Brand applied to `mock.fetch` so matchers can verify their received value. */
 export const FETCH_MOCK_BRAND: unique symbol = Symbol.for("unrift.fetchMock");
@@ -72,7 +73,7 @@ async function matches(handler: Handler, req: Request): Promise<boolean> {
   if (handler.consumed) return false;
   const m = handler.matcher;
   if (typeof m === "string") return urlOf(req) === m;
-  if (m instanceof RegExp) return m.test(urlOf(req));
+  if (m instanceof RegExp) return regexTest(m, urlOf(req));
   if (typeof m === "function") return Boolean(await m(req));
   return false;
 }

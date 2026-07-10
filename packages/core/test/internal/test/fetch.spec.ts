@@ -84,6 +84,18 @@ describe("mock.fetch - regex and function matchers", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("second");
   });
+
+  it("a global (/g) regex matcher matches every request, not just the first", async () => {
+    // /g makes RegExp.test stateful via lastIndex; the matcher reuses the same
+    // regex object across requests, so without a reset the 2nd+ would miss.
+    mock.fetch(/x\.test/g, { status: 200 });
+
+    const a = await fetch("https://x.test/a");
+    const b = await fetch("https://x.test/b");
+    const c = await fetch("https://x.test/c");
+
+    expect([a.status, b.status, c.status]).toEqual([200, 200, 200]);
+  });
 });
 
 describe("mock.fetch - function response", () => {
@@ -238,6 +250,17 @@ describe("mock.fetch - matchers", () => {
     expect(() => expect(() => 1).toHaveFetched("https://x.test/")).toThrow(
       "requires `mock.fetch`",
     );
+  });
+
+  it("toHaveFetched with a /g regex is stable across repeated assertions", async () => {
+    mock.fetch(/\//, { status: 200 });
+    await fetch("https://x.test/api/users");
+
+    // Same stateful regex object used twice — the second assertion must not
+    // start from a leftover lastIndex and miss.
+    const re = /users/g;
+    expect(mock.fetch).toHaveFetched(re);
+    expect(mock.fetch).toHaveFetched(re);
   });
 });
 
