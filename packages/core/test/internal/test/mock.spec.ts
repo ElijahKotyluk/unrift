@@ -169,6 +169,65 @@ describe("spy() - lifecycle", () => {
   });
 });
 
+describe("spy() - construction (new spy())", () => {
+  // Spies are callable functions, so `new spy()` is always valid JS. These
+  // pin the constructor path: it must never throw on a non-constructable impl,
+  // and mock.instances must record the actual constructed instance.
+
+  it("new spy() with no impl records and returns the real instance", () => {
+    const Ctor = spy();
+    const inst = new (Ctor as unknown as new () => object)();
+
+    expect(typeof inst).toBe("object");
+    expect(Ctor.mock.instances).toHaveLength(1);
+    expect(Ctor.mock.instances[0]).toBe(inst); // not undefined
+  });
+
+  it("new spy(arrowImpl) does not throw (non-constructable impl)", () => {
+    const Ctor = spy(() => {});
+    let inst: object | undefined;
+
+    expect(() => {
+      inst = new (Ctor as unknown as new () => object)();
+    }).not.toThrow();
+    expect(Ctor.mock.instances[0]).toBe(inst);
+  });
+
+  it("a non-constructable impl can initialize the instance via `this`", () => {
+    const method = {
+      init(this: { ready?: boolean }) {
+        this.ready = true;
+      },
+    }.init; // object-shorthand method - not constructable
+
+    const Ctor = spy(method);
+    const inst = new (Ctor as unknown as new () => { ready?: boolean })();
+
+    expect(inst.ready).toBe(true);
+    expect(Ctor.mock.instances[0]).toBe(inst);
+  });
+
+  it("an impl returning an object overrides the instance (constructor return semantics)", () => {
+    const tag = { tagged: true };
+    const Ctor = spy(() => tag);
+    const inst = new (Ctor as unknown as new () => object)();
+
+    expect(inst).toBe(tag);
+    expect(Ctor.mock.instances[0]).toBe(tag);
+  });
+
+  it("a constructable impl still runs as the constructor", () => {
+    function Real(this: { x?: number }, x: number) {
+      this.x = x;
+    }
+    const Ctor = spy(Real);
+    const inst = new (Ctor as unknown as new (x: number) => { x: number })(42);
+
+    expect(inst.x).toBe(42);
+    expect(Ctor.mock.instances[0]).toBe(inst);
+  });
+});
+
 describe("isSpy()", () => {
   it("returns true for spy() and mock.fn(), which are the same primitive", () => {
     expect(isSpy(spy())).toBe(true);

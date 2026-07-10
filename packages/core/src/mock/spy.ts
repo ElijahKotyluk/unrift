@@ -88,6 +88,23 @@ export function isSpy(value: unknown): value is Spy {
   );
 }
 
+/**
+ * True if `fn` can be used with `new` / `Reflect.construct`. Arrow functions,
+ * object/class methods, async and generator functions, and most bound
+ * functions are NOT constructable.
+ *
+ * Probes by using `fn` as the `newTarget` of a no-op construct - this
+ * validates constructability without ever invoking `fn`'s body.
+ */
+function isConstructor(fn: AnyFn): boolean {
+  try {
+    Reflect.construct(function () {}, [], fn);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface SpyInternalConfig {
   // Original method when constructed via spyOn - used as fallback impl + on restore.
   originalImpl?: AnyFn;
@@ -145,15 +162,28 @@ function createSpy<T extends AnyFn>(config: SpyInternalConfig): Spy<T> {
     try {
       let value: unknown;
 
-      if (impl) {
-        value = isNewTarget
-          ? Reflect.construct(impl, args, spyImpl as unknown as AnyFn)
-          : impl.apply(this, args);
+      if (isNewTarget) {
+        // `new spy()` is always valid, regardless of the implementation.
+        if (impl && isConstructor(impl)) {
+          // Constructable impl: run it as the constructor with the spy's
+          // prototype (via newTarget), yielding its own instance.
+          value = Reflect.construct(impl, args, spyImpl as unknown as AnyFn);
+        } else if (impl) {
+          // Non-constructable impl (arrow, method, async, …): can't
+          // Reflect.construct it. Run it against the object JS already created
+          // for us; the instance is that object, unless the impl explicitly
+          // returns one (constructor return semantics).
+          const ret = impl.apply(this, args);
+          value = typeof ret === "object" && ret !== null ? ret : this;
+        } else {
+          // No impl: the instance is the object JS created for `new spy()`.
+          value = this;
+        }
+        state.instances.push(value);
       } else {
-        value = undefined;
+        value = impl ? impl.apply(this, args) : undefined;
       }
 
-      if (isNewTarget) state.instances.push(value);
       state.results.push({ type: "return", value });
       return value;
     } catch (err) {
