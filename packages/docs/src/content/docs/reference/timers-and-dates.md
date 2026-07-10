@@ -65,7 +65,7 @@ Returns the number of pending (non-cancelled) tasks.
 
 ## Async drainers
 
-When a timer callback does `await` work, the sync drainers will fire the callback but return before the awaited promise settles. The async variants awaitthe callback's return value and yield to the real microtask queue between pumps so any pending `.then` handlers get to run.
+When a timer callback does `await` work, the sync drainers will fire the callback but return before the awaited promise settles. The async variants await the callback's return value and yield to the real microtask queue between pumps so any pending `.then` handlers get to run.
 
 ```ts
 mock.useFakeTimers();
