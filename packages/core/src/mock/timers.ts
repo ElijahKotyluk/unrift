@@ -39,6 +39,12 @@ const PRIORITY: Record<TaskKind, number> = {
 };
 
 // State
+//
+// NOTE: this is process-global singleton state. It is correct today because
+// unrift runs every spec file sequentially in one process, and the
+// afterEach(restoreAll) contract resets between tests. If parallel per-file
+// execution lands (see ISSUES.md, parallel test file execution), the fake
+// clock would need per-worker isolation instead of module-level state.
 
 let installed = false;
 let now = 0;

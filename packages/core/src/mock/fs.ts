@@ -133,15 +133,16 @@ export interface FakeFsHandle {
   restore(): void;
 }
 
+// Process-global singleton: only one fake fs interception is active at a time.
+// Safe under sequential per-file execution + afterEach(restoreAll); parallel
+// per-file execution (see ISSUES.md) would need per-worker isolation.
 let activeBackend: FakeFsBackend | undefined;
-let activeHandle: FakeFsHandle | undefined;
 
 const restoreFakeFs = (): void => {
   if (!activeBackend) return;
   unmock("node:fs");
   unmock("node:fs/promises");
   activeBackend = undefined;
-  activeHandle = undefined;
   activeRestorers.delete(restoreFakeFs);
 };
 
@@ -186,11 +187,5 @@ export function fs(initial?: FakeFsState): FakeFsHandle {
     },
   };
 
-  activeHandle = handle;
   return handle;
-}
-
-/** Returns the current handle if `mock.fs()` is installed, otherwise undefined. */
-export function getActiveFsHandle(): FakeFsHandle | undefined {
-  return activeHandle;
 }

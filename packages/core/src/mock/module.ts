@@ -27,6 +27,11 @@
 
 import { activeRestorers, spy } from "./spy";
 
+// The mock registry and loader port below live on globalThis, which is
+// process-global. This is correct under unrift's sequential single-process
+// execution; parallel per-file execution (see ISSUES.md) would need the
+// registry keyed/isolated per worker.
+
 /**
  * Sentinel field name on globalThis. Loader-generated synthetic source
  * reads back through this same name, so it must stay stable.

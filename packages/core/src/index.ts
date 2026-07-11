@@ -41,7 +41,6 @@ export {
   listMockedSpecs,
   fromModule,
   mockFs,
-  getActiveFsHandle,
   clearAllMocks,
   resetAllMocks,
   restoreAllMocks,

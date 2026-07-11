@@ -55,6 +55,9 @@ interface Handler {
   consumed: boolean;
 }
 
+// Process-global singleton state. Correct because unrift runs spec files
+// sequentially in one process and afterEach(restoreAll) resets between tests.
+// Parallel per-file execution (see ISSUES.md) would need per-worker isolation.
 const handlers: Handler[] = [];
 const calls: Request[] = [];
 let originalFetch: typeof globalThis.fetch | undefined;
@@ -216,7 +219,9 @@ mockFetchImpl.reset = () => {
 mockFetchImpl.restore = restoreFetch;
 
 Object.defineProperty(mockFetchImpl, "calls", {
-  get: () => calls,
+  // Return a snapshot copy, not the internal array, so callers can't mutate
+  // recorded state (e.g. push/splice) and corrupt later assertions.
+  get: () => calls.slice(),
   enumerable: true,
   configurable: false,
 });

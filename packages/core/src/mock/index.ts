@@ -37,7 +37,7 @@ import {
   getRealSystemTime,
 } from "./timers";
 import { doMock, unmock, listMockedSpecs, fromModule } from "./module";
-import { fs as mockFs, getActiveFsHandle } from "./fs";
+import { fs as mockFs } from "./fs";
 
 export {
   spy,
@@ -65,7 +65,6 @@ export {
   listMockedSpecs,
   fromModule,
   mockFs,
-  getActiveFsHandle,
   clearAllMocks,
   resetAllMocks,
   restoreAllMocks,
