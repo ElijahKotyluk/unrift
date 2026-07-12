@@ -33,7 +33,7 @@ describe("math", () => {
 });
 ```
 
-Multiple `.only` markers can coexist — all marked tests run, everything else is skipped.
+Multiple `.only` markers can coexist - all marked tests run, everything else is skipped.
 
 :::caution
 Remember to remove `.only` before committing. Tests marked with `.only` will cause other tests to be silently skipped.

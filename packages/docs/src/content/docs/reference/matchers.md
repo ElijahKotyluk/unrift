@@ -23,7 +23,7 @@ expect({ a: 1 }).not.toBe({ a: 1 }); // different references
 
 ### `toEqual(expected)`
 
-Deep structural equality. Prototype-insensitive — compares by shape, not by constructor.
+Deep structural equality. Prototype-insensitive - compares by shape, not by constructor.
 
 ```ts
 expect({ a: 1 }).toEqual({ a: 1 });
@@ -197,7 +197,7 @@ expect([]).toHaveLength(0);
 
 ### `toMatchObject(expected)`
 
-Checks that the received object contains all properties in `expected`. The received object may have additional properties — this is a partial match.
+Checks that the received object contains all properties in `expected`. The received object may have additional properties - this is a partial match.
 
 ```ts
 expect({ a: 1, b: 2 }).toMatchObject({ a: 1 });          // passes

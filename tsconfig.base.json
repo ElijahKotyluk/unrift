@@ -1,10 +1,9 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "target": "esnext",
     "module": "esnext",
     "lib": ["esnext"],
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "strict": true,
     "resolveJsonModule": true,
     // "sourceMap": true,
@@ -16,15 +15,17 @@
     "types": ["@types/node"],
     "noEmit": false,
     "strictNullChecks": true,
-    "skipDefaultLibCheck": true,
-    "paths": {
-      "@unrift/*": ["packages/*/src"]
-    }
+    "skipDefaultLibCheck": true
+    // Note: no `paths` here on purpose. Per-package build configs inherit this
+    // base and must resolve `@unrift/core` from node_modules (the built
+    // package), not from source - otherwise the wrapper build drags core's
+    // source in, outside its rootDir. Editor/dev path mapping lives in the
+    // root tsconfig.json instead.
     // "moduleDetection": "force",
     // "isolatedModules": false,
   },
   "ts-node": {
-    // Tell ts-node CLI to install the --loader automatically, explained below
+    // Tell ts-node CLI to install the --loader automatically
     "esm": true
   },
   "exclude": ["node_modules"]

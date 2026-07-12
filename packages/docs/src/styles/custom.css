@@ -1,4 +1,4 @@
-/* Unrift docs theme — cyan/magenta palette from logo */
+/* Unrift docs theme - cyan/magenta palette from logo */
 
 :root {
   /* Primary accent: cyan/blue from logo */
@@ -65,7 +65,7 @@
 
 /* ── Sidebar nav highlight fix ────────────────────────── */
 
-/* Active sidebar link — ensure text is readable on cyan highlight */
+/* Active sidebar link - ensure text is readable on cyan highlight */
 :root[data-theme="dark"] nav.sidebar a[aria-current="page"],
 :root[data-theme="dark"] nav.sidebar a[aria-current="true"] {
   color: #ffffff;
@@ -74,7 +74,7 @@
   font-weight: 600;
 }
 
-/* Sidebar hover — visible text */
+/* Sidebar hover - visible text */
 :root[data-theme="dark"] nav.sidebar a:hover {
   color: #ffffff;
   background: rgba(0, 180, 216, 0.1);
@@ -92,7 +92,7 @@
 
 /* ── Gradient text for "Unrift" branding ──────────────── */
 
-/* Header site title gradient — use !important to prevent FOUC flash */
+/* Header site title gradient - use !important to prevent FOUC flash */
 .site-title span,
 .site-title .site-title-text,
 [class*="site-title"] span {

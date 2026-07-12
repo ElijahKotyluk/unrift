@@ -38,7 +38,7 @@ unrift math
 # Stop on first failure with a 10s timeout
 unrift --bail --timeout 10000
 
-# Watch mode — re-run on file changes
+# Watch mode - re-run on file changes
 unrift --watch
 
 # Use a specific config file

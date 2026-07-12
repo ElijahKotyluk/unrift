@@ -16,6 +16,12 @@ import { normalizePath } from "./utils/normalizePath";
 import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
 import { TaskStatus } from "./types";
 
+/**
+ * Captured at module load so the runner's own timing measurements
+ * aren't affected by user mocks (e.g. mock.useFakeTimers patches performance.now).
+ */
+const realPerformanceNow = performance.now.bind(performance);
+
 interface RunnerOptions {
   configPath?: string;
   testDir?: string;
@@ -246,7 +252,7 @@ function extractTestName(description: string): string {
 
 export async function runTestsCLI(options: RunnerOptions = {}) {
   regExpCache.clear();
-  const runStart = performance.now();
+  const runStart = realPerformanceNow();
 
   // Cache clean mode
   if (options.cacheClean) {
@@ -259,7 +265,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       const lines: string[] = [];
       if (result.projectCacheDeleted) lines.push("✔ deleted project cache");
       if (result.tempCacheDeleted) lines.push("✔ deleted temp cache");
-      if (lines.length === 0) lines.push("— nothing to clean");
+      if (lines.length === 0) lines.push("- nothing to clean");
       console.log(lines.join("\n"));
     }
 
@@ -341,7 +347,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
         testDir: dir,
         configPath: resolvedConfigPath,
         files: [],
-        durationMs: performance.now() - runStart,
+        durationMs: realPerformanceNow() - runStart,
         results: [],
       };
 
@@ -401,7 +407,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   }
 
   const ok = failed === 0;
-  const durationMs = performance.now() - runStart;
+  const durationMs = realPerformanceNow() - runStart;
 
   // JSON mode: stdout must be JSON only
   if (options.json) {
@@ -428,7 +434,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     return;
   }
 
-  // ── Pretty reporting ──────────────────────────────────────────────
+  // Pretty reporting
 
   const groups = groupResultsByFile(results);
 
@@ -506,7 +512,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     }
   }
 
-  // ── Failure details ────────────────────────────────────────────────
+  // Failure details
   if (failures.length > 0) {
     console.log(`\n${horizontalRule(colors.boldRed(" FAILURES "))}\n`);
 
@@ -539,7 +545,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     console.log(`\n${horizontalRule()}`);
   }
 
-  // ── Summary ────────────────────────────────────────────────────────
+  // Summary
   console.log("");
 
   const summaryParts: string[] = [];
@@ -660,7 +666,7 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
       `\n${colors.dim("─".repeat(Math.min(process.stdout.columns || 80, 80)))}`,
     );
     console.log(
-      ` ${colors.dim("↺")} ${colors.dim(`${shortFile} changed — re-running…`)}\n`,
+      ` ${colors.dim("↺")} ${colors.dim(`${shortFile} changed - re-running…`)}\n`,
     );
 
     // Reset exit code so each run is evaluated independently

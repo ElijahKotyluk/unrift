@@ -3,8 +3,14 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { registerModuleLoader } from "./mock/register-loader";
 import { runTestsCLI, watchTestsCLI } from "./runner";
 import { safeRegExp } from "./utils/helpers";
+
+// Install the module-mock loader before any test file is imported. Both the
+// core bin and the unrift wrapper bin run this CLI, so this is the single
+// place module mocking is bootstrapped.
+registerModuleLoader();
 
 const __cliDir = dirname(fileURLToPath(import.meta.url));
 

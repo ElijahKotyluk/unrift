@@ -1,7 +1,7 @@
 {
   "name": "@unrift/core",
   "version": "0.3.0",
-  "description": "Core engine for the Unrift TypeScript test framework — runner, matchers, CLI, and programmatic API",
+  "description": "Core engine for the Unrift TypeScript test framework - runner, matchers, CLI, and programmatic API",
   "private": false,
   "sideEffects": false,
   "main": "./dist/cjs/index.cjs",
@@ -75,7 +75,8 @@
   },
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
-    "esbuild": "^0.27.2"
+    "esbuild": "^0.27.2",
+    "memfs": "^4.57.7"
   },
   "devDependencies": {
     "ts-node": "^10.9.2",

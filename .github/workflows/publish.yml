@@ -152,14 +152,14 @@ jobs:
           if [ "${{ steps.changes.outputs.core }}" = "true" ]; then
             if git rev-parse "@unrift/core@${CORE_VERSION}" >/dev/null 2>&1; then
               CORE_TAG_EXISTS=true
-              echo "Tag @unrift/core@${CORE_VERSION} already exists — skipping (previous run may have completed partially)."
+              echo "Tag @unrift/core@${CORE_VERSION} already exists - skipping (previous run may have completed partially)."
             fi
           fi
 
           if [ "${{ steps.changes.outputs.unrift }}" = "true" ]; then
             if git rev-parse "unrift@${UNRIFT_VERSION}" >/dev/null 2>&1; then
               UNRIFT_TAG_EXISTS=true
-              echo "Tag unrift@${UNRIFT_VERSION} already exists — skipping (previous run may have completed partially)."
+              echo "Tag unrift@${UNRIFT_VERSION} already exists - skipping (previous run may have completed partially)."
             fi
           fi
 
@@ -233,4 +233,4 @@ jobs:
 
       - name: No packages to publish
         if: steps.changes.outputs.any != 'true'
-        run: echo "No package changes detected in this PR — skipping publish."
+        run: echo "No package changes detected in this PR - skipping publish."
