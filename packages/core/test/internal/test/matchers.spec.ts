@@ -102,6 +102,11 @@ describe("numeric matchers", () => {
     expect(Infinity).toBeCloseTo(Infinity);
     expect(Infinity).not.toBeCloseTo(-Infinity);
     expect(() => expect("1" as unknown).toBeCloseTo(1)).toThrow();
+    expect(() =>
+      expect(1).not.toBeCloseTo(2, "x" as unknown as number),
+    ).toThrow();
+    // Tolerance underflows to 0, so even equal finite values fail.
+    expect(1).not.toBeCloseTo(1, 324);
   });
 });
 

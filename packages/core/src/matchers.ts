@@ -360,9 +360,14 @@ function registerCoreMatchers() {
         throw new Error(this.diff(received, "expected a number"));
       }
 
+      if (!Number.isFinite(precision)) {
+        throw new Error(this.diff(precision, "a finite number for precision"));
+      }
+
       // Same-signed infinities are equal; the subtraction below would be NaN.
+      // Finite values always go through the tolerance check.
       const pass =
-        received === expected ||
+        (!Number.isFinite(received) && received === expected) ||
         Math.abs(received - expected) < 10 ** -(precision as number) / 2;
 
       if (this.isNot ? pass : !pass) {
