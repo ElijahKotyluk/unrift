@@ -22,6 +22,7 @@ export interface Matchers<T> {
   toBeLessThan(expected: number): void | Promise<void>;
   toBeInstanceOf(expected: { prototype: unknown }): void | Promise<void>;
   toContain(expected: unknown): void | Promise<void>;
+  toContainEqual(expected: unknown): void | Promise<void>;
   toEqual(expected: unknown): void | Promise<void>;
   toHaveLength(expected: number): void | Promise<void>;
   toMatch(expected: RegExp | string): void | Promise<void>;

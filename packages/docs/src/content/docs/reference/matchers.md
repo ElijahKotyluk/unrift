@@ -193,6 +193,15 @@ expect("hello").toContain("ell");
 expect([1, 2]).not.toContain(5);
 ```
 
+### `toContainEqual(expected)`
+
+Like `toContain` but compares each item with `toEqual` instead of by reference. Arrays only.
+
+```ts
+expect([{ a: 1 }, { b: 2 }]).toContainEqual({ a: 1 });
+expect([{ a: 1 }]).not.toContainEqual({ a: 2 });
+```
+
 ### `toHaveLength(expected)`
 
 Checks the `.length` property of arrays, strings, or any object with a `length`.

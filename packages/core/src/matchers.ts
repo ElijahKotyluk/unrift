@@ -227,6 +227,20 @@ function registerCoreMatchers() {
       }
     },
 
+    toContainEqual(this: MatcherContext, received: unknown, expected: unknown) {
+      if (!Array.isArray(received)) {
+        throw new Error(
+          this.diff(received, "expected an array for toContainEqual()"),
+        );
+      }
+
+      const pass = received.some((item) => looseEqual(item, expected));
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, expected));
+      }
+    },
+
     toEqual<T>(this: MatcherContext, received: T, expected: T) {
       const pass = looseEqual(received, expected);
 

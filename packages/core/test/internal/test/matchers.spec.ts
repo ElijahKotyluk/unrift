@@ -121,6 +121,17 @@ describe("collection matchers", () => {
     expect(() => expect([1, 2]).not.toContain(1)).toThrow();
   });
 
+  it("toContainEqual compares items deeply", () => {
+    expect([{ a: 1 }, { b: [2] }]).toContainEqual({ b: [2] });
+    expect(() => expect([{ a: 1 }]).toContainEqual({ a: 2 })).toThrow();
+  });
+
+  it("toContainEqual with .not and non-arrays", () => {
+    expect([{ a: 1 }]).not.toContainEqual({ a: 2 });
+    expect(() => expect([{ a: 1 }]).not.toContainEqual({ a: 1 })).toThrow();
+    expect(() => expect("abc").toContainEqual("a")).toThrow();
+  });
+
   it("toHaveLength works with arrays", () => {
     expect([1, 2, 3]).toHaveLength(3);
     expect(() => expect([1]).toHaveLength(2)).toThrow();
