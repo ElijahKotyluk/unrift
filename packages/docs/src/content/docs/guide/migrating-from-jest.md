@@ -73,6 +73,8 @@ Most matchers are identical. Key differences:
 | `toStrictEqual` | `toStrictEqual` | Same (deep, prototype-sensitive) |
 | `toMatchObject` | `toMatchObject` | Same (partial recursive match) |
 | `toHaveProperty` | `toHaveProperty` | Same (dot-notation and array paths supported) |
+| `toBeCloseTo(n, digits?)` | `toBeCloseTo(n, digits?)` | Same (default 2 digits) |
+| `toContainEqual` | `toContainEqual` | Arrays only (Jest also takes other iterables) |
 | `toHaveBeenCalled` | `toHaveBeenCalled` | Same |
 | `toHaveBeenCalledTimes(n)` | `toHaveBeenCalledTimes(n)` | Same |
 | `toHaveBeenCalledWith(...)` | `toHaveBeenCalledWith(...)` | Same |

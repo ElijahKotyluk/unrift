@@ -85,6 +85,32 @@ describe("numeric matchers", () => {
     expect(5).not.toBeLessThan(2);
     expect(() => expect(3).not.toBeLessThan(5)).toThrow();
   });
+
+  it("toBeCloseTo defaults to 2 digits", () => {
+    expect(0.1 + 0.2).toBeCloseTo(0.3);
+    expect(1.004).toBeCloseTo(1);
+    expect(() => expect(1.006).toBeCloseTo(1)).toThrow();
+  });
+
+  it("toBeCloseTo respects precision", () => {
+    expect(0.1 + 0.2).toBeCloseTo(0.3, 10);
+    expect(() => expect(0.301).toBeCloseTo(0.3, 5)).toThrow();
+  });
+
+  it("toBeCloseTo with .not and infinities", () => {
+    expect(0.1 + 0.2).not.toBeCloseTo(0.4);
+    expect(Infinity).toBeCloseTo(Infinity);
+    expect(Infinity).not.toBeCloseTo(-Infinity);
+    expect(() => expect("1" as unknown).toBeCloseTo(1)).toThrow();
+    expect(() => expect(1).toBeCloseTo("1" as unknown as number)).toThrow(
+      "a number for expected",
+    );
+    expect(() =>
+      expect(1).not.toBeCloseTo(2, "x" as unknown as number),
+    ).toThrow();
+    // Tolerance underflows to 0, so even equal finite values fail.
+    expect(1).not.toBeCloseTo(1, 324);
+  });
 });
 
 describe("collection matchers", () => {
@@ -101,6 +127,22 @@ describe("collection matchers", () => {
   it("toContain with .not", () => {
     expect([1, 2]).not.toContain(3);
     expect(() => expect([1, 2]).not.toContain(1)).toThrow();
+  });
+
+  it("toContainEqual compares items deeply", () => {
+    expect([{ a: 1 }, { b: [2] }]).toContainEqual({ b: [2] });
+    expect(() => expect([{ a: 1 }]).toContainEqual({ a: 2 })).toThrow();
+  });
+
+  it("toContainEqual with .not and non-arrays", () => {
+    expect([{ a: 1 }]).not.toContainEqual({ a: 2 });
+    expect(() => expect([{ a: 1 }]).not.toContainEqual({ a: 1 })).toThrow();
+    expect(() => expect("abc").toContainEqual("a")).toThrow();
+  });
+
+  it("toContainEqual treats sparse holes as undefined", () => {
+    expect(new Array(1)).toContainEqual(undefined);
+    expect(() => expect(new Array(1)).not.toContainEqual(undefined)).toThrow();
   });
 
   it("toHaveLength works with arrays", () => {

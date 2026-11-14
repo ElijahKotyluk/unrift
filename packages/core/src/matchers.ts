@@ -227,6 +227,27 @@ function registerCoreMatchers() {
       }
     },
 
+    toContainEqual(this: MatcherContext, received: unknown, expected: unknown) {
+      if (!Array.isArray(received)) {
+        throw new Error(
+          this.diff(received, "expected an array for toContainEqual()"),
+        );
+      }
+
+      // for...of visits sparse holes as undefined; Array.some would skip them.
+      let pass = false;
+      for (const item of received) {
+        if (looseEqual(item, expected)) {
+          pass = true;
+          break;
+        }
+      }
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(this.diff(received, expected));
+      }
+    },
+
     toEqual<T>(this: MatcherContext, received: T, expected: T) {
       const pass = looseEqual(received, expected);
 
@@ -326,6 +347,37 @@ function registerCoreMatchers() {
 
       if (this.isNot ? pass : !pass) {
         throw new Error(this.diff(received, `<= ${expected}`));
+      }
+    },
+
+    toBeCloseTo(
+      this: MatcherContext,
+      received: unknown,
+      expected: unknown,
+      precision: unknown = 2,
+    ) {
+      if (typeof received !== "number") {
+        throw new Error(this.diff(received, "expected a number"));
+      }
+
+      if (typeof expected !== "number") {
+        throw new Error(this.diff(expected, "a number for expected"));
+      }
+
+      if (!Number.isFinite(precision)) {
+        throw new Error(this.diff(precision, "a finite number for precision"));
+      }
+
+      // Same-signed infinities are equal; the subtraction below would be NaN.
+      // Finite values always go through the tolerance check.
+      const pass =
+        (!Number.isFinite(received) && received === expected) ||
+        Math.abs(received - expected) < 10 ** -(precision as number) / 2;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(
+          this.diff(received, `${expected} (precision ${precision})`),
+        );
       }
     },
 
