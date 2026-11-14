@@ -356,8 +356,12 @@ function registerCoreMatchers() {
       expected: unknown,
       precision: unknown = 2,
     ) {
-      if (typeof received !== "number" || typeof expected !== "number") {
+      if (typeof received !== "number") {
         throw new Error(this.diff(received, "expected a number"));
+      }
+
+      if (typeof expected !== "number") {
+        throw new Error(this.diff(expected, "a number for expected"));
       }
 
       if (!Number.isFinite(precision)) {

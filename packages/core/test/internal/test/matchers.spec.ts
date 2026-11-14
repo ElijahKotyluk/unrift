@@ -102,6 +102,9 @@ describe("numeric matchers", () => {
     expect(Infinity).toBeCloseTo(Infinity);
     expect(Infinity).not.toBeCloseTo(-Infinity);
     expect(() => expect("1" as unknown).toBeCloseTo(1)).toThrow();
+    expect(() => expect(1).toBeCloseTo("1" as unknown as number)).toThrow(
+      "a number for expected",
+    );
     expect(() =>
       expect(1).not.toBeCloseTo(2, "x" as unknown as number),
     ).toThrow();
