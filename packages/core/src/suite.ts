@@ -153,7 +153,8 @@ export class Suite {
     // Same for --grep: no matching test below means its hooks shouldn't run.
     if (
       (isOnly && !suiteHasOnly && !inOnlyContext) ||
-      (options?.grep && !this.subtreeMatchesGrep(options.grep))
+      (options?.grep &&
+        !this.hasRunnableMatch(options.grep, isOnly, inOnlyContext))
     ) {
       this.markSubtreeSkipped();
 
@@ -296,11 +297,37 @@ export class Suite {
     );
   }
 
-  private subtreeMatchesGrep(grep: RegExp): boolean {
-    return (
-      this.tests.some((test) => this.testMatchesGrep(test, grep)) ||
-      this.suites.some((suite) => suite.subtreeMatchesGrep(grep))
+  /**
+   * True if a test below this suite matches grep AND would actually run, using
+   * the same skip/todo/only rules as run(). A matching test that won't run
+   * shouldn't cause this suite's hooks to fire.
+   */
+  private hasRunnableMatch(
+    grep: RegExp,
+    isOnly: boolean,
+    inOnlyContext: boolean,
+  ): boolean {
+    const runnable = this.tests.some(
+      (test) =>
+        test.mode !== TaskMode.Skip &&
+        test.mode !== TaskMode.Todo &&
+        (!isOnly || inOnlyContext || test.mode === TaskMode.Only) &&
+        this.testMatchesGrep(test, grep),
     );
+
+    if (runnable) return true;
+
+    return this.suites.some((suite) => {
+      if (suite.mode === TaskMode.Skip || suite.mode === TaskMode.Todo) {
+        return false;
+      }
+
+      const childOnly = inOnlyContext || suite.mode === TaskMode.Only;
+
+      if (isOnly && !suite.subtreeHasOnly && !childOnly) return false;
+
+      return suite.hasRunnableMatch(grep, isOnly, childOnly);
+    });
   }
 
   getFullDescription(): string {

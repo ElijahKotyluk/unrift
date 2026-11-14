@@ -2,7 +2,8 @@ import { describe, it, expect } from "@unrift/core";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
-function run(...args: string[]) {
+// `file` is the positional file pattern, so each test picks its fixture.
+function run(file: string, ...args: string[]) {
   const proc = spawnSync(
     process.execPath,
     [
@@ -10,6 +11,7 @@ function run(...args: string[]) {
       "--config",
       resolve(process.cwd(), "test/grep/unrift.config.ts"),
       "--json",
+      file,
       ...args,
     ],
     { encoding: "utf8" },
@@ -24,7 +26,7 @@ function run(...args: string[]) {
 
 describe("--grep", () => {
   it("runs only matching tests and skips the rest", () => {
-    const { proc, report, statusOf } = run("--grep", "adds");
+    const { proc, report, statusOf } = run("grep-fixture", "--grep", "adds");
 
     expect(proc.status).toBe(0);
     expect(statusOf("adds numbers")).toBe("pass");
@@ -34,7 +36,7 @@ describe("--grep", () => {
   });
 
   it("does not run hooks of suites with no matches", () => {
-    const { report } = run("-g", "adds");
+    const { report } = run("grep-fixture", "-g", "adds");
 
     expect(
       report.results.some((r: { description: string }) =>
@@ -44,9 +46,18 @@ describe("--grep", () => {
   });
 
   it("matches against suite names", () => {
-    const { statusOf } = run("--grep", "math › sub");
+    const { statusOf } = run("grep-fixture", "--grep", "math › sub");
 
     expect(statusOf("subtracts numbers")).toBe("fail");
     expect(statusOf("adds numbers")).toBe("skipped");
+  });
+
+  it("does not run hooks when matching tests can't run", () => {
+    for (const fixture of ["only-fixture", "skip-fixture"]) {
+      const { proc, report } = run(fixture, "--grep", "wanted");
+
+      expect(proc.status).toBe(0);
+      expect(report.skipped).toBe(report.total);
+    }
   });
 });
