@@ -139,6 +139,16 @@ expect(9).toBeLessThanOrEqual(10);
 expect(11).not.toBeLessThanOrEqual(10);
 ```
 
+### `toBeCloseTo(expected, precision?)`
+
+Use for floats where exact equality won't work. Passes when the difference is less than `10 ** -precision / 2`. Precision defaults to `2`.
+
+```ts
+expect(0.1 + 0.2).toBeCloseTo(0.3);
+expect(0.1 + 0.2).toBeCloseTo(0.3, 10);
+expect(0.1 + 0.2).not.toBeCloseTo(0.4);
+```
+
 ### `toBeNaN()`
 
 Passes when the value is `NaN`.
@@ -181,6 +191,15 @@ For arrays, checks if the item is in the array (using `Array.includes`). For str
 expect([1, 2, 3]).toContain(2);
 expect("hello").toContain("ell");
 expect([1, 2]).not.toContain(5);
+```
+
+### `toContainEqual(expected)`
+
+Like `toContain` but compares each item with `toEqual` instead of by reference. Arrays only.
+
+```ts
+expect([{ a: 1 }, { b: 2 }]).toContainEqual({ a: 1 });
+expect([{ a: 1 }]).not.toContainEqual({ a: 2 });
 ```
 
 ### `toHaveLength(expected)`
