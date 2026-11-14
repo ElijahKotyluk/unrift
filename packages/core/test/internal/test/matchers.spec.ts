@@ -132,6 +132,11 @@ describe("collection matchers", () => {
     expect(() => expect("abc").toContainEqual("a")).toThrow();
   });
 
+  it("toContainEqual treats sparse holes as undefined", () => {
+    expect(new Array(1)).toContainEqual(undefined);
+    expect(() => expect(new Array(1)).not.toContainEqual(undefined)).toThrow();
+  });
+
   it("toHaveLength works with arrays", () => {
     expect([1, 2, 3]).toHaveLength(3);
     expect(() => expect([1]).toHaveLength(2)).toThrow();

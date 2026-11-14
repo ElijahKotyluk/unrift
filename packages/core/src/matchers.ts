@@ -234,7 +234,14 @@ function registerCoreMatchers() {
         );
       }
 
-      const pass = received.some((item) => looseEqual(item, expected));
+      // for...of visits sparse holes as undefined; Array.some would skip them.
+      let pass = false;
+      for (const item of received) {
+        if (looseEqual(item, expected)) {
+          pass = true;
+          break;
+        }
+      }
 
       if (this.isNot ? pass : !pass) {
         throw new Error(this.diff(received, expected));
