@@ -85,6 +85,24 @@ describe("numeric matchers", () => {
     expect(5).not.toBeLessThan(2);
     expect(() => expect(3).not.toBeLessThan(5)).toThrow();
   });
+
+  it("toBeCloseTo defaults to 2 digits", () => {
+    expect(0.1 + 0.2).toBeCloseTo(0.3);
+    expect(1.004).toBeCloseTo(1);
+    expect(() => expect(1.006).toBeCloseTo(1)).toThrow();
+  });
+
+  it("toBeCloseTo respects precision", () => {
+    expect(0.1 + 0.2).toBeCloseTo(0.3, 10);
+    expect(() => expect(0.301).toBeCloseTo(0.3, 5)).toThrow();
+  });
+
+  it("toBeCloseTo with .not and infinities", () => {
+    expect(0.1 + 0.2).not.toBeCloseTo(0.4);
+    expect(Infinity).toBeCloseTo(Infinity);
+    expect(Infinity).not.toBeCloseTo(-Infinity);
+    expect(() => expect("1" as unknown).toBeCloseTo(1)).toThrow();
+  });
 });
 
 describe("collection matchers", () => {

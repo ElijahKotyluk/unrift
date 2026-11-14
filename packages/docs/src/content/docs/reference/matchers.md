@@ -139,6 +139,16 @@ expect(9).toBeLessThanOrEqual(10);
 expect(11).not.toBeLessThanOrEqual(10);
 ```
 
+### `toBeCloseTo(expected, precision?)`
+
+Use for floats where exact equality won't work. Passes when the difference is less than `10 ** -precision / 2`. Precision defaults to `2`.
+
+```ts
+expect(0.1 + 0.2).toBeCloseTo(0.3);
+expect(0.1 + 0.2).toBeCloseTo(0.3, 10);
+expect(0.1 + 0.2).not.toBeCloseTo(0.4);
+```
+
 ### `toBeNaN()`
 
 Passes when the value is `NaN`.

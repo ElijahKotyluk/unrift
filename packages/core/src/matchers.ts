@@ -329,6 +329,28 @@ function registerCoreMatchers() {
       }
     },
 
+    toBeCloseTo(
+      this: MatcherContext,
+      received: unknown,
+      expected: unknown,
+      precision: unknown = 2,
+    ) {
+      if (typeof received !== "number" || typeof expected !== "number") {
+        throw new Error(this.diff(received, "expected a number"));
+      }
+
+      // Same-signed infinities are equal; the subtraction below would be NaN.
+      const pass =
+        received === expected ||
+        Math.abs(received - expected) < 10 ** -(precision as number) / 2;
+
+      if (this.isNot ? pass : !pass) {
+        throw new Error(
+          this.diff(received, `${expected} (precision ${precision})`),
+        );
+      }
+    },
+
     toBeNaN(this: MatcherContext, received: unknown) {
       const pass = Number.isNaN(received);
 

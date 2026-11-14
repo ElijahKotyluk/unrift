@@ -29,6 +29,7 @@ export interface Matchers<T> {
   toThrow(expected?: unknown): void | Promise<void>;
   toBeGreaterThanOrEqual(expected: number): void | Promise<void>;
   toBeLessThanOrEqual(expected: number): void | Promise<void>;
+  toBeCloseTo(expected: number, precision?: number): void | Promise<void>;
   toBeNaN(): void | Promise<void>;
   toBeFinite(): void | Promise<void>;
   toMatchObject(expected: Record<string, unknown>): void | Promise<void>;
