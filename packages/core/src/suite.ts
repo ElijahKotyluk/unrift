@@ -3,11 +3,13 @@ import { resetMatchers } from "./matchers";
 import { Test } from "./test";
 
 import { type PromisableFn, TaskMode, TaskStatus } from "./types";
+import { regexTest } from "./utils/helpers";
 import { toError } from "./utils/toError";
 
 interface RunOptions {
   timeoutMs?: number;
   bail?: boolean;
+  grep?: RegExp;
 }
 
 interface SuiteRunState {
@@ -147,8 +149,12 @@ export class Suite {
     const suiteHasOnly = this.subtreeHasOnly;
     const inOnlyContext = ancestorOnly || this.mode === TaskMode.Only;
 
-    // If only is on and this suite has no runnable-only content, skip it entirely
-    if (isOnly && !suiteHasOnly && !inOnlyContext) {
+    // If only is on and this suite has no runnable-only content, skip it entirely.
+    // Same for --grep: no matching test below means its hooks shouldn't run.
+    if (
+      (isOnly && !suiteHasOnly && !inOnlyContext) ||
+      (options?.grep && !this.subtreeMatchesGrep(options.grep))
+    ) {
       this.markSubtreeSkipped();
 
       return;
@@ -196,7 +202,10 @@ export class Suite {
         const testIsOnly = inOnlyContext || test.mode === TaskMode.Only;
 
         // If onlyMode, skip tests that are not in only context
-        if (isOnly && !testIsOnly) {
+        if (
+          (isOnly && !testIsOnly) ||
+          (options?.grep && !this.testMatchesGrep(test, options.grep))
+        ) {
           test.status = TaskStatus.Skipped;
           test.durationMs = 0;
           continue;
@@ -278,6 +287,20 @@ export class Suite {
         }
       }
     }
+  }
+
+  private testMatchesGrep(test: Test, grep: RegExp): boolean {
+    return regexTest(
+      grep,
+      `${this.getFullDescription()} › ${test.description}`,
+    );
+  }
+
+  private subtreeMatchesGrep(grep: RegExp): boolean {
+    return (
+      this.tests.some((test) => this.testMatchesGrep(test, grep)) ||
+      this.suites.some((suite) => suite.subtreeMatchesGrep(grep))
+    );
   }
 
   getFullDescription(): string {

@@ -59,6 +59,7 @@ The main difference is explicit imports. Unrift doesn't inject globals:
 | `jest --watch` | `unrift --watch` | Watch mode |
 | `jest --json` | `unrift --json` | Similar output |
 | `jest math` | `unrift math` | Pattern filter |
+| `jest -t "adds"` | `unrift --grep "adds"` | Different flag name, also matches the file path |
 | `jest --config path` | `unrift --config path` | Same concept |
 | `jest --testTimeout 5000` | `unrift --timeout 5000` | Different flag name |
 

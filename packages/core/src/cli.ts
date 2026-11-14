@@ -42,6 +42,7 @@ Usage:
 
 Options:
   -c, --config <path>      Path to config file
+  -g, --grep <pattern>     Only run tests whose full name matches (regex)
   -b, --bail               Stop on first test failure
   -t, --timeout <ms>       Default test timeout in milliseconds
   -w, --watch              Re-run tests on file changes
@@ -55,6 +56,7 @@ Options:
 Examples:
   unrift
   unrift math
+  unrift --grep "adds numbers"
   unrift -c test/config.ts --bail
   unrift --timeout 10000
   unrift --watch
@@ -64,6 +66,7 @@ Examples:
 function parseArgs(argv: string[]) {
   let configPath: string | undefined;
   let pattern: RegExp | undefined;
+  let grep: RegExp | undefined;
   let timeoutMs: number | undefined;
   let bail: boolean | undefined;
   let debug = false;
@@ -95,6 +98,17 @@ function parseArgs(argv: string[]) {
       if (!next) throw new Error(`${a} requires a path`);
 
       configPath = next;
+      i++;
+
+      continue;
+    }
+
+    if (a === "--grep" || a === "-g") {
+      const next = argv[i + 1];
+
+      if (!next) throw new Error(`${a} requires a pattern`);
+
+      grep = safeRegExp(next);
       i++;
 
       continue;
@@ -159,6 +173,7 @@ function parseArgs(argv: string[]) {
   return {
     configPath,
     pattern,
+    grep,
     timeoutMs,
     bail,
     debug,
@@ -174,6 +189,7 @@ function parseArgs(argv: string[]) {
 const {
   configPath,
   pattern,
+  grep,
   timeoutMs,
   bail,
   debug,
@@ -197,6 +213,7 @@ if (help) {
 
 const runOpts = {
   pattern,
+  grep,
   configPath,
   timeoutMs,
   bail,

@@ -9,13 +9,14 @@ description: Command-line interface reference for Unrift.
 unrift [pattern] [options]
 ```
 
-The first positional argument is a regex pattern to filter test files by path.
+The first positional argument is a regex pattern to filter test files by path. Use `--grep` to filter by test name instead.
 
 ## Flags
 
 | Flag | Description |
 |------|-------------|
 | `-c, --config <path>` | Path to config file |
+| `-g, --grep <pattern>` | Only run tests whose full name matches the regex |
 | `-b, --bail` | Stop on first test failure |
 | `-t, --timeout <ms>` | Default test timeout in milliseconds |
 | `-w, --watch` | Re-run tests automatically when files change |
@@ -35,6 +36,9 @@ unrift
 # Run tests matching a pattern
 unrift math
 
+# Run tests by name
+unrift --grep "adds numbers"
+
 # Stop on first failure with a 10s timeout
 unrift --bail --timeout 10000
 
@@ -50,6 +54,12 @@ unrift --list
 # JSON output for CI pipelines
 unrift --json
 ```
+
+## Filtering by test name
+
+`--grep` matches against the full test name, which is the file path, the describe blocks and the test name joined with ` › `. So `unrift --grep "math › adds"` runs `adds numbers` inside `describe("math")`.
+
+Tests that don't match show up as skipped so the totals stay the same. Hooks for a describe block only run if something inside it matches.
 
 ## JSON output
 
