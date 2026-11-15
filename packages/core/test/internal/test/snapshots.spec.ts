@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@unrift/core";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -526,6 +526,8 @@ it("template", () => expect(1).toMatchInlineSnapshot(\`\${two}\`));
 
     expect(blocked.status).toBe(1);
     expect(blocked.report.snapshots.errors).toHaveLength(1);
+    // Nothing was saved, so nothing counts as written
+    expect(blocked.report.snapshots.added).toBe(0);
     rmSync(join(ws.snapPath, ".."));
 
     // A read-only test file can't take an inline snapshot. Root can write it anyway.
@@ -539,8 +541,121 @@ it("template", () => expect(1).toMatchInlineSnapshot(\`\${two}\`));
       expect(readOnly.status).toBe(1);
       expect(readOnly.report.snapshots.errors).toHaveLength(1);
       expect(ws.source()).toBe(source);
+
+      // Unreadable by the end of the run is an error too, not a skip
+      ws.spec(`import { chmodSync } from "node:fs";
+it("a", () => {
+  expect(1).toMatchInlineSnapshot();
+  chmodSync(${JSON.stringify(ws.specPath)}, 0o000);
+});
+`);
+      const unreadable = ws.run();
+      chmodSync(ws.specPath, 0o644);
+
+      expect(unreadable.status).toBe(1);
+      expect(unreadable.report.snapshots.errors).toHaveLength(1);
+      expect(unreadable.report.snapshots.inlineSkipped).toEqual([]);
+
+      // A .snap -u can't rewrite keeps its obsolete snapshot in the report
+      ws.spec(
+        `it("a", () => expect(1).toMatchSnapshot());\nit("b", () => expect(2).toMatchSnapshot());\n`,
+      );
+      ws.run();
+      ws.spec(`it("a", () => expect(1).toMatchSnapshot());\n`);
+      chmodSync(ws.snapPath, 0o444);
+      const stuck = ws.run({}, "-u");
+      chmodSync(ws.snapPath, 0o644);
+
+      expect(stuck.report.snapshots).toMatchObject({ removed: 0 });
+      expect(stuck.report.snapshots.obsoleteKeys).toEqual([
+        { file: ws.snapPath.replace(/\\/g, "/"), key: "b 1" },
+      ]);
     }
   });
+
+  it("runs every file again when runEngine is called again in the same process", () => {
+    // Watch mode does this. A file that didn't change came back from Node's
+    // module cache and registered no tests, so its snapshots looked obsolete.
+    const ws = workspace("rerun");
+    const fileSpec = join(ws.dir, "x.spec.ts");
+
+    writeFileSync(
+      fileSpec,
+      `import { it, expect } from "@unrift/core";\nit("x", () => expect(1).toMatchSnapshot());\n`,
+    );
+    ws.spec(`it("y", () => expect(2).toMatchInlineSnapshot());\n`);
+    writeFileSync(
+      join(ws.dir, "run.mjs"),
+      `import { runEngine } from "@unrift/core";
+const both = [${JSON.stringify(fileSpec)}, ${JSON.stringify(ws.specPath)}];
+const runs = [];
+for (const [files, updateSnapshots] of [[both, "none"], [both, "new"], [both.slice(0, 1), "all"]]) {
+  const res = await runEngine({ files, updateSnapshots });
+  runs.push({ tests: res.results.length, snapshots: res.snapshots });
+}
+console.log(JSON.stringify(runs));
+`,
+    );
+    const res = spawnSync(process.execPath, [join(ws.dir, "run.mjs")], {
+      encoding: "utf8",
+      env: { ...process.env, CI: "" },
+    });
+    const [, second, third] = JSON.parse(res.stdout);
+
+    // Second run: nothing changed on disk since the first, both files still run
+    expect(second.tests).toBe(2);
+    expect(second.snapshots.added).toBe(2);
+    expect(ws.source()).toContain("toMatchInlineSnapshot(`2`)");
+    // Third run with -u: x is unchanged and cached, its snapshot must survive
+    expect(third.tests).toBe(1);
+    expect(third.snapshots.removed).toBe(0);
+    expect(existsSync(join(ws.dir, "__snapshots__", "x.spec.ts.snap"))).toBe(
+      true,
+    );
+  });
+
+  it("watch mode reruns on edits to a .snap but not on its own writes", async () => {
+    const ws = workspace("watch");
+
+    ws.spec(`it("a", () => expect(1).toMatchSnapshot());\n`);
+
+    const child = spawn(
+      process.execPath,
+      [
+        resolve(process.cwd(), "bin/unrift.mjs"),
+        "--config",
+        join(ws.dir, "unrift.config.ts"),
+        "--watch",
+      ],
+      { env: { ...process.env, CI: "" } },
+    );
+    let output = "";
+
+    child.stdout.on("data", (chunk) => (output += chunk));
+
+    const waitFor = async (text: string, ms = 5000) => {
+      const start = Date.now();
+
+      while (!output.includes(text) && Date.now() - start < ms) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      return output.includes(text);
+    };
+
+    try {
+      expect(await waitFor("for changes")).toBe(true);
+      // The first run wrote the .snap, that alone mustn't rerun
+      await new Promise((r) => setTimeout(r, 600));
+      expect(output).not.toContain("re-running");
+
+      // Breaking it by hand does
+      writeFileSync(ws.snapPath, "exports[`a 1`] = `2`;\n");
+      expect(await waitFor("re-running")).toBe(true);
+    } finally {
+      child.kill();
+    }
+  }, 15000);
 
   it("serializes values like Jest", () => {
     // Escaped, so different values can't print the same

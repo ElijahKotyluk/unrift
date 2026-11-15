@@ -431,10 +431,11 @@ export function writeInlineSnapshots(): {
 
     let current: string;
 
+    // Can't be read back, the matcher passed expecting this to land
     try {
       current = readFileSync(path, "utf8");
-    } catch {
-      skipped.push(path);
+    } catch (err) {
+      errors.push({ file: path, message: errorMessage(err) });
       continue;
     }
 

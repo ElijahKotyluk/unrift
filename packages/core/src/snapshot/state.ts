@@ -307,11 +307,17 @@ export function finishSnapshots(
 
     summary.failed += file.failed.size;
 
+    // Counted per file and only added once the file is saved, so a failed
+    // write doesn't say "1 written"
+    let added = 0;
+    let updated = 0;
+    const removed: string[] = [];
+
     for (const [key, value] of file.data) {
       const before = file.saved.get(key);
 
-      if (before === undefined) summary.added++;
-      else if (before !== value) summary.updated++;
+      if (before === undefined) added++;
+      else if (before !== value) updated++;
     }
 
     for (const key of file.saved.keys()) {
@@ -323,7 +329,7 @@ export function finishSnapshots(
 
       if (mode === "all") {
         file.data.delete(key);
-        summary.removed++;
+        removed.push(key);
       } else {
         summary.obsoleteKeys.push({ file: file.path, key });
       }
@@ -344,9 +350,18 @@ export function finishSnapshots(
         file: file.path,
         message: err instanceof Error ? err.message : String(err),
       });
+
+      // Still in the file, so still obsolete
+      for (const key of removed) {
+        summary.obsoleteKeys.push({ file: file.path, key });
+      }
+
       continue;
     }
 
+    summary.added += added;
+    summary.updated += updated;
+    summary.removed += removed.length;
     summary.filesWritten.push(file.path);
   }
 

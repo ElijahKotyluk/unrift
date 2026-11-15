@@ -1,5 +1,10 @@
-import { watch as fsWatch, readdirSync, type FSWatcher } from "node:fs";
-import { relative, resolve, join } from "node:path";
+import {
+  watch as fsWatch,
+  readdirSync,
+  statSync,
+  type FSWatcher,
+} from "node:fs";
+import { basename, dirname, relative, resolve, join } from "node:path";
 
 import {
   loadConfig,
@@ -445,6 +450,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   }
 
   const snapshots = engine.snapshots;
+
+  noteOwnWrites(snapshots.filesWritten);
   // Obsolete snapshots fail the run until they're removed with -u, and so
   // does a snapshot that couldn't be read or written
   const obsoleteLeft = snapshots.obsolete - snapshots.removed;
@@ -660,6 +667,36 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
  * platforms (Linux `fs.watch` does not support `recursive: true` before Node 22).
  * Returns a cleanup function to stop watching.
  */
+// What the last run wrote, so the watcher can tell its own writes from user
+// edits. Stamped by mtime and size: an edit after that changes the stamp.
+const ownWrites = new Map<string, string>();
+
+function stamp(path: string): string {
+  try {
+    const st = statSync(path);
+
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return "missing";
+  }
+}
+
+function noteOwnWrites(paths: string[]) {
+  ownWrites.clear();
+
+  for (const path of paths) {
+    ownWrites.set(resolve(path), stamp(path));
+    // Creating or removing the .snap also shows up as a change to its folder
+    ownWrites.set(dirname(resolve(path)), stamp(dirname(path)));
+  }
+}
+
+function isOwnWrite(path: string): boolean {
+  const own = ownWrites.get(resolve(path));
+
+  return own !== undefined && own === stamp(path);
+}
+
 function watchRecursive(
   dir: string,
   onChange: (filename: string) => void,
@@ -680,8 +717,14 @@ function watchRecursive(
     try {
       watchers.push(
         fsWatch(d, (_event, filename) => {
-          // Our own snapshot writes shouldn't trigger another run
-          if (filename?.endsWith(".snap") || filename === "__snapshots__") {
+          // Our own snapshot writes shouldn't trigger another run, edits by
+          // the user (fixing or deleting a .snap) should
+          // (macOS also reports a change to the watched folder itself by its name)
+          if (
+            filename &&
+            (isOwnWrite(join(d, filename)) ||
+              (filename === basename(d) && isOwnWrite(d)))
+          ) {
             return;
           }
           trigger(filename ?? d);
@@ -729,12 +772,8 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
   // Resolve the directory to watch (same logic as runTestsCLI)
   const loaded = options.configPath
-    ? await import("./utils/loadConfig").then((m) =>
-        m.loadConfigFromPath(options.configPath!),
-      )
-    : await import("./utils/loadConfig").then((m) =>
-        m.loadConfig(process.cwd()),
-      );
+    ? await loadConfigFromPath(options.configPath)
+    : await loadConfig(process.cwd());
 
   const config = loaded?.config ?? null;
   const configDir = loaded?.configDir ?? process.cwd();

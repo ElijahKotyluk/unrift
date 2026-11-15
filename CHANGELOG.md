@@ -15,6 +15,9 @@ Versions are `@unrift/core` / `unrift`.
 - `runEngine` takes `updateSnapshots` and returns a `snapshots` summary, `--json` gets a `snapshots` block
 - `SnapshotSummary` and `SnapshotUpdateMode` types exported
 - Fix: test bundles are written to the real path of the cache dir, source map paths didn't resolve on macOS
+- Fix: `--watch` crashed after the first run with `ERR_MODULE_NOT_FOUND`
+- Fix: in watch mode (or a second `runEngine` call) test files that didn't change ran no tests
+- Watch mode reruns when you edit or delete a `.snap`, but not on the run's own snapshot writes
 - Not supported yet: property matchers, `.not` with either snapshot matcher
 
 ## 0.5.1 / 0.6.1 - 2026-11-15

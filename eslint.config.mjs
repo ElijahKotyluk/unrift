@@ -23,6 +23,8 @@ export default defineConfig(
       "**/lib",
       "**/test/**.*",
       "packages/docs/**",
+      // Scratch dirs from the snapshot tests
+      "packages/core/test/snapshots/.work",
     ],
   },
   {

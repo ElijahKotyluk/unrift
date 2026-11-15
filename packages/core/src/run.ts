@@ -38,6 +38,15 @@ export type RunEngineResult = {
   snapshots: SnapshotSummary;
 };
 
+// Node caches a module by URL, so a file that didn't change would come back
+// from the cache and register no tests on a second run (watch mode). Every
+// run after the first gets its own URL so the file runs again.
+let runCount = 0;
+
+function freshImportUrl(url: string): string {
+  return runCount > 1 ? `${url}?run=${runCount}` : url;
+}
+
 function isCI(): boolean {
   const ci = process.env.CI;
 
@@ -80,6 +89,7 @@ export async function runEngine(
   }
 
   clearContext();
+  runCount++;
 
   resetSnapshots(updateMode);
 
@@ -104,7 +114,7 @@ export async function runEngine(
       unriftGlobalContext.currentSuite = fileSuite;
 
       try {
-        await import(toImportUrl(file, "bundle-test"));
+        await import(freshImportUrl(toImportUrl(file, "bundle-test")));
       } catch (err) {
         const error = toError(err);
 
