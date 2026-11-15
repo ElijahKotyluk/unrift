@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { SourceMap } from "node:module";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -34,14 +34,21 @@ interface SourceFile {
   lineStarts: number[];
   /** From tests that are done. A test's own edits are held until then, see state.ts. */
   edits: Map<number, InlineEdit>;
+  /** Changed after the run started, so the code that ran isn't what's on disk. */
+  stale: boolean;
+  /** A stale file a snapshot couldn't be written to, reported as skipped. */
+  missed: boolean;
 }
 
 const sources = new Map<string, SourceFile>();
 const sourceMaps = new Map<string, SourceMap | null>();
 
+let runStartedAt = 0;
+
 export function resetInlineSnapshots() {
   sources.clear();
   sourceMaps.clear();
+  runStartedAt = Date.now();
 }
 
 /**
@@ -149,6 +156,12 @@ function queueEdit(
   }
 
   const file = getSource(site.file, site.content);
+
+  if (file.stale) {
+    if (!optional) file.missed = true;
+    return;
+  }
+
   const offset = (file.lineStarts[site.line] ?? Infinity) + site.column;
   const args = findArgs(file.source, offset);
 
@@ -217,11 +230,28 @@ function getSource(path: string, bundled?: string): SourceFile {
       }
     }
 
-    file = { source, lineStarts, edits: new Map() };
+    // A bundled file has the source it was built from. A plain .js file (or a
+    // helper it imports) is read now, so it only matches what ran if it wasn't
+    // touched since the run started.
+    file = {
+      source,
+      lineStarts,
+      edits: new Map(),
+      stale: bundled === undefined && modifiedSince(path, runStartedAt),
+      missed: false,
+    };
     sources.set(path, file);
   }
 
   return file;
+}
+
+function modifiedSince(path: string, time: number): boolean {
+  try {
+    return statSync(path).mtimeMs > time;
+  } catch {
+    return true;
+  }
 }
 
 /** Where the matcher was called from, in the original source (0-based). */
@@ -389,6 +419,8 @@ export function writeInlineSnapshots(): {
   const skipped: string[] = [];
 
   for (const [path, file] of sources) {
+    if (file.missed) skipped.push(path);
+
     const edits = [...file.edits.values()]
       .filter((edit) => edit.kind === "new" || edit.kind === "update")
       .sort((a, b) => b.start - a.start);

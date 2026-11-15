@@ -29,6 +29,7 @@ function workspace(name: string) {
 
   return {
     snapPath,
+    dir,
     specPath,
     source: () => readFileSync(specPath, "utf8"),
     setSource: (text: string) => writeFileSync(specPath, text),
@@ -365,9 +366,36 @@ it("a", () => {
   expect(1).toMatchInlineSnapshot();
 });
 `);
+    // Same for a plain .js file, which isn't bundled so has no copy of what ran
+    const jsPath = join(ws.dir, "b.spec.mjs");
+    writeFileSync(
+      jsPath,
+      `import { it, expect } from "@unrift/core";
+import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+it("js", () => {
+  const path = fileURLToPath(import.meta.url);
+  writeFileSync(path, "// edited\\n" + readFileSync(path, "utf8"));
+  expect(0).toMatchInlineSnapshot(\`0\`);
+  expect(1).toMatchInlineSnapshot();
+});
+`,
+    );
+    // An untouched one is still written
+    const plainPath = join(ws.dir, "c.spec.mjs");
+    writeFileSync(
+      plainPath,
+      `import { it, expect } from "@unrift/core";\nit("plain", () => expect(1).toMatchInlineSnapshot());\n`,
+    );
     const edited = ws.run();
 
-    expect(edited.report.snapshots.inlineSkipped).toHaveLength(1);
+    expect(edited.report.snapshots.inlineSkipped).toHaveLength(2);
+    expect(readFileSync(plainPath, "utf8")).toContain(
+      "toMatchInlineSnapshot(`1`)",
+    );
+    expect(readFileSync(jsPath, "utf8")).toContain(
+      "expect(0).toMatchInlineSnapshot(`0`);\n  expect(1).toMatchInlineSnapshot();",
+    );
     expect(ws.source()).toContain(
       "expect(0).toMatchInlineSnapshot(`0`);\n  expect(1).toMatchInlineSnapshot();",
     );
