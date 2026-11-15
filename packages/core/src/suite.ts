@@ -10,6 +10,7 @@ interface RunOptions {
   timeoutMs?: number;
   bail?: boolean;
   grep?: RegExp;
+  retries?: number;
 }
 
 interface SuiteRunState {
@@ -34,6 +35,15 @@ function appendHookFailure(
   combined.stack = `${primaryStack}\n\n[${hookName}] ${hookStack}`;
 
   return combined;
+}
+
+export interface TestResult {
+  description: string;
+  status: TaskStatus;
+  error?: Error;
+  durationMs: number;
+  /** How many times the test ran. Above 1 means it was retried. */
+  attempts?: number;
 }
 
 export class Suite {
@@ -256,33 +266,55 @@ export class Suite {
           continue;
         }
 
-        try {
-          for (const hook of beforeEachHooks) {
-            try {
-              await hook();
-            } catch (error) {
-              throw appendHookFailure(undefined, "beforeEach", toError(error));
+        // Each attempt gets its own beforeEach/afterEach so state resets between retries.
+        const maxAttempts = (test.retries ?? options?.retries ?? 0) + 1;
+        let totalMs = 0;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          test.attempts = attempt;
+          test.error = undefined;
+          // Reset so an attempt whose beforeEach throws doesn't report the
+          // previous attempt's time.
+          test.durationMs = 0;
+
+          try {
+            for (const hook of beforeEachHooks) {
+              try {
+                await hook();
+              } catch (error) {
+                throw appendHookFailure(
+                  undefined,
+                  "beforeEach",
+                  toError(error),
+                );
+              }
+            }
+
+            await test.run(options?.timeoutMs);
+          } catch (error) {
+            test.status = TaskStatus.Fail;
+            test.error = toError(error);
+          } finally {
+            for (const hook of afterEachHooks) {
+              try {
+                await hook();
+              } catch (error) {
+                test.status = TaskStatus.Fail;
+                test.error = appendHookFailure(
+                  test.error,
+                  "afterEach",
+                  toError(error),
+                );
+              }
             }
           }
 
-          await test.run(options?.timeoutMs);
-        } catch (error) {
-          test.status = TaskStatus.Fail;
-          test.error = toError(error);
-        } finally {
-          for (const hook of afterEachHooks) {
-            try {
-              await hook();
-            } catch (error) {
-              test.status = TaskStatus.Fail;
-              test.error = appendHookFailure(
-                test.error,
-                "afterEach",
-                toError(error),
-              );
-            }
-          }
+          totalMs += test.durationMs;
+
+          if (test.status !== TaskStatus.Fail) break;
         }
+
+        test.durationMs = totalMs;
 
         // Mark everything that hasn't run as skipped on bail
         if (options?.bail && test.status === TaskStatus.Fail) {
@@ -392,18 +424,8 @@ export class Suite {
     this.subtreeHasOnly = false;
   }
 
-  getResults(): Array<{
-    description: string;
-    status: TaskStatus;
-    error?: Error;
-    durationMs: number;
-  }> {
-    let results: Array<{
-      description: string;
-      status: TaskStatus;
-      error?: Error;
-      durationMs: number;
-    }> = [];
+  getResults(): TestResult[] {
+    let results: TestResult[] = [];
 
     for (const suiteError of this.errors) {
       results.push({
@@ -438,6 +460,7 @@ export class Suite {
         status: test.status,
         error: test.error,
         durationMs: test.durationMs ?? 0,
+        attempts: test.attempts,
       });
     }
 

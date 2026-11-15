@@ -29,6 +29,8 @@ console.log(`Failed: ${result.results.filter(r => r.status === "fail").length}`)
 | `files` | `string[]` | - | **Required.** Absolute or relative paths to test files |
 | `timeoutMs` | `number` | - | Timeout per test in milliseconds |
 | `bail` | `boolean` | `false` | Stop after first failure |
+| `grep` | `RegExp` | - | Only run tests whose full name matches |
+| `retries` | `number` | `0` | Retry failing tests this many times |
 | `matchers` | `string[]` | - | Module specifiers for custom matchers to load |
 
 ## Return value
@@ -45,6 +47,7 @@ type RunEngineResult = {
     status: TaskStatus;  // "pass" | "fail" | "skipped" | "todo"
     error?: Error;       // error details if failed
     durationMs: number;  // execution time in ms
+    attempts?: number;   // how many times it ran, above 1 means retried
   }>;
 };
 ```

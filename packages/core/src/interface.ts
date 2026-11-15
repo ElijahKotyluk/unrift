@@ -3,6 +3,7 @@ import { getCurrentSuite, Suite } from "./suite";
 import { Test } from "./test";
 
 import { type PromisableFn, TaskMode } from "./types";
+import { assertValidRetries } from "./utils/helpers";
 
 /**
  * @TODO expose test and suite aliases
@@ -15,17 +16,26 @@ type DescribeFn = {
   todo: (description: string) => void;
 };
 
+export interface TestOptions {
+  timeout?: number;
+  retries?: number;
+}
+
 type ItFn = {
-  (description: string, fn: PromisableFn<void>, timeoutMs?: number): void;
+  (
+    description: string,
+    fn: PromisableFn<void>,
+    options?: number | TestOptions,
+  ): void;
   only: (
     description: string,
     fn: PromisableFn<void>,
-    timeoutMs?: number,
+    options?: number | TestOptions,
   ) => void;
   skip: (
     description: string,
     fn: PromisableFn<void>,
-    timeoutMs?: number,
+    options?: number | TestOptions,
   ) => void;
   todo: (description: string) => void;
 };
@@ -68,21 +78,27 @@ function _it(
   description: string,
   fn: PromisableFn<void>,
   mode: TaskMode,
-  timeoutMs?: number,
+  options?: number | TestOptions,
 ) {
   assertRegisterState("it");
 
-  const test = new Test(description, fn, mode, timeoutMs);
+  // A bare number is the timeout, kept for backwards compatibility.
+  const { timeout, retries } =
+    typeof options === "number" ? { timeout: options } : (options ?? {});
+
+  assertValidRetries(retries, `it("${description}")`);
+
+  const test = new Test(description, fn, mode, timeout, retries);
 
   getCurrentSuite().addTest(test);
 }
 
-const it: ItFn = (description, fn, timeoutMs) =>
-  _it(description, fn, TaskMode.Default, timeoutMs);
-it.only = (description, fn, timeoutMs) =>
-  _it(description, fn, TaskMode.Only, timeoutMs);
-it.skip = (description, fn, timeoutMs) =>
-  _it(description, fn, TaskMode.Skip, timeoutMs);
+const it: ItFn = (description, fn, options) =>
+  _it(description, fn, TaskMode.Default, options);
+it.only = (description, fn, options) =>
+  _it(description, fn, TaskMode.Only, options);
+it.skip = (description, fn, options) =>
+  _it(description, fn, TaskMode.Skip, options);
 it.todo = (description) => _it(description, () => {}, TaskMode.Todo);
 
 const test: ItFn = it;

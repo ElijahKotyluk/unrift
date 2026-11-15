@@ -1,6 +1,6 @@
 export { beforeEach, afterEach, beforeAll, afterAll } from "./hooks";
 export { defineConfig, type UnriftConfigOptions } from "./utils/defineConfig";
-export { describe, it, test } from "./interface";
+export { describe, it, test, type TestOptions } from "./interface";
 export { expect, extendMatchers } from "./expect";
 
 export type { Matchers, ExpectInterface } from "./expect";

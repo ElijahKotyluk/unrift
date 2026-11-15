@@ -17,17 +17,21 @@ export class Test {
 
   status: TaskStatus = TaskStatus.Pending;
   timeoutMs?: number;
+  retries?: number;
+  attempts: number = 0;
 
   constructor(
     description: string,
     fn: PromisableFn<void>,
     mode: TaskMode = TaskMode.Default,
     timeoutMs?: number,
+    retries?: number,
   ) {
     this.description = description;
     this.fn = fn;
     this.mode = mode;
     this.timeoutMs = timeoutMs;
+    this.retries = retries;
   }
 
   async run(globalTimeoutMs?: number): Promise<void> {
