@@ -293,7 +293,23 @@ describe("async matchers", () => {
       "Expected promise to reject with RangeError, but it rejected with TypeError: boom",
     );
 
-    // Values String() can't handle must not crash the matcher.
+    // Values that can't be inspected or stringified must not crash the matcher.
+    const hostile = Object.create(null, {
+      [Symbol.toStringTag]: {
+        get() {
+          throw new Error("tag getter");
+        },
+      },
+    });
+    await expect(Promise.reject(hostile)).rejects.not.toThrow();
+    expect(
+      await failure(() =>
+        expect(Promise.reject<number>(hostile)).resolves.toBe(1),
+      ),
+    ).toBe(
+      "Expected promise to resolve, but it rejected with: [unprintable value]",
+    );
+
     const nullProto = Object.create(null);
     expect(
       await failure(() =>

@@ -161,7 +161,12 @@ export function safeString(value: unknown): string {
   try {
     return String(value);
   } catch {
-    return Object.prototype.toString.call(value);
+    // The tag lookup can throw too (a throwing Symbol.toStringTag getter).
+    try {
+      return Object.prototype.toString.call(value);
+    } catch {
+      return "[unprintable value]";
+    }
   }
 }
 
@@ -170,8 +175,14 @@ export function safeString(value: unknown): string {
  * `instanceof Error` is false. Same test Jest uses.
  */
 export function isErrorLike(value: unknown): value is Error {
-  return (
-    value instanceof Error ||
-    Object.prototype.toString.call(value) === "[object Error]"
-  );
+  // Both checks can throw (Proxy traps, a throwing Symbol.toStringTag getter).
+  // A value that can't be inspected isn't treated as an Error.
+  try {
+    return (
+      value instanceof Error ||
+      Object.prototype.toString.call(value) === "[object Error]"
+    );
+  } catch {
+    return false;
+  }
 }
