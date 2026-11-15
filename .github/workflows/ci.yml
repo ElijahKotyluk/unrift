@@ -10,6 +10,9 @@ on:
 
 jobs:
   build-lint-test:
+    # Without a name GitHub appends every matrix value, "(20, false)", which
+    # doesn't match the required checks in the ruleset
+    name: build-lint-test (${{ matrix.node-version }})
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
     strategy:
