@@ -12,6 +12,7 @@ export type {
 } from "./types";
 export { runEngine } from "./run";
 export type { RunEngineResult } from "./run";
+export type { SnapshotSummary, SnapshotUpdateMode } from "./snapshot/state";
 
 // Mocking suite
 export {
