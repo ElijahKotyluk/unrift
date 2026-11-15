@@ -1,5 +1,6 @@
 import type { MatcherContext, MatcherMap } from "./types";
 import { formatDiff } from "./utils/diff";
+import { isErrorLike, safeString } from "./utils/helpers";
 
 const matcherRegistry: MatcherMap = Object.create(null);
 
@@ -58,7 +59,7 @@ export interface Matchers<T> {
   toHaveFetchedTimes(expected: number): void | Promise<void>;
 
   readonly not: Matchers<T>;
-  readonly resolves: Matchers<Awaited<T>>;
+  readonly resolves: Matchers<Settled<T>>;
   readonly rejects: Matchers<unknown>;
 }
 
@@ -72,11 +73,27 @@ export interface ExpectInterface {
   readonly matchers: Readonly<MatcherMap>;
 }
 
+/** What `.resolves` sees: a function's returned promise, or the promise itself. */
+type Settled<T> = Awaited<T extends (...args: never[]) => infer R ? R : T>;
+
+function describeError(value: unknown): string {
+  return isErrorLike(value) ? value.message : safeString(value);
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value != null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
 export const expect: ExpectInterface = (() => {
   function expectFn<T>(received: T): Matchers<T> {
     function makeExpectation(isNot: boolean): Matchers<T> {
       const ctx: MatcherContext = {
         isNot,
+        promise: "",
         diff(a, b) {
           return formatDiff(a, b);
         },
@@ -93,9 +110,11 @@ export const expect: ExpectInterface = (() => {
       function makeAsyncProxy(
         getActual: () => Promise<unknown>,
         asyncIsNot: boolean,
+        promise: "resolves" | "rejects",
       ): Matchers<unknown> {
         const asyncCtx: MatcherContext = {
           isNot: asyncIsNot,
+          promise,
           diff(a, b) {
             return formatDiff(a, b);
           },
@@ -106,16 +125,16 @@ export const expect: ExpectInterface = (() => {
         for (const name in matcherRegistry) {
           const fn = matcherRegistry[name];
 
-          asyncFns[name] = async (...args: unknown[]) => {
-            const actual = await getActual();
-            return fn.call(asyncCtx, actual, ...args);
-          };
+          // Not async: getActual() runs now, so a bad received value (a sync
+          // throw, a non-promise) throws immediately like Jest, even unawaited.
+          asyncFns[name] = (...args: unknown[]) =>
+            getActual().then((actual) => fn.call(asyncCtx, actual, ...args));
         }
 
         return new Proxy(asyncFns, {
           get(target, prop) {
             if (prop === "not") {
-              return makeAsyncProxy(getActual, !asyncIsNot);
+              return makeAsyncProxy(getActual, !asyncIsNot, promise);
             }
 
             if (typeof prop === "string" && !(prop in target)) {
@@ -131,33 +150,73 @@ export const expect: ExpectInterface = (() => {
         get(target, prop) {
           if (prop === "not") return makeExpectation(!isNot);
 
+          // Same as Jest: a function is called and must return a promise. A
+          // sync throw from it isn't a rejection, it fails the assertion.
+          const toPromise = (modifier: string): PromiseLike<unknown> => {
+            const value =
+              typeof received === "function"
+                ? (received as () => unknown)()
+                : received;
+
+            if (!isThenable(value)) {
+              throw new TypeError(
+                `.${modifier}: received value must be a promise or a function returning a promise, got ${describeError(value)}`,
+              );
+            }
+
+            return value;
+          };
+
           if (prop === "resolves") {
-            return makeAsyncProxy(async () => {
-              try {
-                return await (received as Promise<unknown>);
-              } catch (err) {
-                throw new Error(
-                  `Expected promise to resolve, but it rejected with: ${err instanceof Error ? err.message : String(err)}`,
-                );
-              }
-            }, isNot);
+            return makeAsyncProxy(
+              () => {
+                const pending = toPromise("resolves");
+
+                return (async () => {
+                  try {
+                    return await pending;
+                  } catch (err) {
+                    throw new Error(
+                      `Expected promise to resolve, but it rejected with: ${describeError(err)}`,
+                    );
+                  }
+                })();
+              },
+              isNot,
+              "resolves",
+            );
           }
 
           if (prop === "rejects") {
-            return makeAsyncProxy(async () => {
-              try {
-                await (received as Promise<unknown>);
-                throw new Error("Expected promise to reject, but it resolved");
-              } catch (err) {
-                if (
-                  err instanceof Error &&
-                  err.message === "Expected promise to reject, but it resolved"
-                ) {
-                  throw err;
-                }
-                return err;
-              }
-            }, isNot);
+            return makeAsyncProxy(
+              () => {
+                const pending = toPromise("rejects");
+
+                return (async () => {
+                  // Tracked with a flag, not by error message, so a promise that
+                  // rejects with that same text is still treated as a rejection.
+                  let resolved = false;
+                  let reason: unknown;
+
+                  try {
+                    await pending;
+                    resolved = true;
+                  } catch (err) {
+                    reason = err;
+                  }
+
+                  if (resolved) {
+                    throw new Error(
+                      "Expected promise to reject, but it resolved",
+                    );
+                  }
+
+                  return reason;
+                })();
+              },
+              isNot,
+              "rejects",
+            );
           }
 
           if (typeof prop === "string" && !(prop in target)) {

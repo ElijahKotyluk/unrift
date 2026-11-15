@@ -5,7 +5,11 @@ import { isFetchMock, type MockFetch } from "./mock/fetch";
 import { deepEqual } from "./utils/deepEqual";
 import { looseEqual } from "./utils/looseEqual";
 import { regexTest } from "./utils/helpers";
-import { toThrow, type ToThrowExpected } from "./utils/toThrow";
+import {
+  toThrow,
+  toThrowFromPromise,
+  type ToThrowExpected,
+} from "./utils/toThrow";
 
 import type { MatcherContext } from "./types";
 
@@ -309,11 +313,15 @@ function registerCoreMatchers() {
     },
 
     toThrow(this: MatcherContext, received: unknown, expected?: unknown) {
-      const { pass, message } = toThrow(
-        received,
-        expected as ToThrowExpected,
-        this.isNot,
-      );
+      // Under .resolves/.rejects, `received` is the settled value itself.
+      const { pass, message } = this.promise
+        ? toThrowFromPromise(
+            received,
+            expected as ToThrowExpected,
+            this.isNot,
+            this.promise,
+          )
+        : toThrow(received, expected as ToThrowExpected, this.isNot);
 
       if (!pass) throw new Error(message());
     },

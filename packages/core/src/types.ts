@@ -20,6 +20,8 @@ export enum TaskMode {
 
 export interface MatcherContext {
   isNot: boolean;
+  /** "resolves" or "rejects" under those modifiers, otherwise "" (same as Jest). */
+  promise: "" | "resolves" | "rejects";
   diff(a: unknown, b: unknown): string;
 }
 

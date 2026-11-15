@@ -42,6 +42,15 @@ await expect(failingOperation()).rejects.toThrow(/timeout/);
 
 If the promise resolves, the test fails.
 
+With `rejects.toThrow`, the rejection only counts as thrown if it's an `Error`. A promise that rejects with a string fails `rejects.toThrow()`, same as Jest. Use `rejects.toBe("reason")` for those.
+
+You can also pass a function that returns a promise. Anything else fails the assertion, same as Jest: a plain value like `expect(42).resolves`, a function that throws right away, or a function that returns a non-promise.
+
+```ts
+await expect(() => failingOperation()).rejects.toThrow(/timeout/);
+await expect(async () => 42).resolves.toBe(42);
+```
+
 ## Chaining with .not
 
 Both `resolves` and `rejects` support `.not`:
