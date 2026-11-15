@@ -10,7 +10,7 @@ Unrift's API is designed to be familiar to Jest and Vitest users. Most tests can
 These work identically in Unrift:
 
 - `describe()`, `it()`, `test()`
-- `expect()` with `.toBe()`, `.toEqual()`, `.toThrow()`, etc.
+- `expect()` with `.toBe()`, `.toEqual()`, `.toThrow()`, etc. (a few small differences are listed in [Matcher differences](#matcher-differences))
 - `.not` chaining
 - `beforeAll`, `afterAll`, `beforeEach`, `afterEach`
 - `.only`, `.skip`
@@ -77,6 +77,7 @@ Most matchers are identical. Key differences:
 | `toHaveProperty` | `toHaveProperty` | Same (dot-notation and array paths supported) |
 | `toBeCloseTo(n, digits?)` | `toBeCloseTo(n, digits?)` | Same (default 2 digits) |
 | `toContainEqual` | `toContainEqual` | Arrays only (Jest also takes other iterables) |
+| `toThrow({ message })` | `toThrow({ message })` | Substring match, Jest needs the exact message. Use a regex like `/^boom$/` for exact |
 | `toHaveBeenCalled` | `toHaveBeenCalled` | Same |
 | `toHaveBeenCalledTimes(n)` | `toHaveBeenCalledTimes(n)` | Same |
 | `toHaveBeenCalledWith(...)` | `toHaveBeenCalledWith(...)` | Same |
