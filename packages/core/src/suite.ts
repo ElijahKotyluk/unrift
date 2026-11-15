@@ -80,7 +80,11 @@ export class Suite {
    * doesn't depend on whether a runnable sibling matched; everything else is
    * skipped.
    */
-  private markSubtreeFilteredOut(grep: RegExp) {
+  private markSubtreeFilteredOut(
+    grep: RegExp,
+    isOnly: boolean,
+    inOnlyContext: boolean,
+  ) {
     for (const test of this.tests) {
       if (test.status !== TaskStatus.Pending) continue;
       test.status =
@@ -90,9 +94,19 @@ export class Suite {
       test.durationMs = 0;
     }
 
+    // Same skip and .only rules as run(), so a suite excluded by .only stays
+    // skipped no matter which pattern pruned its parent.
     for (const suite of this.suites) {
-      if (suite.mode === TaskMode.Skip) suite.markSubtreeSkipped();
-      else suite.markSubtreeFilteredOut(grep);
+      const childOnly = inOnlyContext || suite.mode === TaskMode.Only;
+
+      if (
+        suite.mode === TaskMode.Skip ||
+        (isOnly && !suite.subtreeHasOnly && !childOnly)
+      ) {
+        suite.markSubtreeSkipped();
+      } else {
+        suite.markSubtreeFilteredOut(grep, isOnly, childOnly);
+      }
     }
   }
 
@@ -182,7 +196,7 @@ export class Suite {
       options?.grep &&
       !this.hasRunnableMatch(options.grep, isOnly, inOnlyContext)
     ) {
-      this.markSubtreeFilteredOut(options.grep);
+      this.markSubtreeFilteredOut(options.grep, isOnly, inOnlyContext);
 
       return;
     }

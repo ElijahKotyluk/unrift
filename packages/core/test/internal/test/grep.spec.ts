@@ -68,4 +68,12 @@ describe("--grep", () => {
     expect(statusOf("wanted runnable")).toBe("pass");
     expect(statusOf("unrelated todo")).toBe("skipped");
   });
+
+  it("keeps todos excluded by .only skipped for any pattern", () => {
+    for (const pattern of ["wanted", "wanted|focused"]) {
+      const { statusOf } = run("focus-fixture", "--grep", pattern);
+
+      expect(statusOf("wanted")).toBe("skipped");
+    }
+  });
 });
