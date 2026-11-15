@@ -610,12 +610,14 @@ it("a", () => {
 
     writeFileSync(
       cjsSpec,
-      `const { it, expect } = require("@unrift/core");\nit("z", () => expect(3).toMatchSnapshot());\n`,
+      // Not require("@unrift/core"): Node 18 can't require the ESM build
+      `const { it, expect } = globalThis.__unrift;\nit("z", () => expect(3).toMatchSnapshot());\n`,
     );
     ws.spec(`it("y", () => expect(2).toMatchInlineSnapshot());\n`);
     writeFileSync(
       join(ws.dir, "run.mjs"),
-      `import { runEngine } from "@unrift/core";
+      `import { runEngine, it, expect } from "@unrift/core";
+globalThis.__unrift = { it, expect };
 const all = [${JSON.stringify(fileSpec)}, ${JSON.stringify(cjsSpec)}, ${JSON.stringify(ws.specPath)}];
 const runs = [];
 for (const [files, updateSnapshots] of [[all, "none"], [all, "new"], [all.slice(0, 2), "all"]]) {
@@ -660,7 +662,7 @@ console.log(JSON.stringify(runs));
         join(ws.dir, "unrift.config.ts"),
         "--watch",
       ],
-      { env: { ...process.env, CI: "" } },
+      { env: { ...process.env, CI: "", UNRIFT_DEBUG: "1" } },
     );
     let output = "";
 
@@ -677,6 +679,13 @@ console.log(JSON.stringify(runs));
     };
 
     const reruns = () => output.split("re-running").length - 1;
+    const waitForReruns = async (n: number) => {
+      const start = Date.now();
+
+      while (reruns() < n && Date.now() - start < 5000) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    };
 
     try {
       expect(await waitFor("for changes")).toBe(true);
@@ -689,13 +698,24 @@ console.log(JSON.stringify(runs));
 
       // Breaking it by hand does, even though the folder is newer than the watcher
       writeFileSync(ws.snapPath, "exports[`a 1`] = `2`;\n");
-      const start = Date.now();
-
-      while (reruns() < 2 && Date.now() - start < 5000) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      await waitForReruns(2);
 
       expect(reruns()).toBe(2);
+
+      // Deleted and made again by the next rerun: the new folder is watched too
+      await new Promise((r) => setTimeout(r, 300));
+      rmSync(join(ws.snapPath, ".."), { recursive: true });
+      await waitForReruns(3);
+      await new Promise((r) => setTimeout(r, 600));
+      expect(existsSync(ws.snapPath)).toBe(true);
+      writeFileSync(ws.snapPath, "exports[`a 1`] = `3`;\n");
+      await waitForReruns(4);
+
+      expect(reruns()).toBe(4);
+      // Once when it was first made, again when it was made again. macOS
+      // follows the new folder on its own, Linux needs the new watcher.
+      const snapDir = join(ws.snapPath, "..");
+      expect(output.split(`[unrift] watching ${snapDir}\n`).length - 1).toBe(2);
     } finally {
       child.kill();
     }

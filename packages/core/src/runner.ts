@@ -711,18 +711,31 @@ function watchRecursive(
     timer = setTimeout(() => onChange(lastFile), debounceMs);
   }
 
-  const watchers: FSWatcher[] = [];
-  const watched = new Set<string>();
+  // By inode, so a folder deleted and made again at the same path (like
+  // __snapshots__) gets a new watcher. The old one stays on the deleted folder.
+  const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
 
   // A folder made after startup (the first __snapshots__, a new test dir)
   // gets its own watcher, before its creation event is checked below
   function watchIfNewDir(path: string) {
-    if (watched.has(path)) return;
+    let ino: number;
 
     try {
-      if (!statSync(path).isDirectory()) return;
+      const st = statSync(path);
+
+      if (!st.isDirectory()) return;
+      ino = st.ino;
     } catch {
       return;
+    }
+
+    const existing = watched.get(path);
+
+    if (existing?.ino === ino) return;
+
+    if (existing) {
+      closeWatcher(existing.watcher);
+      watched.delete(path);
     }
 
     const name = basename(path);
@@ -731,26 +744,37 @@ function watchRecursive(
   }
 
   function watchDir(d: string) {
-    watched.add(d);
+    let ino: number;
 
     try {
-      watchers.push(
-        fsWatch(d, (_event, filename) => {
-          if (filename) watchIfNewDir(join(d, filename));
+      ino = statSync(d).ino;
+    } catch {
+      return;
+    }
 
-          // Our own snapshot writes shouldn't trigger another run, edits by
-          // the user (fixing or deleting a .snap) should
-          // (macOS also reports a change to the watched folder itself by its name)
-          if (
-            filename &&
-            (isOwnWrite(join(d, filename)) ||
-              (filename === basename(d) && isOwnWrite(d)))
-          ) {
-            return;
-          }
-          trigger(filename ?? d);
-        }),
-      );
+    try {
+      const watcher = fsWatch(d, (_event, filename) => {
+        if (filename) watchIfNewDir(join(d, filename));
+
+        // Our own snapshot writes shouldn't trigger another run, edits by
+        // the user (fixing or deleting a .snap) should
+        // (macOS also reports a change to the watched folder itself by its name)
+        if (
+          filename &&
+          (isOwnWrite(join(d, filename)) ||
+            (filename === basename(d) && isOwnWrite(d)))
+        ) {
+          return;
+        }
+        trigger(filename ?? d);
+      });
+
+      // Deleting a watched folder can emit an error on some platforms
+      watcher.on("error", () => {});
+      watched.set(d, { watcher, ino });
+
+      if (process.env.UNRIFT_DEBUG === "1")
+        console.log(`[unrift] watching ${d}`);
     } catch {
       return;
     }
@@ -777,14 +801,16 @@ function watchRecursive(
 
   return () => {
     if (timer) clearTimeout(timer);
-    for (const w of watchers) {
-      try {
-        w.close();
-      } catch {
-        // ignore
-      }
-    }
+    for (const { watcher } of watched.values()) closeWatcher(watcher);
   };
+}
+
+function closeWatcher(watcher: FSWatcher) {
+  try {
+    watcher.close();
+  } catch {
+    // ignore
+  }
 }
 
 export async function watchTestsCLI(options: RunnerOptions = {}) {
