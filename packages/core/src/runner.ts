@@ -26,6 +26,7 @@ interface RunnerOptions {
   configPath?: string;
   testDir?: string;
   pattern?: RegExp;
+  grep?: RegExp;
   timeoutMs?: number;
   bail?: boolean;
   debug?: boolean;
@@ -370,6 +371,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     files,
     timeoutMs,
     bail,
+    grep: options.grep,
     matchers: config?.matchers,
   });
 

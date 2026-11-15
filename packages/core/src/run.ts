@@ -10,6 +10,7 @@ type RunEngineOptions = {
   files: string[];
   timeoutMs?: number;
   bail?: boolean;
+  grep?: RegExp;
   matchers?: string[];
 };
 
@@ -78,7 +79,12 @@ export async function runEngine(
 
     unriftGlobalContext.state = RunState.Run;
 
-    await rootSuite.run({ timeoutMs, bail }, { bailed: false }, isOnly, false);
+    await rootSuite.run(
+      { timeoutMs, bail, grep: options.grep },
+      { bailed: false },
+      isOnly,
+      false,
+    );
 
     const results = rootSuite.getResults();
 
