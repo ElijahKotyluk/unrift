@@ -348,6 +348,12 @@ describe("async matchers", () => {
         throw new Error("x");
       }).toThrow(),
     ).toThrow("toThrow() received an async function");
+
+    // a bare thenable has no .catch
+    const thenable = { then: (resolve: (v: number) => void) => resolve(42) };
+    expect(() => expect(() => thenable).toThrow()).toThrow(
+      "toThrow() received an async function",
+    );
   });
 });
 

@@ -116,7 +116,8 @@ export function toThrow(
     typeof (result as { then?: unknown }).then === "function"
   ) {
     // Suppress the unhandled rejection from the returned promise
-    (result as Promise<unknown>).catch(() => {});
+    // Promise.resolve so plain thenables without .catch work too
+    Promise.resolve(result).catch(() => {});
 
     return {
       pass: false,
