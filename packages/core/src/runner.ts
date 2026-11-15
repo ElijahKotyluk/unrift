@@ -4,7 +4,7 @@ import {
   statSync,
   type FSWatcher,
 } from "node:fs";
-import { basename, dirname, relative, resolve, join } from "node:path";
+import { basename, dirname, relative, resolve, join, sep } from "node:path";
 
 import {
   loadConfig,
@@ -711,9 +711,20 @@ function watchRecursive(
     timer = setTimeout(() => onChange(lastFile), debounceMs);
   }
 
-  // By inode, so a folder deleted and made again at the same path (like
-  // __snapshots__) gets a new watcher. The old one stays on the deleted folder.
+  // A folder deleted and made again at the same path (like __snapshots__)
+  // needs a new watcher, the old one stays on the deleted folder. Its watcher
+  // is dropped when the delete is seen. Linux reuses inode numbers right away,
+  // so the inode check is only a backup for a delete that wasn't seen.
   const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
+
+  function forget(path: string) {
+    for (const [dir, { watcher }] of watched) {
+      if (dir === path || dir.startsWith(path + sep)) {
+        closeWatcher(watcher);
+        watched.delete(dir);
+      }
+    }
+  }
 
   // A folder made after startup (the first __snapshots__, a new test dir)
   // gets its own watcher, before its creation event is checked below
@@ -726,6 +737,7 @@ function watchRecursive(
       if (!st.isDirectory()) return;
       ino = st.ino;
     } catch {
+      forget(path);
       return;
     }
 
