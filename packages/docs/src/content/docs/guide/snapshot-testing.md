@@ -64,6 +64,35 @@ exports[`user builds a profile 1`] = `
 
 Values are printed in Jest's format: sorted keys, trailing commas, `Map {`, `Set {`, `[Error: message]`, class names in front of instances. It's Unrift's own printer though, not `pretty-format`, so a snapshot file from Jest might need a `-u` run before it passes.
 
+## Inline snapshots
+
+`toMatchInlineSnapshot()` stores the snapshot in the test file instead, as the argument:
+
+```ts
+it("adds", () => {
+  expect(add(1, 2)).toMatchInlineSnapshot();
+});
+```
+
+After the first run the file reads:
+
+```ts
+it("adds", () => {
+  expect(add(1, 2)).toMatchInlineSnapshot(`3`);
+});
+```
+
+Multi-line values are indented to match the code. Mismatches, `-u` and CI work the same as `toMatchSnapshot`. Inline snapshots are never obsolete, deleting the call deletes the snapshot.
+
+A few things it won't write:
+
+- A call that runs more than once with different values, like in a loop.
+- An argument that isn't a string or template literal, like a variable. Write a literal there or remove it.
+- Under `.resolves` or `.rejects`. Comparing works, but to write one, await the value first and snapshot that.
+- A test file you edited while the tests ran. The run says which file, run it again.
+
+If a test is retried, only the last attempt's value is written.
+
 ## Obsolete snapshots
 
 A stored snapshot that no test used is obsolete, like when you rename or delete a test. Obsolete snapshots fail the run until you remove them with `-u`.
@@ -80,6 +109,6 @@ When the `CI` environment variable is set, new snapshots aren't written and the 
 
 ## Limitations
 
-- `.not.toMatchSnapshot()` isn't allowed.
+- `.not` isn't allowed with either matcher.
 - Property matchers (`toMatchSnapshot({ id: expect.any(Number) })`) aren't supported yet.
 - A snapshot file whose test file was deleted isn't reported, delete it yourself.

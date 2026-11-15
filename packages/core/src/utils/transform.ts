@@ -257,7 +257,9 @@ export function toImportUrl(
 
   ensureDir(outDir);
 
-  const outFile = cacheOutPath(outDir, filePath, hashStr);
+  // Node reports the bundle by its real path (macOS /var is a symlink), so
+  // write it there and the source map's relative paths resolve from it.
+  const outFile = cacheOutPath(safeRealpath(outDir), filePath, hashStr);
 
   try {
     buildSync({

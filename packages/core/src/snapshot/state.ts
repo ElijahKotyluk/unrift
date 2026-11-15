@@ -10,6 +10,13 @@ import {
 import { basename, dirname, join } from "node:path";
 
 import { diffLines, formatSnapshotFile, readSnapshotFile } from "./file";
+import {
+  commitInlineEdits,
+  matchInlineSnapshot,
+  resetInlineSnapshots,
+  writeInlineSnapshots,
+  type InlineEdits,
+} from "./inline";
 import { serialize } from "./serialize";
 
 /**
@@ -29,8 +36,10 @@ export interface SnapshotSummary {
   /** Stored snapshots no test used. Removed with `-u`, otherwise they fail the run. */
   obsolete: number;
   removed: number;
-  /** Snapshot files that were written or deleted. */
+  /** Snapshot files that were written or deleted, and test files with inline snapshots written. */
   filesWritten: string[];
+  /** Test files whose inline snapshots weren't written: changed during the run, or the write failed. */
+  inlineSkipped: string[];
 }
 
 class SnapshotFile {
@@ -71,6 +80,8 @@ interface Scope {
   writes: Map<string, string>;
   checked: Set<string>;
   failed: Set<string>;
+  inline: InlineEdits;
+  inlineFailed: number;
   done: boolean;
 }
 
@@ -79,9 +90,12 @@ const storage = new AsyncLocalStorage<Scope>();
 let current: Scope | undefined;
 const files = new Map<string, SnapshotFile>();
 let mode: SnapshotUpdateMode = "new";
+let inlineFailed = 0;
 
 export function resetSnapshots(updateMode: SnapshotUpdateMode) {
   files.clear();
+  resetInlineSnapshots();
+  inlineFailed = 0;
   current = undefined;
   mode = updateMode;
 }
@@ -113,6 +127,8 @@ export function createSnapshotTest(testFile: string, testName: string) {
         writes: new Map(),
         checked: new Set(),
         failed: new Set(),
+        inline: new Map(),
+        inlineFailed: 0,
         done: false,
       };
 
@@ -130,7 +146,12 @@ export function createSnapshotTest(testFile: string, testName: string) {
     },
 
     finish() {
-      if (!last || last.counters.size === 0) return;
+      if (!last) return;
+
+      commitInlineEdits(last.inline);
+      inlineFailed += last.inlineFailed;
+
+      if (last.counters.size === 0) return;
 
       const file = getFile(testFile);
 
@@ -145,22 +166,53 @@ export function createSnapshotTest(testFile: string, testName: string) {
   };
 }
 
-export function matchSnapshot(
-  received: unknown,
-  hint?: string,
-): { pass: true } | { pass: false; message: string } {
+type MatchResult = { pass: true } | { pass: false; message: string };
+
+function getScope(matcher: string): Scope {
   const scope = storage.getStore() ?? current;
 
   if (!scope) {
-    throw new Error("toMatchSnapshot() can only be called inside a test");
+    throw new Error(`${matcher}() can only be called inside a test`);
   }
 
   if (scope.done) {
     throw new Error(
-      "toMatchSnapshot() was called after its test finished. Is a timed-out test still running?",
+      `${matcher}() was called after its test finished. Is a timed-out test still running?`,
     );
   }
 
+  return scope;
+}
+
+export function matchInline(
+  received: unknown,
+  snapshot: string | undefined,
+  canWrite: boolean,
+): MatchResult {
+  const scope = getScope("toMatchInlineSnapshot");
+  let result: MatchResult;
+
+  try {
+    result = matchInlineSnapshot(
+      scope.inline,
+      mode,
+      received,
+      snapshot,
+      canWrite,
+    );
+  } catch (err) {
+    // Can't be written (a conflict, .resolves), that's a failed snapshot too
+    scope.inlineFailed++;
+    throw err;
+  }
+
+  if (!result.pass) scope.inlineFailed++;
+
+  return result;
+}
+
+export function matchSnapshot(received: unknown, hint?: string): MatchResult {
+  const scope = getScope("toMatchSnapshot");
   const file = getFile(scope.file);
 
   if (file.loadError) throw file.loadError;
@@ -224,6 +276,7 @@ export function finishSnapshots(
     obsolete: 0,
     removed: 0,
     filesWritten: [],
+    inlineSkipped: [],
   };
 
   for (const { file: testFile, keep } of testFiles) {
@@ -268,6 +321,14 @@ export function finishSnapshots(
   }
 
   files.clear();
+
+  const inline = writeInlineSnapshots();
+
+  summary.added += inline.added;
+  summary.updated += inline.updated;
+  summary.failed += inlineFailed;
+  summary.filesWritten.push(...inline.filesWritten);
+  summary.inlineSkipped = inline.skipped;
 
   return summary;
 }

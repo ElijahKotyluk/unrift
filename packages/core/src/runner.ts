@@ -445,6 +445,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       snapshots: {
         ...snapshots,
         filesWritten: snapshots.filesWritten.map(normalizePath),
+        inlineSkipped: snapshots.inlineSkipped.map(normalizePath),
       },
       results: serializedResults,
     };
@@ -601,6 +602,12 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   if (obsoleteLeft > 0) {
     console.log(
       `\n ${colors.boldYellow("!")} ${obsoleteLeft} obsolete snapshot${obsoleteLeft === 1 ? "" : "s"}, run with -u to remove ${obsoleteLeft === 1 ? "it" : "them"}`,
+    );
+  }
+
+  for (const file of snapshots.inlineSkipped) {
+    console.log(
+      `\n ${colors.boldYellow("!")} ${shortenPath(file)} changed during the run or couldn't be written, its inline snapshots weren't written`,
     );
   }
 

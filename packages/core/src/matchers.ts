@@ -5,7 +5,7 @@ import { isFetchMock, type MockFetch } from "./mock/fetch";
 import { deepEqual } from "./utils/deepEqual";
 import { looseEqual } from "./utils/looseEqual";
 import { regexTest } from "./utils/helpers";
-import { matchSnapshot } from "./snapshot/state";
+import { matchInline, matchSnapshot } from "./snapshot/state";
 import {
   toThrow,
   toThrowFromPromise,
@@ -339,6 +339,26 @@ function registerCoreMatchers() {
       }
 
       const result = matchSnapshot(received, hint);
+
+      if (!result.pass) throw new Error(result.message);
+    },
+
+    toMatchInlineSnapshot(
+      this: MatcherContext,
+      received: unknown,
+      snapshot?: unknown,
+    ) {
+      if (this.isNot) {
+        throw new Error("toMatchInlineSnapshot() can't be used with .not");
+      }
+
+      if (snapshot !== undefined && typeof snapshot !== "string") {
+        throw new Error(
+          "toMatchInlineSnapshot() snapshot must be a string (property matchers aren't supported)",
+        );
+      }
+
+      const result = matchInline(received, snapshot, this.promise === "");
 
       if (!result.pass) throw new Error(result.message);
     },

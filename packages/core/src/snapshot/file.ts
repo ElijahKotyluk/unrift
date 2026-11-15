@@ -7,7 +7,7 @@ const HEADER = "// Unrift Snapshot v1";
 
 // Same escaping as Jest so a value can't close the template literal early.
 // A template literal turns a raw \r into \n when it's read, so that's escaped too.
-function escape(text: string): string {
+export function escapeTemplate(text: string): string {
   return text.replace(/\\|`|\$\{/g, "\\$&").replace(/\r/g, "\\r");
 }
 
@@ -47,7 +47,7 @@ export function formatSnapshotFile(snapshots: Map<string, string>): string {
     const value = snapshots.get(key)!;
     const body = value.includes("\n") ? `\n${value}\n` : value;
 
-    return `exports[\`${escape(key)}\`] = \`${escape(body)}\`;`;
+    return `exports[\`${escapeTemplate(key)}\`] = \`${escapeTemplate(body)}\`;`;
   });
 
   return `${HEADER}\n\n${entries.join("\n\n")}\n`;

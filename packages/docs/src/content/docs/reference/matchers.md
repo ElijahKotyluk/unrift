@@ -292,6 +292,14 @@ expect(buildProfile("alice")).toMatchSnapshot();
 expect(guest).toMatchSnapshot("guest");
 ```
 
+### `toMatchInlineSnapshot(snapshot?)`
+
+Same thing, but the snapshot is written into the test file as the argument. See [Inline snapshots](/guide/snapshot-testing/#inline-snapshots).
+
+```ts
+expect(add(1, 2)).toMatchInlineSnapshot(`3`);
+```
+
 ## Negation
 
 All matchers support `.not`:

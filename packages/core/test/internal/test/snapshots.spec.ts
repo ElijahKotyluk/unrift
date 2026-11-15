@@ -25,12 +25,16 @@ function workspace(name: string) {
   );
 
   const snapPath = join(dir, "__snapshots__", "a.spec.ts.snap");
+  const specPath = join(dir, "a.spec.ts");
 
   return {
     snapPath,
+    specPath,
+    source: () => readFileSync(specPath, "utf8"),
+    setSource: (text: string) => writeFileSync(specPath, text),
     spec(body: string) {
       writeFileSync(
-        join(dir, "a.spec.ts"),
+        specPath,
         `import { describe, it, expect, beforeAll } from "@unrift/core";\n${body}`,
       );
     },
@@ -277,6 +281,185 @@ describe("callback", () => {
     expect(ws.snap()).toBe(
       '// Unrift Snapshot v1\n\nexports[`callback from beforeAll 1`] = `"x"`;\n',
     );
+  });
+
+  it("writes inline snapshots into the test file, matches them, and -u updates them", () => {
+    // Non-ASCII and # in the path, source maps URL-encode those
+    const ws = workspace("inline café#1");
+
+    // The interface shifts lines in the bundle, so this goes through the source
+    // map. U+2028 and a lone \\r are line breaks to the source map too.
+    ws.spec(`
+interface Unused {
+  a: number;
+}
+const sep = "a\u2028b"; /* old mac\r comment */
+
+describe("inline", () => {
+  it("writes", () => {
+    expect({ a: 1 }).toMatchInlineSnapshot();
+    expect(1).toMatchInlineSnapshot(); expect("one").toMatchInlineSnapshot();
+    expect(42)
+      .toMatchInlineSnapshot();
+  });
+});
+`);
+    const first = ws.run();
+    const written = ws.source();
+
+    expect(first.status).toBe(0);
+    expect(first.report.snapshots).toMatchObject({ added: 4 });
+    expect(written).toContain(
+      [
+        "    expect({ a: 1 }).toMatchInlineSnapshot(`",
+        "      {",
+        '        "a": 1,',
+        "      }",
+        "    `);",
+        '    expect(1).toMatchInlineSnapshot(`1`); expect("one").toMatchInlineSnapshot(`"one"`);',
+        "    expect(42)",
+        "      .toMatchInlineSnapshot(`42`);",
+      ].join("\n"),
+    );
+
+    expect(ws.run().status).toBe(0);
+    expect(ws.source()).toBe(written);
+
+    ws.setSource(ws.source().replace("expect(42)", "expect(43)"));
+    const changed = ws.source();
+    const failed = ws.run();
+
+    expect(failed.status).toBe(1);
+    expect(failed.report.results[0].error.message).toContain("- 43\n+ 42");
+    expect(ws.source()).toBe(changed);
+
+    expect(ws.run({}, "-u").report.snapshots.updated).toBe(1);
+    expect(ws.source()).toContain(".toMatchInlineSnapshot(`43`);");
+
+    // Nothing written on CI
+    ws.spec(`it("a", () => expect(1).toMatchInlineSnapshot());\n`);
+    const ci = ws.source();
+
+    expect(ws.run({ CI: "true" }).report.results[0].error.message).toContain(
+      "New inline snapshot was not written",
+    );
+    expect(ws.source()).toBe(ci);
+
+    // A CRLF file stays CRLF and still matches on the next run
+    ws.setSource(
+      `import { it, expect } from "@unrift/core";\r\nit("a", () => {\r\n  expect({ a: 1 }).toMatchInlineSnapshot();\r\n});\r\n`,
+    );
+    ws.run();
+
+    expect(ws.source().replace(/\r\n/g, "")).not.toContain("\n");
+    expect(ws.source()).toContain('\r\n      "a": 1,\r\n');
+    expect(ws.run().status).toBe(0);
+
+    // Edited during the run, before the snapshot. The offsets are stale so
+    // it's left alone.
+    ws.spec(`import { readFileSync, writeFileSync } from "node:fs";
+it("a", () => {
+  const path = ${JSON.stringify(ws.specPath)};
+  writeFileSync(path, "// edited\\n" + readFileSync(path, "utf8"));
+  expect(0).toMatchInlineSnapshot(\`0\`);
+  expect(1).toMatchInlineSnapshot();
+});
+`);
+    const edited = ws.run();
+
+    expect(edited.report.snapshots.inlineSkipped).toHaveLength(1);
+    expect(ws.source()).toContain(
+      "expect(0).toMatchInlineSnapshot(`0`);\n  expect(1).toMatchInlineSnapshot();",
+    );
+  });
+
+  it("only writes inline snapshots it can place", () => {
+    const ws = workspace("inline-misuse");
+
+    ws.spec(`
+const missing: string | undefined = undefined;
+let runs = 0;
+
+it("loop", () => {
+  for (const n of [1, 2]) expect(n).toMatchInlineSnapshot();
+});
+it("flaky", () => {
+  expect("attempt " + ++runs).toMatchInlineSnapshot();
+  if (runs === 1) throw new Error("first attempt");
+}, { retries: 1 });
+it("not", () => expect(1).not.toMatchInlineSnapshot());
+it("number", () => expect(1).toMatchInlineSnapshot(1 as any));
+it("variable", () => expect(1).toMatchInlineSnapshot(missing));
+it("resolves", () => expect(Promise.resolve(1)).resolves.toMatchInlineSnapshot());
+it("resolves match", () => expect(Promise.resolve(1)).resolves.toMatchInlineSnapshot("1"));
+
+// Two tests, one spot, different values
+const shared = (n: number) => expect(n).toMatchInlineSnapshot();
+it("shared a", () => shared(1));
+it("shared b", () => shared(2));
+`);
+    const { report } = ws.run();
+    const result = (name: string) =>
+      report.results.find((r: { description: string }) =>
+        r.description.endsWith(name),
+      );
+
+    expect(result("loop").error.message).toContain(
+      "ran more than once with different values",
+    );
+    // Not even the first value
+    expect(ws.source()).toContain(
+      "for (const n of [1, 2]) expect(n).toMatchInlineSnapshot();",
+    );
+    expect(result("not").error.message).toContain("can't be used with .not");
+    expect(result("number").error.message).toContain(
+      "snapshot must be a string",
+    );
+    expect(result("variable").error.message).toContain(
+      "needs no argument or a single string",
+    );
+    expect(result("resolves").error.message).toContain(
+      "can't write a snapshot under .resolves",
+    );
+    expect(result("resolves match").status).toBe("pass");
+    expect(result("shared b").error.message).toContain(
+      "ran more than once with different values",
+    );
+    expect(ws.source()).toContain(
+      "const shared = (n: number) => expect(n).toMatchInlineSnapshot();",
+    );
+    // loop, variable, resolves and shared b. .not and a number are misuse,
+    // rejected before any snapshot is checked.
+    expect(report.snapshots.failed).toBe(4);
+    // The failed attempt's value isn't the one written
+    expect(result("flaky").status).toBe("pass");
+    expect(ws.source()).toContain('toMatchInlineSnapshot(`"attempt 2"`)');
+    expect(ws.source()).toContain("toMatchInlineSnapshot(missing)");
+
+    // -u sees the call that matched too, so it doesn't write 2 over it. A match
+    // it can't rewrite is fine, an interpolated template is never replaced.
+    ws.spec(`
+const one = "1";
+const two = 2;
+it("u", () => {
+  for (const n of [2, 1]) expect(n).toMatchInlineSnapshot(\`1\`);
+});
+it("variable match", () => expect(1).toMatchInlineSnapshot(one));
+it("template", () => expect(1).toMatchInlineSnapshot(\`\${two}\`));
+`);
+    const u = ws.run({}, "-u");
+    const uResult = (name: string) =>
+      u.report.results.find((r: { description: string }) =>
+        r.description.endsWith(name),
+      );
+
+    expect(uResult("u").status).toBe("fail");
+    expect(uResult("variable match").status).toBe("pass");
+    expect(uResult("template").error.message).toContain(
+      "needs no argument or a single string",
+    );
+    expect(ws.source()).toContain("expect(n).toMatchInlineSnapshot(`1`);");
+    expect(ws.source()).toContain("toMatchInlineSnapshot(`${two}`)");
   });
 
   it("serializes values like Jest", () => {
