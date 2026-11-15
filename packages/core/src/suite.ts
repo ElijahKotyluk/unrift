@@ -312,6 +312,21 @@ export class Suite {
           totalMs += test.durationMs;
 
           if (test.status !== TaskStatus.Fail) break;
+
+          // A timed-out body can't be cancelled and may still be running, so
+          // another attempt could race with it. Stop here instead.
+          if (test.timedOut) {
+            if (attempt < maxAttempts && test.error) {
+              const original = test.error.message;
+              const note = `${original} (not retried: the timed-out attempt may still be running)`;
+
+              // The printed stack is usually built lazily from the message, but
+              // an afterEach failure already rebuilt it, so update it too.
+              test.error.message = note;
+              test.error.stack = test.error.stack?.replace(original, note);
+            }
+            break;
+          }
         }
 
         test.durationMs = totalMs;

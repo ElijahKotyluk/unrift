@@ -36,6 +36,9 @@ describe("retries", () => {
       status: "pass",
       attempts: 2,
     });
+    // Timeouts aren't retried: the first body may still be running.
+    expect(result("times out").status).toBe("fail");
+    expect(result("times out").attempts).toBeUndefined();
     expect(result("opts out").status).toBe("fail");
     expect(result("opts out").attempts).toBeUndefined();
   });
@@ -45,6 +48,9 @@ describe("retries", () => {
 
     expect(out).toContain("(passed after 3 attempts)");
     expect(out).toContain("(failed after 3 attempts)");
+    expect(out).toContain(
+      "not retried: the timed-out attempt may still be running",
+    );
   });
 
   it("rejects invalid retries before running anything", () => {

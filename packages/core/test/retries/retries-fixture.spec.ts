@@ -32,6 +32,11 @@ describe("retries", () => {
     if (++defaultRuns < 2) throw new Error("first attempt failed");
   });
 
+  it("times out", () => new Promise<void>(() => {}), {
+    timeout: 20,
+    retries: 2,
+  });
+
   it(
     "opts out",
     () => {

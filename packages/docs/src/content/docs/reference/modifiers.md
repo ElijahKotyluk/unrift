@@ -93,6 +93,8 @@ it("flaky network call", async () => {
 }, { retries: 3 });
 ```
 
+A test that times out isn't retried, since the timed-out attempt can't be stopped and may still be running.
+
 Set `retries` in the config to apply it to every test. A per-test value wins, so `{ retries: 0 }` turns it off for one test.
 
 Retried tests show the attempt count in the output, e.g. `✘ flaky network call (failed after 4 attempts)`. In `--json` output they get an `attempts` field.

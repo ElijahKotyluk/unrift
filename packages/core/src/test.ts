@@ -19,6 +19,8 @@ export class Test {
   timeoutMs?: number;
   retries?: number;
   attempts: number = 0;
+  /** True if the last run timed out. Its body may still be running. */
+  timedOut: boolean = false;
 
   constructor(
     description: string,
@@ -52,6 +54,7 @@ export class Test {
 
     const start = realPerformanceNow();
     this.status = TaskStatus.Running;
+    this.timedOut = false;
 
     const exec = Promise.resolve().then(() => this.fn());
 
@@ -61,6 +64,7 @@ export class Test {
 
         const timeoutFn = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
+            this.timedOut = true;
             reject(
               new Error(
                 `Test "${this.description}" timed out after ${timeoutMs} ms`,
