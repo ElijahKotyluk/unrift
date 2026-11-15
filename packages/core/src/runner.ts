@@ -1,5 +1,10 @@
-import { watch as fsWatch, readdirSync, type FSWatcher } from "node:fs";
-import { relative, resolve, join } from "node:path";
+import {
+  watch as fsWatch,
+  readdirSync,
+  statSync,
+  type FSWatcher,
+} from "node:fs";
+import { basename, dirname, relative, resolve, join, sep } from "node:path";
 
 import {
   loadConfig,
@@ -12,6 +17,7 @@ import { colors } from "./utils/colors";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
 import type { TestResult } from "./suite";
+import type { SnapshotSummary } from "./snapshot/state";
 
 import { normalizePath } from "./utils/normalizePath";
 import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
@@ -34,6 +40,7 @@ interface RunnerOptions {
   list?: boolean;
   json?: boolean;
   cacheClean?: boolean;
+  updateSnapshots?: boolean;
 }
 
 type JsonReport = {
@@ -49,6 +56,7 @@ type JsonReport = {
   configPath?: string | null;
   files: string[];
   durationMs: number;
+  snapshots?: SnapshotSummary;
   results: Array<{
     description: string;
     status: TaskStatus;
@@ -241,6 +249,45 @@ function extractTestName(description: string): string {
   return description.replace(/^.*?›\s*/, "");
 }
 
+const MAX_OBSOLETE_SHOWN = 20;
+
+/** Grouped by .snap file, so a rename is easy to tell from a snapshot that only runs sometimes. */
+function formatObsolete(keys: SnapshotSummary["obsoleteKeys"]): string {
+  const lines: string[] = [];
+  let lastFile = "";
+
+  for (const { file, key } of keys.slice(0, MAX_OBSOLETE_SHOWN)) {
+    if (file !== lastFile) {
+      lines.push(`   ${colors.dim(shortenPath(file))}`);
+      lastFile = file;
+    }
+
+    lines.push(`     ${colors.yellow("›")} ${key}`);
+  }
+
+  if (keys.length > MAX_OBSOLETE_SHOWN) {
+    lines.push(colors.dim(`     and ${keys.length - MAX_OBSOLETE_SHOWN} more`));
+  }
+
+  return lines.join("\n");
+}
+
+function formatSnapshotSummary(s: SnapshotSummary): string {
+  const parts: string[] = [];
+
+  if (s.added > 0) parts.push(colors.green(`${s.added} written`));
+  if (s.updated > 0) parts.push(colors.green(`${s.updated} updated`));
+  if (s.removed > 0) parts.push(colors.green(`${s.removed} removed`));
+  if (s.failed > 0) parts.push(colors.red(`${s.failed} failed`));
+  if (s.obsolete > s.removed) {
+    parts.push(colors.yellow(`${s.obsolete - s.removed} obsolete`));
+  }
+
+  if (parts.length === 0) return "";
+
+  return `${colors.dim("snapshots:")} ${parts.join(colors.dim("  ·  "))}`;
+}
+
 export async function runTestsCLI(options: RunnerOptions = {}) {
   regExpCache.clear();
   const runStart = realPerformanceNow();
@@ -364,6 +411,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     grep: options.grep,
     retries: config?.retries,
     matchers: config?.matchers,
+    updateSnapshots: options.updateSnapshots ? "all" : undefined,
   });
 
   debugLog(options.debug, options.json, "Only mode:", engine.isOnly);
@@ -401,7 +449,14 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     });
   }
 
-  const ok = failed === 0;
+  const snapshots = engine.snapshots;
+
+  noteOwnWrites(snapshots.filesWritten);
+  // Obsolete snapshots fail the run until they're removed with -u, and so
+  // does a snapshot that couldn't be read or written
+  const obsoleteLeft = snapshots.obsolete - snapshots.removed;
+  const ok =
+    failed === 0 && obsoleteLeft === 0 && snapshots.errors.length === 0;
   const durationMs = realPerformanceNow() - runStart;
 
   // JSON mode: stdout must be JSON only
@@ -419,6 +474,19 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       configPath: resolvedConfigPath,
       files: files.map(normalizePath),
       durationMs,
+      snapshots: {
+        ...snapshots,
+        filesWritten: snapshots.filesWritten.map(normalizePath),
+        obsoleteKeys: snapshots.obsoleteKeys.map(({ file, key }) => ({
+          file: normalizePath(file),
+          key,
+        })),
+        inlineSkipped: snapshots.inlineSkipped.map(normalizePath),
+        errors: snapshots.errors.map(({ file, message }) => ({
+          file: normalizePath(file),
+          message,
+        })),
+      },
       results: serializedResults,
     };
 
@@ -535,7 +603,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
           } else if (line.trim().startsWith("at ")) {
             console.log(colors.dim(`     ${line.trim()}`));
           } else {
-            console.log(`     ${colors.red(line.trim())}`);
+            // Keep leading spaces, diffs (snapshots especially) need them
+            console.log(`     ${colors.red(line.trimEnd())}`);
           }
         }
       }
@@ -566,6 +635,27 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     `         ${colors.dim(`${files.length} test file${files.length === 1 ? "" : "s"}`)}${bail ? colors.dim("  ·  bail mode") : ""}`,
   );
 
+  const snapshotLine = formatSnapshotSummary(snapshots);
+
+  if (snapshotLine) console.log(`         ${snapshotLine}`);
+
+  if (obsoleteLeft > 0) {
+    console.log(
+      `\n ${colors.boldYellow("!")} ${obsoleteLeft} obsolete snapshot${obsoleteLeft === 1 ? "" : "s"}, run with -u to remove ${obsoleteLeft === 1 ? "it" : "them"}`,
+    );
+    console.log(formatObsolete(snapshots.obsoleteKeys));
+  }
+
+  for (const { file, message } of snapshots.errors) {
+    console.log(`\n ${colors.boldRed("✘")} ${shortenPath(file)}: ${message}`);
+  }
+
+  for (const file of snapshots.inlineSkipped) {
+    console.log(
+      `\n ${colors.boldYellow("!")} ${shortenPath(file)} changed during the run, its inline snapshots weren't written`,
+    );
+  }
+
   console.log("");
 
   if (!ok) process.exitCode = 1;
@@ -577,6 +667,36 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
  * platforms (Linux `fs.watch` does not support `recursive: true` before Node 22).
  * Returns a cleanup function to stop watching.
  */
+// What the last run wrote, so the watcher can tell its own writes from user
+// edits. Stamped by mtime and size: an edit after that changes the stamp.
+const ownWrites = new Map<string, string>();
+
+function stamp(path: string): string {
+  try {
+    const st = statSync(path);
+
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return "missing";
+  }
+}
+
+function noteOwnWrites(paths: string[]) {
+  ownWrites.clear();
+
+  for (const path of paths) {
+    ownWrites.set(resolve(path), stamp(path));
+    // Creating or removing the .snap also shows up as a change to its folder
+    ownWrites.set(dirname(resolve(path)), stamp(dirname(path)));
+  }
+}
+
+function isOwnWrite(path: string): boolean {
+  const own = ownWrites.get(resolve(path));
+
+  return own !== undefined && own === stamp(path);
+}
+
 function watchRecursive(
   dir: string,
   onChange: (filename: string) => void,
@@ -591,11 +711,82 @@ function watchRecursive(
     timer = setTimeout(() => onChange(lastFile), debounceMs);
   }
 
-  const watchers: FSWatcher[] = [];
+  // A folder deleted and made again at the same path (like __snapshots__)
+  // needs a new watcher, the old one stays on the deleted folder. Its watcher
+  // is dropped when the delete is seen. Linux reuses inode numbers right away,
+  // so the inode check is only a backup for a delete that wasn't seen.
+  const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
+
+  function forget(path: string) {
+    for (const [dir, { watcher }] of watched) {
+      if (dir === path || dir.startsWith(path + sep)) {
+        closeWatcher(watcher);
+        watched.delete(dir);
+      }
+    }
+  }
+
+  // A folder made after startup (the first __snapshots__, a new test dir)
+  // gets its own watcher, before its creation event is checked below
+  function watchIfNewDir(path: string) {
+    let ino: number;
+
+    try {
+      const st = statSync(path);
+
+      if (!st.isDirectory()) return;
+      ino = st.ino;
+    } catch {
+      forget(path);
+      return;
+    }
+
+    const existing = watched.get(path);
+
+    if (existing?.ino === ino) return;
+
+    if (existing) {
+      closeWatcher(existing.watcher);
+      watched.delete(path);
+    }
+
+    const name = basename(path);
+
+    if (!name.startsWith(".") && name !== "node_modules") watchDir(path);
+  }
 
   function watchDir(d: string) {
+    let ino: number;
+
     try {
-      watchers.push(fsWatch(d, (_event, filename) => trigger(filename ?? d)));
+      ino = statSync(d).ino;
+    } catch {
+      return;
+    }
+
+    try {
+      const watcher = fsWatch(d, (_event, filename) => {
+        if (filename) watchIfNewDir(join(d, filename));
+
+        // Our own snapshot writes shouldn't trigger another run, edits by
+        // the user (fixing or deleting a .snap) should
+        // (macOS also reports a change to the watched folder itself by its name)
+        if (
+          filename &&
+          (isOwnWrite(join(d, filename)) ||
+            (filename === basename(d) && isOwnWrite(d)))
+        ) {
+          return;
+        }
+        trigger(filename ?? d);
+      });
+
+      // Deleting a watched folder can emit an error on some platforms
+      watcher.on("error", () => {});
+      watched.set(d, { watcher, ino });
+
+      if (process.env.UNRIFT_DEBUG === "1")
+        console.log(`[unrift] watching ${d}`);
     } catch {
       return;
     }
@@ -622,14 +813,16 @@ function watchRecursive(
 
   return () => {
     if (timer) clearTimeout(timer);
-    for (const w of watchers) {
-      try {
-        w.close();
-      } catch {
-        // ignore
-      }
-    }
+    for (const { watcher } of watched.values()) closeWatcher(watcher);
   };
+}
+
+function closeWatcher(watcher: FSWatcher) {
+  try {
+    watcher.close();
+  } catch {
+    // ignore
+  }
 }
 
 export async function watchTestsCLI(options: RunnerOptions = {}) {
@@ -638,12 +831,8 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
   // Resolve the directory to watch (same logic as runTestsCLI)
   const loaded = options.configPath
-    ? await import("./utils/loadConfig").then((m) =>
-        m.loadConfigFromPath(options.configPath!),
-      )
-    : await import("./utils/loadConfig").then((m) =>
-        m.loadConfig(process.cwd()),
-      );
+    ? await loadConfigFromPath(options.configPath)
+    : await loadConfig(process.cwd());
 
   const config = loaded?.config ?? null;
   const configDir = loaded?.configDir ?? process.cwd();
@@ -674,7 +863,9 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     process.exitCode = 0;
 
     try {
-      await runTestsCLI(options);
+      // -u is for the first run only. On every save it would overwrite a
+      // mismatch saved mid-edit, or drop snapshots of a test being renamed.
+      await runTestsCLI({ ...options, updateSnapshots: false });
     } finally {
       running = false;
     }

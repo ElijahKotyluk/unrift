@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
+
 import {
   clearContext,
   computeOnlyFlags,
@@ -8,10 +11,16 @@ import {
 import { ensureInternalMatchers } from "./matchers";
 import { RunState, unriftGlobalContext } from "./context";
 import { normalizePath } from "./utils/normalizePath";
-import { TaskMode } from "./types";
+import { TaskMode, TaskStatus } from "./types";
 import { toError } from "./utils/toError";
 import { toImportUrl } from "./utils/transform";
 import { assertValidRetries } from "./utils/helpers";
+import {
+  finishSnapshots,
+  resetSnapshots,
+  type SnapshotSummary,
+  type SnapshotUpdateMode,
+} from "./snapshot/state";
 
 type RunEngineOptions = {
   files: string[];
@@ -20,6 +29,8 @@ type RunEngineOptions = {
   grep?: RegExp;
   retries?: number;
   matchers?: string[];
+  /** Defaults to "none" when the CI env var is set, otherwise "new". */
+  updateSnapshots?: SnapshotUpdateMode;
 };
 
 export type RunEngineResult = {
@@ -27,7 +38,51 @@ export type RunEngineResult = {
   timeoutMs?: number;
   bail: boolean;
   results: TestResult[];
+  snapshots: SnapshotSummary;
 };
+
+// Node caches a module by URL, so a file that didn't change would come back
+// from the cache and register no tests on a second run (watch mode). Every
+// run after the first gets its own URL so the file runs again.
+let runCount = 0;
+
+function freshImportUrl(url: string): string {
+  return runCount > 1 ? `${url}?run=${runCount}` : url;
+}
+
+// The query string only reloads ESM. A CommonJS file (.cjs, or .js in a
+// CommonJS package) is cached by filename, so drop it from that cache.
+const requireCache = createRequire(import.meta.url).cache;
+
+function forgetCommonJs(file: string) {
+  for (const key of [file, safeRealpath(file)]) delete requireCache[key];
+}
+
+function safeRealpath(file: string): string {
+  try {
+    return realpathSync(file);
+  } catch {
+    return file;
+  }
+}
+
+function isCI(): boolean {
+  const ci = process.env.CI;
+
+  return !!ci && ci !== "false" && ci !== "0";
+}
+
+/** Names of tests that didn't pass, so their unused snapshots aren't called obsolete. */
+function unpassedTestNames(suite: Suite, names: string[] = []): string[] {
+  for (const test of suite.tests) {
+    if (test.status !== TaskStatus.Pass)
+      names.push(suite.getSnapshotName(test));
+  }
+
+  for (const child of suite.suites) unpassedTestNames(child, names);
+
+  return names;
+}
 
 async function loadMatcherModules(specifiers?: string[]) {
   for (const spec of specifiers ?? []) {
@@ -44,7 +99,18 @@ export async function runEngine(
   // config) would otherwise turn into "31" attempts or zero.
   assertValidRetries(options.retries, "runEngine");
 
+  const updateMode = options.updateSnapshots ?? (isCI() ? "none" : "new");
+
+  if (!["all", "new", "none"].includes(updateMode)) {
+    throw new Error(
+      `updateSnapshots must be "all", "new" or "none", got ${JSON.stringify(updateMode)}`,
+    );
+  }
+
   clearContext();
+  runCount++;
+
+  resetSnapshots(updateMode);
 
   ensureInternalMatchers();
 
@@ -67,7 +133,8 @@ export async function runEngine(
       unriftGlobalContext.currentSuite = fileSuite;
 
       try {
-        await import(toImportUrl(file, "bundle-test"));
+        forgetCommonJs(file);
+        await import(freshImportUrl(toImportUrl(file, "bundle-test")));
       } catch (err) {
         const error = toError(err);
 
@@ -76,6 +143,9 @@ export async function runEngine(
           error,
         });
 
+        // Tests registered before the error mustn't run. The run loop goes by
+        // mode, so marking statuses alone wasn't enough.
+        fileSuite.mode = TaskMode.Skip;
         fileSuite.markSubtreeSkipped();
       } finally {
         unriftGlobalContext.currentSuite = rootSuite;
@@ -95,11 +165,22 @@ export async function runEngine(
 
     const results = rootSuite.getResults();
 
+    // A file that failed to import never ran, leave its snapshots alone
+    const snapshots = finishSnapshots(
+      rootSuite.suites
+        .filter((suite) => !suite.errors.some((e) => e.label === "import"))
+        .map((suite) => ({
+          file: suite.description,
+          keep: unpassedTestNames(suite),
+        })),
+    );
+
     return {
       isOnly,
       timeoutMs,
       bail,
       results,
+      snapshots,
     };
   } finally {
     unriftGlobalContext.state = RunState.Idle;

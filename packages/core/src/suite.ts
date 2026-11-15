@@ -1,5 +1,6 @@
 import { unriftGlobalContext } from "./context";
 import { resetMatchers } from "./matchers";
+import { createSnapshotTest } from "./snapshot/state";
 import { Test } from "./test";
 
 import { type PromisableFn, TaskMode, TaskStatus } from "./types";
@@ -269,9 +270,12 @@ export class Suite {
         // Each attempt gets its own beforeEach/afterEach so state resets between retries.
         const maxAttempts = (test.retries ?? options?.retries ?? 0) + 1;
         let totalMs = 0;
+        const filePath = this.getFilePath();
+        const snapshots = filePath
+          ? createSnapshotTest(filePath, this.getSnapshotName(test))
+          : undefined;
 
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-          test.attempts = attempt;
+        const runAttempt = async () => {
           test.error = undefined;
           // Reset so an attempt whose beforeEach throws doesn't report the
           // previous attempt's time.
@@ -308,6 +312,13 @@ export class Suite {
               }
             }
           }
+        };
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          test.attempts = attempt;
+
+          if (snapshots) await snapshots.attempt(runAttempt);
+          else await runAttempt();
 
           totalMs += test.durationMs;
 
@@ -331,6 +342,7 @@ export class Suite {
         }
 
         test.durationMs = totalMs;
+        snapshots?.finish();
 
         // Mark everything that hasn't run as skipped on bail
         if (options?.bail && test.status === TaskStatus.Fail) {
@@ -420,6 +432,25 @@ export class Suite {
 
       return suite.hasRunnableMatch(grep, isOnly, childOnly);
     });
+  }
+
+  /** The test file this suite is in. Top-level suites are named by their file path. */
+  getFilePath(): string | undefined {
+    if (this.root) return undefined;
+    if (!this.parent || this.parent.root) return this.description;
+    return this.parent.getFilePath();
+  }
+
+  /** Describe and test names joined with spaces, without the file. Same as Jest. */
+  getSnapshotName(test: Test): string {
+    const names = [test.description];
+
+    for (let s: Suite | undefined = this; s?.parent && !s.parent.root; ) {
+      names.unshift(s.description);
+      s = s.parent;
+    }
+
+    return names.join(" ");
   }
 
   getFullDescription(): string {

@@ -32,6 +32,7 @@ console.log(`Failed: ${result.results.filter(r => r.status === "fail").length}`)
 | `grep` | `RegExp` | - | Only run tests whose full name matches |
 | `retries` | `number` | `0` | Retry failing tests this many times |
 | `matchers` | `string[]` | - | Module specifiers for custom matchers to load |
+| `updateSnapshots` | `"all" \| "new" \| "none"` | `"none"` on CI, otherwise `"new"` | `"all"` is `-u`, `"new"` writes new snapshots only, `"none"` writes nothing |
 
 ## Return value
 
@@ -49,6 +50,17 @@ type RunEngineResult = {
     durationMs: number;  // execution time in ms
     attempts?: number;   // how many times it ran, above 1 means retried
   }>;
+  snapshots: {
+    added: number;       // new snapshots written
+    updated: number;     // mismatches overwritten ("all" only)
+    failed: number;      // didn't match, or not written on CI
+    obsolete: number;    // stored but no test used them
+    removed: number;     // obsolete ones deleted ("all" only)
+    obsoleteKeys: Array<{ file: string; key: string }>; // obsolete ones still in their .snap file
+    filesWritten: string[];  // .snap files, and test files with inline snapshots written
+    inlineSkipped: string[]; // test files that changed during the run, inline snapshots not written
+    errors: Array<{ file: string; message: string }>; // files that couldn't be read or written, these fail the run
+  };
 };
 ```
 

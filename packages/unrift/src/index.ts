@@ -49,6 +49,8 @@ export type {
   MatcherMap,
   Promisable,
   RunEngineResult,
+  SnapshotSummary,
+  SnapshotUpdateMode,
   UnriftConfigOptions,
   TestOptions,
   Spy,
