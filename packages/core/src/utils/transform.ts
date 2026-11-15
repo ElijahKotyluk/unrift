@@ -268,7 +268,7 @@ export function toImportUrl(
       bundle: true,
       format: "esm",
       platform: "node",
-      target: "node18",
+      target: "node20",
       packages: "external",
       external: ["@unrift/*", "@unrift/core", "@unrift/core/*"],
       absWorkingDir: projectRoot,

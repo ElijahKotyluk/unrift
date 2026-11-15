@@ -4,6 +4,10 @@ Versions are `@unrift/core` / `unrift`.
 
 ## Unreleased
 
+- Breaking: Node 18 is no longer supported. Unrift needs Node 20.19+ or 22.12+, the first versions that can `require()` an ES module, so CommonJS test files work. Node 18 has been end-of-life since April 2025
+
+## 0.6.0 / 0.7.0 - 2026-11-15
+
 - Snapshot testing: `toMatchSnapshot(hint?)` and `toMatchInlineSnapshot(snapshot?)`
 - Snapshot files live in `__snapshots__/<file>.snap` next to the test file, same keys and layout as Jest
 - `-u, --update-snapshots` overwrites mismatches and removes obsolete snapshots. In watch mode it only applies to the first run
