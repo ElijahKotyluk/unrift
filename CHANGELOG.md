@@ -4,7 +4,7 @@ Versions are `@unrift/core` / `unrift`.
 
 ## Unreleased
 
-- Breaking: Node 18 is no longer supported. Unrift needs Node 20.19+ on 20.x, or 22.12+ (not 21), the first versions that can `require()` an ES module, so CommonJS test files work. Node 18 has been end-of-life since April 2025
+- Breaking: Node 18 and 20 are no longer supported, Unrift needs Node 22.12+. Both are end-of-life and Node 20 didn't get the October and November 2026 security fixes. 22.12 is also the first 22.x that can `require()` an ES module, so CommonJS test files work
 
 ## 0.6.0 / 0.7.0 - 2026-11-15
 
