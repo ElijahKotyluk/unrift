@@ -60,4 +60,12 @@ describe("--grep", () => {
       expect(report.skipped).toBe(report.total);
     }
   });
+
+  it("keeps matching todos as todo and skips the rest", () => {
+    const { statusOf } = run("todo-fixture", "--grep", "wanted");
+
+    expect(statusOf("wanted todo alone")).toBe("todo");
+    expect(statusOf("wanted runnable")).toBe("pass");
+    expect(statusOf("unrelated todo")).toBe("skipped");
+  });
 });

@@ -75,6 +75,27 @@ export class Suite {
     for (const suite of this.suites) suite.markSubtreeSkipped();
   }
 
+  /**
+   * Used when --grep prunes a suite. Matching todos stay todo so their status
+   * doesn't depend on whether a runnable sibling matched; everything else is
+   * skipped.
+   */
+  private markSubtreeFilteredOut(grep: RegExp) {
+    for (const test of this.tests) {
+      if (test.status !== TaskStatus.Pending) continue;
+      test.status =
+        test.mode === TaskMode.Todo && this.testMatchesGrep(test, grep)
+          ? TaskStatus.Todo
+          : TaskStatus.Skipped;
+      test.durationMs = 0;
+    }
+
+    for (const suite of this.suites) {
+      if (suite.mode === TaskMode.Skip) suite.markSubtreeSkipped();
+      else suite.markSubtreeFilteredOut(grep);
+    }
+  }
+
   public markSubtreeTodo() {
     for (const test of this.tests) {
       if (test.status === TaskStatus.Pending) test.status = TaskStatus.Todo;
@@ -149,14 +170,19 @@ export class Suite {
     const suiteHasOnly = this.subtreeHasOnly;
     const inOnlyContext = ancestorOnly || this.mode === TaskMode.Only;
 
-    // If only is on and this suite has no runnable-only content, skip it entirely.
-    // Same for --grep: no matching test below means its hooks shouldn't run.
-    if (
-      (isOnly && !suiteHasOnly && !inOnlyContext) ||
-      (options?.grep &&
-        !this.hasRunnableMatch(options.grep, isOnly, inOnlyContext))
-    ) {
+    // If only is on and this suite has no runnable-only content, skip it entirely
+    if (isOnly && !suiteHasOnly && !inOnlyContext) {
       this.markSubtreeSkipped();
+
+      return;
+    }
+
+    // Same for --grep: nothing below can run, so don't run hooks either
+    if (
+      options?.grep &&
+      !this.hasRunnableMatch(options.grep, isOnly, inOnlyContext)
+    ) {
+      this.markSubtreeFilteredOut(options.grep);
 
       return;
     }
@@ -188,6 +214,13 @@ export class Suite {
 
         if (state.bailed) break;
 
+        // Checked before skip/todo so a non-matching todo reports as skipped
+        if (options?.grep && !this.testMatchesGrep(test, options.grep)) {
+          test.status = TaskStatus.Skipped;
+          test.durationMs = 0;
+          continue;
+        }
+
         if (test.mode === TaskMode.Skip) {
           test.status = TaskStatus.Skipped;
           test.durationMs = 0;
@@ -203,10 +236,7 @@ export class Suite {
         const testIsOnly = inOnlyContext || test.mode === TaskMode.Only;
 
         // If onlyMode, skip tests that are not in only context
-        if (
-          (isOnly && !testIsOnly) ||
-          (options?.grep && !this.testMatchesGrep(test, options.grep))
-        ) {
+        if (isOnly && !testIsOnly) {
           test.status = TaskStatus.Skipped;
           test.durationMs = 0;
           continue;

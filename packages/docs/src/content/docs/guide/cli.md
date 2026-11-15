@@ -59,7 +59,7 @@ unrift --json
 
 `--grep` matches against the full test name, which is the file path, the describe blocks and the test name joined with ` › `. So `unrift --grep "math › adds"` runs `adds numbers` inside `describe("math")`.
 
-Tests that don't match show up as skipped so the totals stay the same. Hooks for a describe block only run if something inside it matches.
+Tests that don't match show up as skipped so the totals stay the same, and a matching `it.todo` still shows as todo. Hooks for a describe block only run if a matching test inside it actually runs.
 
 ## JSON output
 
