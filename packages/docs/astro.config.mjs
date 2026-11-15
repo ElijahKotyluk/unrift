@@ -46,6 +46,7 @@ export default defineConfig({
             { label: "CLI", slug: "guide/cli" },
             { label: "Custom Matchers", slug: "guide/custom-matchers" },
             { label: "Async Testing", slug: "guide/async-testing" },
+            { label: "Snapshot Testing", slug: "guide/snapshot-testing" },
             { label: "Migrating from Jest", slug: "guide/migrating-from-jest" },
           ],
         },

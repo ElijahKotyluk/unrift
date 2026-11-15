@@ -5,6 +5,7 @@ import { isFetchMock, type MockFetch } from "./mock/fetch";
 import { deepEqual } from "./utils/deepEqual";
 import { looseEqual } from "./utils/looseEqual";
 import { regexTest } from "./utils/helpers";
+import { matchSnapshot } from "./snapshot/state";
 import {
   toThrow,
   toThrowFromPromise,
@@ -324,6 +325,22 @@ function registerCoreMatchers() {
         : toThrow(received, expected as ToThrowExpected, this.isNot);
 
       if (!pass) throw new Error(message());
+    },
+
+    toMatchSnapshot(this: MatcherContext, received: unknown, hint?: unknown) {
+      if (this.isNot) {
+        throw new Error("toMatchSnapshot() can't be used with .not");
+      }
+
+      if (hint !== undefined && typeof hint !== "string") {
+        throw new Error(
+          "toMatchSnapshot() hint must be a string (property matchers aren't supported)",
+        );
+      }
+
+      const result = matchSnapshot(received, hint);
+
+      if (!result.pass) throw new Error(result.message);
     },
 
     toBeGreaterThanOrEqual(

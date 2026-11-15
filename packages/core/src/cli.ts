@@ -46,6 +46,7 @@ Options:
   -b, --bail               Stop on first test failure
   -t, --timeout <ms>       Default test timeout in milliseconds
   -w, --watch              Re-run tests on file changes
+  -u, --update-snapshots   Rewrite failing snapshots and remove obsolete ones
   -d, --debug              Enable debug logging
   -l, --list               List discovered test files
   -j, --json               Output test results as JSON
@@ -60,6 +61,7 @@ Examples:
   unrift -c test/config.ts --bail
   unrift --timeout 10000
   unrift --watch
+  unrift -u
 `);
 }
 
@@ -76,6 +78,7 @@ function parseArgs(argv: string[]) {
   let json = false;
   let cacheClean = false;
   let watch = false;
+  let updateSnapshots = false;
 
   const rest: string[] = [];
 
@@ -158,6 +161,12 @@ function parseArgs(argv: string[]) {
       continue;
     }
 
+    if (a === "--update-snapshots" || a === "-u") {
+      updateSnapshots = true;
+
+      continue;
+    }
+
     if (a === "--cache-clean" || a === "--clear-cache") {
       cacheClean = true;
 
@@ -181,6 +190,7 @@ function parseArgs(argv: string[]) {
     json,
     cacheClean,
     watch,
+    updateSnapshots,
     help,
     showVersion,
   };
@@ -197,6 +207,7 @@ const {
   json,
   cacheClean,
   watch,
+  updateSnapshots,
   help,
   showVersion,
 } = parseArgs(process.argv.slice(2));
@@ -221,6 +232,7 @@ const runOpts = {
   list,
   json,
   cacheClean,
+  updateSnapshots,
 };
 
 (watch ? watchTestsCLI(runOpts) : runTestsCLI(runOpts)).catch((err) => {

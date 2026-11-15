@@ -12,6 +12,7 @@ import { colors } from "./utils/colors";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
 import type { TestResult } from "./suite";
+import type { SnapshotSummary } from "./snapshot/state";
 
 import { normalizePath } from "./utils/normalizePath";
 import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
@@ -34,6 +35,7 @@ interface RunnerOptions {
   list?: boolean;
   json?: boolean;
   cacheClean?: boolean;
+  updateSnapshots?: boolean;
 }
 
 type JsonReport = {
@@ -49,6 +51,7 @@ type JsonReport = {
   configPath?: string | null;
   files: string[];
   durationMs: number;
+  snapshots?: SnapshotSummary;
   results: Array<{
     description: string;
     status: TaskStatus;
@@ -241,6 +244,22 @@ function extractTestName(description: string): string {
   return description.replace(/^.*?›\s*/, "");
 }
 
+function formatSnapshotSummary(s: SnapshotSummary): string {
+  const parts: string[] = [];
+
+  if (s.added > 0) parts.push(colors.green(`${s.added} written`));
+  if (s.updated > 0) parts.push(colors.green(`${s.updated} updated`));
+  if (s.removed > 0) parts.push(colors.green(`${s.removed} removed`));
+  if (s.failed > 0) parts.push(colors.red(`${s.failed} failed`));
+  if (s.obsolete > s.removed) {
+    parts.push(colors.yellow(`${s.obsolete - s.removed} obsolete`));
+  }
+
+  if (parts.length === 0) return "";
+
+  return `${colors.dim("snapshots:")} ${parts.join(colors.dim("  ·  "))}`;
+}
+
 export async function runTestsCLI(options: RunnerOptions = {}) {
   regExpCache.clear();
   const runStart = realPerformanceNow();
@@ -364,6 +383,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     grep: options.grep,
     retries: config?.retries,
     matchers: config?.matchers,
+    updateSnapshots: options.updateSnapshots ? "all" : undefined,
   });
 
   debugLog(options.debug, options.json, "Only mode:", engine.isOnly);
@@ -401,7 +421,10 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     });
   }
 
-  const ok = failed === 0;
+  const snapshots = engine.snapshots;
+  // Obsolete snapshots fail the run until they're removed with -u
+  const obsoleteLeft = snapshots.obsolete - snapshots.removed;
+  const ok = failed === 0 && obsoleteLeft === 0;
   const durationMs = realPerformanceNow() - runStart;
 
   // JSON mode: stdout must be JSON only
@@ -419,6 +442,10 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       configPath: resolvedConfigPath,
       files: files.map(normalizePath),
       durationMs,
+      snapshots: {
+        ...snapshots,
+        filesWritten: snapshots.filesWritten.map(normalizePath),
+      },
       results: serializedResults,
     };
 
@@ -535,7 +562,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
           } else if (line.trim().startsWith("at ")) {
             console.log(colors.dim(`     ${line.trim()}`));
           } else {
-            console.log(`     ${colors.red(line.trim())}`);
+            // Keep leading spaces, diffs (snapshots especially) need them
+            console.log(`     ${colors.red(line.trimEnd())}`);
           }
         }
       }
@@ -566,6 +594,16 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     `         ${colors.dim(`${files.length} test file${files.length === 1 ? "" : "s"}`)}${bail ? colors.dim("  ·  bail mode") : ""}`,
   );
 
+  const snapshotLine = formatSnapshotSummary(snapshots);
+
+  if (snapshotLine) console.log(`         ${snapshotLine}`);
+
+  if (obsoleteLeft > 0) {
+    console.log(
+      `\n ${colors.boldYellow("!")} ${obsoleteLeft} obsolete snapshot${obsoleteLeft === 1 ? "" : "s"}, run with -u to remove ${obsoleteLeft === 1 ? "it" : "them"}`,
+    );
+  }
+
   console.log("");
 
   if (!ok) process.exitCode = 1;
@@ -595,7 +633,15 @@ function watchRecursive(
 
   function watchDir(d: string) {
     try {
-      watchers.push(fsWatch(d, (_event, filename) => trigger(filename ?? d)));
+      watchers.push(
+        fsWatch(d, (_event, filename) => {
+          // Our own snapshot writes shouldn't trigger another run
+          if (filename?.endsWith(".snap") || filename === "__snapshots__") {
+            return;
+          }
+          trigger(filename ?? d);
+        }),
+      );
     } catch {
       return;
     }
@@ -674,7 +720,9 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     process.exitCode = 0;
 
     try {
-      await runTestsCLI(options);
+      // -u is for the first run only. On every save it would overwrite a
+      // mismatch saved mid-edit, or drop snapshots of a test being renamed.
+      await runTestsCLI({ ...options, updateSnapshots: false });
     } finally {
       running = false;
     }

@@ -281,6 +281,17 @@ expect(() => { throw new Error("fail"); }).toThrow({ message: "fail" });
 `toThrow` only works with synchronous functions. If you pass an async function, Unrift will throw an error prompting you to use `expect(fn).rejects.toThrow()` instead.
 :::
 
+## Snapshots
+
+### `toMatchSnapshot(hint?)`
+
+Compares the value against a stored snapshot, and writes it the first time. See [Snapshot Testing](/guide/snapshot-testing/).
+
+```ts
+expect(buildProfile("alice")).toMatchSnapshot();
+expect(guest).toMatchSnapshot("guest");
+```
+
 ## Negation
 
 All matchers support `.not`:

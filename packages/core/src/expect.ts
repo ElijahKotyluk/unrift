@@ -29,6 +29,7 @@ export interface Matchers<T> {
   toMatch(expected: RegExp | string): void | Promise<void>;
   toStrictEqual(expected: unknown): void | Promise<void>;
   toThrow(expected?: unknown): void | Promise<void>;
+  toMatchSnapshot(hint?: string): void | Promise<void>;
   toBeGreaterThanOrEqual(expected: number): void | Promise<void>;
   toBeLessThanOrEqual(expected: number): void | Promise<void>;
   toBeCloseTo(expected: number, precision?: number): void | Promise<void>;

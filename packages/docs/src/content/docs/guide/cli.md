@@ -20,6 +20,7 @@ The first positional argument is a regex pattern to filter test files by path. U
 | `-b, --bail` | Stop on first test failure |
 | `-t, --timeout <ms>` | Default test timeout in milliseconds |
 | `-w, --watch` | Re-run tests automatically when files change |
+| `-u, --update-snapshots` | Rewrite snapshots that don't match and remove obsolete ones |
 | `-d, --debug` | Enable debug logging |
 | `-l, --list` | List discovered test files without running them |
 | `-j, --json` | Output results as JSON |
@@ -44,6 +45,9 @@ unrift --bail --timeout 10000
 
 # Watch mode - re-run on file changes
 unrift --watch
+
+# Update snapshots
+unrift -u
 
 # Use a specific config file
 unrift --config ./test/custom.config.ts
@@ -79,6 +83,14 @@ The `--json` flag outputs a structured report to stdout:
   "configPath": "/path/to/unrift.config.ts",
   "durationMs": 142.5,
   "files": ["test/math.spec.ts"],
+  "snapshots": {
+    "added": 0,
+    "updated": 0,
+    "failed": 0,
+    "obsolete": 0,
+    "removed": 0,
+    "filesWritten": []
+  },
   "results": [
     {
       "description": "math > adds numbers",
@@ -96,7 +108,7 @@ When `--json` is active, debug output goes to stderr to keep stdout clean.
 | Code | Meaning |
 |------|---------|
 | `0` | All tests passed |
-| `1` | One or more tests failed, or no test files found |
+| `1` | One or more tests failed, there are obsolete snapshots, or no test files found |
 
 ## Cache management
 

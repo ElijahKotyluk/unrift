@@ -8,10 +8,16 @@ import {
 import { ensureInternalMatchers } from "./matchers";
 import { RunState, unriftGlobalContext } from "./context";
 import { normalizePath } from "./utils/normalizePath";
-import { TaskMode } from "./types";
+import { TaskMode, TaskStatus } from "./types";
 import { toError } from "./utils/toError";
 import { toImportUrl } from "./utils/transform";
 import { assertValidRetries } from "./utils/helpers";
+import {
+  finishSnapshots,
+  resetSnapshots,
+  type SnapshotSummary,
+  type SnapshotUpdateMode,
+} from "./snapshot/state";
 
 type RunEngineOptions = {
   files: string[];
@@ -20,6 +26,8 @@ type RunEngineOptions = {
   grep?: RegExp;
   retries?: number;
   matchers?: string[];
+  /** Defaults to "none" when the CI env var is set, otherwise "new". */
+  updateSnapshots?: SnapshotUpdateMode;
 };
 
 export type RunEngineResult = {
@@ -27,7 +35,26 @@ export type RunEngineResult = {
   timeoutMs?: number;
   bail: boolean;
   results: TestResult[];
+  snapshots: SnapshotSummary;
 };
+
+function isCI(): boolean {
+  const ci = process.env.CI;
+
+  return !!ci && ci !== "false" && ci !== "0";
+}
+
+/** Names of tests that didn't pass, so their unused snapshots aren't called obsolete. */
+function unpassedTestNames(suite: Suite, names: string[] = []): string[] {
+  for (const test of suite.tests) {
+    if (test.status !== TaskStatus.Pass)
+      names.push(suite.getSnapshotName(test));
+  }
+
+  for (const child of suite.suites) unpassedTestNames(child, names);
+
+  return names;
+}
 
 async function loadMatcherModules(specifiers?: string[]) {
   for (const spec of specifiers ?? []) {
@@ -44,7 +71,17 @@ export async function runEngine(
   // config) would otherwise turn into "31" attempts or zero.
   assertValidRetries(options.retries, "runEngine");
 
+  const updateMode = options.updateSnapshots ?? (isCI() ? "none" : "new");
+
+  if (!["all", "new", "none"].includes(updateMode)) {
+    throw new Error(
+      `updateSnapshots must be "all", "new" or "none", got ${JSON.stringify(updateMode)}`,
+    );
+  }
+
   clearContext();
+
+  resetSnapshots(updateMode);
 
   ensureInternalMatchers();
 
@@ -95,11 +132,22 @@ export async function runEngine(
 
     const results = rootSuite.getResults();
 
+    // A file that failed to import never ran, leave its snapshots alone
+    const snapshots = finishSnapshots(
+      rootSuite.suites
+        .filter((suite) => !suite.errors.some((e) => e.label === "import"))
+        .map((suite) => ({
+          file: suite.description,
+          keep: unpassedTestNames(suite),
+        })),
+    );
+
     return {
       isOnly,
       timeoutMs,
       bail,
       results,
+      snapshots,
     };
   } finally {
     unriftGlobalContext.state = RunState.Idle;

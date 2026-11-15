@@ -12,3 +12,6 @@ packages/*/pnpm-lock.yaml
 
 # Astro generated files
 .astro
+
+# Scratch dirs from the snapshot tests
+packages/core/test/snapshots/.work

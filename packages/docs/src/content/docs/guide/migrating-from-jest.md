@@ -89,7 +89,7 @@ Most matchers are identical. Key differences:
 | `toHaveNthReturnedWith(n, v)` | `toHaveNthReturnedWith(n, v)` | Same |
 | (no equivalent - manual `expect(spy).toHaveBeenCalled()` on fetch wrapper) | `expect(mock.fetch).toHaveFetched(url)` | Convenience matcher unique to unrift |
 | (no equivalent) | `expect(mock.fetch).toHaveFetchedTimes(n)` | Convenience matcher unique to unrift |
-| `toMatchSnapshot` | - | Not yet supported |
+| `toMatchSnapshot` | `toMatchSnapshot` | Same keys and file layout, `-u` to update. No property matchers yet. See [Snapshot Testing](/guide/snapshot-testing/) |
 | `toMatchInlineSnapshot` | - | Not yet supported |
 
 ## Mocking
@@ -146,7 +146,7 @@ The hoisted `mock.module` API for static imports is on the roadmap (Tier B). See
 
 These Jest features are planned but not yet available:
 
-- **Snapshot testing** - `toMatchSnapshot`, `toMatchInlineSnapshot`
+- **Inline snapshots** - `toMatchInlineSnapshot`
 - **Hoisted `jest.mock`** for static imports - `mock.doMock` covers dynamic imports today; the hoisted variant is planned (Tier B)
 - **Coverage** - `--coverage` flag
 - **Parallel execution** - tests run sequentially
