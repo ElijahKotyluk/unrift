@@ -143,3 +143,15 @@ export function sameValue(a: unknown, b: unknown): boolean {
     Number.isNaN(b)
   );
 }
+
+/** Throws unless `retries` is undefined or a non-negative integer. */
+export function assertValidRetries(retries: unknown, where: string): void {
+  if (
+    retries !== undefined &&
+    !(typeof retries === "number" && Number.isInteger(retries) && retries >= 0)
+  ) {
+    throw new TypeError(
+      `${where}: retries must be a non-negative integer, got ${typeof retries === "string" ? JSON.stringify(retries) : String(retries)}`,
+    );
+  }
+}

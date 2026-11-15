@@ -2,6 +2,7 @@ export interface UnriftConfigOptions {
   testDir?: string;
   timeoutMs?: number;
   bail?: boolean;
+  retries?: number;
   pattern?: string;
   includes?: string[];
   excludes?: string[];

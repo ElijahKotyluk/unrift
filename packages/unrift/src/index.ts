@@ -50,6 +50,7 @@ export type {
   Promisable,
   RunEngineResult,
   UnriftConfigOptions,
+  TestOptions,
   Spy,
   MockState,
   MockResult,

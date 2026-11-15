@@ -1,16 +1,24 @@
-import { clearContext, computeOnlyFlags, rootSuite, Suite } from "./suite";
+import {
+  clearContext,
+  computeOnlyFlags,
+  rootSuite,
+  Suite,
+  type TestResult,
+} from "./suite";
 import { ensureInternalMatchers } from "./matchers";
 import { RunState, unriftGlobalContext } from "./context";
 import { normalizePath } from "./utils/normalizePath";
-import { TaskMode, TaskStatus } from "./types";
+import { TaskMode } from "./types";
 import { toError } from "./utils/toError";
 import { toImportUrl } from "./utils/transform";
+import { assertValidRetries } from "./utils/helpers";
 
 type RunEngineOptions = {
   files: string[];
   timeoutMs?: number;
   bail?: boolean;
   grep?: RegExp;
+  retries?: number;
   matchers?: string[];
 };
 
@@ -18,12 +26,7 @@ export type RunEngineResult = {
   isOnly: boolean;
   timeoutMs?: number;
   bail: boolean;
-  results: Array<{
-    description: string;
-    status: TaskStatus;
-    error?: Error;
-    durationMs: number;
-  }>;
+  results: TestResult[];
 };
 
 async function loadMatcherModules(specifiers?: string[]) {
@@ -36,6 +39,10 @@ export async function runEngine(
   options: RunEngineOptions,
 ): Promise<RunEngineResult> {
   const { files } = options;
+
+  // Validate before touching global state. A bad value (e.g. "3" from a JSON
+  // config) would otherwise turn into "31" attempts or zero.
+  assertValidRetries(options.retries, "runEngine");
 
   clearContext();
 
@@ -80,7 +87,7 @@ export async function runEngine(
     unriftGlobalContext.state = RunState.Run;
 
     await rootSuite.run(
-      { timeoutMs, bail, grep: options.grep },
+      { timeoutMs, bail, grep: options.grep, retries: options.retries },
       { bailed: false },
       isOnly,
       false,

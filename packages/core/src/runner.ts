@@ -11,6 +11,7 @@ import { cleanUnriftCaches } from "./utils/transform";
 import { colors } from "./utils/colors";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
+import type { TestResult } from "./suite";
 
 import { normalizePath } from "./utils/normalizePath";
 import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
@@ -52,6 +53,7 @@ type JsonReport = {
     description: string;
     status: TaskStatus;
     durationMs: number;
+    attempts?: number;
     error?: { message: string; stack?: string };
   }>;
 };
@@ -187,22 +189,10 @@ function horizontalRule(label?: string): string {
 
 type FileGroup = {
   heading: string;
-  results: Array<{
-    description: string;
-    status: TaskStatus;
-    durationMs: number;
-    error?: Error;
-  }>;
+  results: TestResult[];
 };
 
-function groupResultsByFile(
-  results: Array<{
-    description: string;
-    status: TaskStatus;
-    error?: Error;
-    durationMs: number;
-  }>,
-): FileGroup[] {
+function groupResultsByFile(results: TestResult[]): FileGroup[] {
   const groups: FileGroup[] = [];
   let current: FileGroup | null = null;
 
@@ -372,6 +362,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     timeoutMs,
     bail,
     grep: options.grep,
+    retries: config?.retries,
     matchers: config?.matchers,
   });
 
@@ -402,6 +393,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       description: result.description,
       status: result.status,
       durationMs: result.durationMs ?? 0,
+      attempts:
+        result.attempts && result.attempts > 1 ? result.attempts : undefined,
       error: result.error
         ? { message: result.error.message, stack: result.error.stack }
         : undefined,
@@ -483,12 +476,18 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
         lastSuitePath = suitePath;
       }
       const indent = "   " + "  ".repeat(depth);
+      const retried =
+        result.attempts && result.attempts > 1
+          ? colors.yellow(
+              ` (${result.status === TaskStatus.Fail ? "failed" : "passed"} after ${result.attempts} attempts)`,
+            )
+          : "";
 
       if (result.status === TaskStatus.Pass) {
         const dur = colors.dim(formatDuration(result.durationMs ?? 0));
 
         console.log(
-          `${indent}${colors.green("✔")} ${colors.dim(leaf)} ${dur}`,
+          `${indent}${colors.green("✔")} ${colors.dim(leaf)}${retried} ${dur}`,
         );
         continue;
       }
@@ -497,7 +496,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
         const dur = colors.dim(formatDuration(result.durationMs ?? 0));
 
         console.log(
-          `${indent}${colors.red("✘")} ${colors.boldRed(leaf)} ${dur}`,
+          `${indent}${colors.red("✘")} ${colors.boldRed(leaf)}${retried} ${dur}`,
         );
         continue;
       }

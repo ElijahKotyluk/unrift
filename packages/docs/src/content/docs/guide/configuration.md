@@ -30,6 +30,7 @@ Unrift searches upward from your project root for a config file named `unrift.co
 | `testDir` | `string` | `"test"` | Directory to search for test files (relative to config file) |
 | `timeoutMs` | `number` | - | Default timeout for each test in milliseconds |
 | `bail` | `boolean` | `false` | Stop running tests after the first failure |
+| `retries` | `number` | `0` | Retry failing tests this many times. Can be overridden per test |
 | `pattern` | `string` | - | Regex pattern to filter test files by path |
 | `includes` | `string[]` | - | Glob or regex patterns - only matching files are included |
 | `excludes` | `string[]` | - | Glob or regex patterns - matching files are excluded |

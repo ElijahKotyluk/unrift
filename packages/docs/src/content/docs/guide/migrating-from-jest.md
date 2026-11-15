@@ -62,6 +62,7 @@ The main difference is explicit imports. Unrift doesn't inject globals:
 | `jest -t "adds"` | `unrift --grep "adds"` | Different flag name, also matches the file path |
 | `jest --config path` | `unrift --config path` | Same concept |
 | `jest --testTimeout 5000` | `unrift --timeout 5000` | Different flag name |
+| `jest.retryTimes(3)` | `retries: 3` | Set in the config or per test with `it(name, fn, { retries: 3 })` |
 
 ## Matcher differences
 
