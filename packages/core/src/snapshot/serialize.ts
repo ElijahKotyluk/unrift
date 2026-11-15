@@ -23,7 +23,9 @@ function print(value: unknown, indent: string, parents: object[]): string {
     case "bigint":
       return `${value}n`;
     case "string":
-      return `"${value}"`;
+      // Escaped so a quote in the value can't pass for the end of the string,
+      // like ["a", "b"] vs ['a",\n  "b']. Jest's format before 29 did the same.
+      return `"${value.replace(/["\\]/g, "\\$&")}"`;
     case "symbol":
       return value.toString();
     case "function":
@@ -72,7 +74,14 @@ function print(value: unknown, indent: string, parents: object[]): string {
     const name = constructorName(obj);
     const items: string[] = [];
 
-    for (let i = 0; i < obj.length; i++) items.push(print(obj[i], inner, next));
+    // A hole isn't undefined: new Array(1) and [undefined] differ
+    for (let i = 0; i < obj.length; i++) {
+      items.push(
+        Object.prototype.hasOwnProperty.call(obj, i)
+          ? print(obj[i], inner, next)
+          : "<empty>",
+      );
+    }
 
     return block(name === "Array" ? "" : `${name} `, "[", "]", items);
   }

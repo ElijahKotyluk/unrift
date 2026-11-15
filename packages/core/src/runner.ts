@@ -445,9 +445,11 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   }
 
   const snapshots = engine.snapshots;
-  // Obsolete snapshots fail the run until they're removed with -u
+  // Obsolete snapshots fail the run until they're removed with -u, and so
+  // does a snapshot that couldn't be read or written
   const obsoleteLeft = snapshots.obsolete - snapshots.removed;
-  const ok = failed === 0 && obsoleteLeft === 0;
+  const ok =
+    failed === 0 && obsoleteLeft === 0 && snapshots.errors.length === 0;
   const durationMs = realPerformanceNow() - runStart;
 
   // JSON mode: stdout must be JSON only
@@ -473,6 +475,10 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
           key,
         })),
         inlineSkipped: snapshots.inlineSkipped.map(normalizePath),
+        errors: snapshots.errors.map(({ file, message }) => ({
+          file: normalizePath(file),
+          message,
+        })),
       },
       results: serializedResults,
     };
@@ -633,9 +639,13 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     console.log(formatObsolete(snapshots.obsoleteKeys));
   }
 
+  for (const { file, message } of snapshots.errors) {
+    console.log(`\n ${colors.boldRed("✘")} ${shortenPath(file)}: ${message}`);
+  }
+
   for (const file of snapshots.inlineSkipped) {
     console.log(
-      `\n ${colors.boldYellow("!")} ${shortenPath(file)} changed during the run or couldn't be written, its inline snapshots weren't written`,
+      `\n ${colors.boldYellow("!")} ${shortenPath(file)} changed during the run, its inline snapshots weren't written`,
     );
   }
 

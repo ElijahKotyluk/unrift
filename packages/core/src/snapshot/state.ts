@@ -40,8 +40,10 @@ export interface SnapshotSummary {
   obsoleteKeys: Array<{ file: string; key: string }>;
   /** Snapshot files that were written or deleted, and test files with inline snapshots written. */
   filesWritten: string[];
-  /** Test files whose inline snapshots weren't written: changed during the run, or the write failed. */
+  /** Test files that changed during the run, so their inline snapshots weren't written. */
   inlineSkipped: string[];
+  /** Snapshot and test files that couldn't be read or written. Any of these fail the run. */
+  errors: Array<{ file: string; message: string }>;
 }
 
 class SnapshotFile {
@@ -280,13 +282,28 @@ export function finishSnapshots(
     filesWritten: [],
     obsoleteKeys: [],
     inlineSkipped: [],
+    errors: [],
   };
 
   for (const { file: testFile, keep } of testFiles) {
     // Don't create (and read) a file for every test file that never used snapshots
-    const file = files.get(testFile) ?? peekFile(testFile);
+    const used = files.get(testFile);
+    const file = used ?? peekFile(testFile);
 
-    if (!file || file.loadError) continue;
+    if (!file) continue;
+
+    if (file.loadError) {
+      // A test that used it already failed on this. One nobody used (a .snap
+      // left with merge conflict markers) would otherwise pass unnoticed.
+      if (!used) {
+        summary.errors.push({
+          file: file.path,
+          message: file.loadError.message,
+        });
+      }
+
+      continue;
+    }
 
     summary.failed += file.failed.size;
 
@@ -314,12 +331,20 @@ export function finishSnapshots(
 
     if (!changed(file)) continue;
 
-    if (file.data.size === 0) {
-      rmSync(file.path, { force: true });
-      removeDirIfEmpty(dirname(file.path));
-    } else {
-      mkdirSync(dirname(file.path), { recursive: true });
-      writeFileSync(file.path, formatSnapshotFile(file.data));
+    try {
+      if (file.data.size === 0) {
+        rmSync(file.path, { force: true });
+        removeDirIfEmpty(dirname(file.path));
+      } else {
+        mkdirSync(dirname(file.path), { recursive: true });
+        writeFileSync(file.path, formatSnapshotFile(file.data));
+      }
+    } catch (err) {
+      summary.errors.push({
+        file: file.path,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      continue;
     }
 
     summary.filesWritten.push(file.path);
@@ -334,6 +359,7 @@ export function finishSnapshots(
   summary.failed += inlineFailed;
   summary.filesWritten.push(...inline.filesWritten);
   summary.inlineSkipped = inline.skipped;
+  summary.errors.push(...inline.errors);
 
   return summary;
 }

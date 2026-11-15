@@ -62,7 +62,9 @@ exports[`user builds a profile 1`] = `
 `;
 ```
 
-Values are printed in Jest's format: sorted keys, trailing commas, `Map {`, `Set {`, `[Error: message]`, class names in front of instances. It's Unrift's own printer though, not `pretty-format`, so a snapshot file from Jest might need a `-u` run before it passes.
+Values are printed in Jest's format: sorted keys, trailing commas, `Map {`, `Set {`, `[Error: message]`, class names in front of instances. Quotes and backslashes in strings are escaped, like Jest before 29, so two different values can't print the same. It's Unrift's own printer though, not `pretty-format`, so a snapshot file from Jest might need a `-u` run before it passes.
+
+If a snapshot file can't be read (like merge conflict markers left in it) or can't be written, the run fails and says which file.
 
 ## Inline snapshots
 

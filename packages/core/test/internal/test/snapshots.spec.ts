@@ -1,6 +1,7 @@
 import { describe, it, expect } from "@unrift/core";
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -93,7 +94,7 @@ describe("user", () => {
         "",
         "exports[`user serializes 1`] = `",
         "{",
-        '  "name": "a \\`tick\\` \\${x} \\\\",',
+        '  "name": "a \\`tick\\` \\${x} \\\\\\\\",',
         '  "tags": [',
         '    "x",',
         "  ],",
@@ -503,7 +504,49 @@ it("template", () => expect(1).toMatchInlineSnapshot(\`\${two}\`));
     expect(ws.source()).toContain("toMatchInlineSnapshot(`${two}`)");
   });
 
+  it("fails the run when a snapshot file can't be read or written", () => {
+    const ws = workspace("io-errors");
+    const errors = (res: ReturnType<typeof ws.run>) =>
+      res.report.snapshots.errors.map((e: { message: string }) => e.message);
+
+    // A .snap no test uses anymore, left with merge conflict markers
+    ws.spec(`it("a", () => {});\n`);
+    mkdirSync(join(ws.snapPath, ".."));
+    writeFileSync(ws.snapPath, "<<<<<<< HEAD\n");
+    const broken = ws.run();
+
+    expect(broken.status).toBe(1);
+    expect(errors(broken)[0]).toContain("Couldn't read snapshot file");
+
+    // __snapshots__ is a file, so the .snap can't be written
+    rmSync(join(ws.snapPath, ".."), { recursive: true });
+    writeFileSync(join(ws.snapPath, ".."), "");
+    ws.spec(`it("a", () => expect(1).toMatchSnapshot());\n`);
+    const blocked = ws.run();
+
+    expect(blocked.status).toBe(1);
+    expect(blocked.report.snapshots.errors).toHaveLength(1);
+    rmSync(join(ws.snapPath, ".."));
+
+    // A read-only test file can't take an inline snapshot. Root can write it anyway.
+    if (process.getuid?.() !== 0) {
+      ws.spec(`it("a", () => expect(1).toMatchInlineSnapshot());\n`);
+      const source = ws.source();
+      chmodSync(ws.specPath, 0o444);
+      const readOnly = ws.run();
+      chmodSync(ws.specPath, 0o644);
+
+      expect(readOnly.status).toBe(1);
+      expect(readOnly.report.snapshots.errors).toHaveLength(1);
+      expect(ws.source()).toBe(source);
+    }
+  });
+
   it("serializes values like Jest", () => {
+    // Escaped, so different values can't print the same
+    expect(serialize('say "hi" \\')).toBe('"say \\"hi\\" \\\\"');
+    expect(serialize(["a", "b"])).not.toBe(serialize(['a",\n  "b']));
+
     class Point {
       constructor(public x: number) {}
     }
@@ -519,6 +562,8 @@ it("template", () => expect(1).toMatchInlineSnapshot(\`\${two}\`));
         circular,
         nullProto,
         point: new Point(1),
+        // eslint-disable-next-line no-sparse-arrays
+        sparse: [, undefined],
         nums: [-0, NaN, 10n, new Uint8Array([1])],
         misc: [new Date(NaN), /x/g, new TypeError(""), function named() {}],
         // Other realms and binary values still print what's in them
@@ -578,6 +623,10 @@ it("template", () => expect(1).toMatchInlineSnapshot(\`\${two}\`));
         '  "point": Point {',
         '    "x": 1,',
         "  },",
+        '  "sparse": [',
+        "    <empty>,",
+        "    undefined,",
+        "  ],",
         '  "z": [',
         "    {",
         '      "n": 1,',

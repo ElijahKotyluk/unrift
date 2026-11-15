@@ -91,7 +91,8 @@ The `--json` flag outputs a structured report to stdout:
     "removed": 0,
     "obsoleteKeys": [],
     "filesWritten": [],
-    "inlineSkipped": []
+    "inlineSkipped": [],
+    "errors": []
   },
   "results": [
     {

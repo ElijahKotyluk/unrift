@@ -58,7 +58,8 @@ type RunEngineResult = {
     removed: number;     // obsolete ones deleted ("all" only)
     obsoleteKeys: Array<{ file: string; key: string }>; // obsolete ones still in their .snap file
     filesWritten: string[];  // .snap files, and test files with inline snapshots written
-    inlineSkipped: string[]; // test files whose inline snapshots weren't written (changed during the run, or the write failed)
+    inlineSkipped: string[]; // test files that changed during the run, inline snapshots not written
+    errors: Array<{ file: string; message: string }>; // files that couldn't be read or written, these fail the run
   };
 };
 ```

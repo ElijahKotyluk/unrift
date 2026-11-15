@@ -412,11 +412,13 @@ export function writeInlineSnapshots(): {
   updated: number;
   filesWritten: string[];
   skipped: string[];
+  errors: Array<{ file: string; message: string }>;
 } {
   let added = 0;
   let updated = 0;
   const filesWritten: string[] = [];
   const skipped: string[] = [];
+  const errors: Array<{ file: string; message: string }> = [];
 
   for (const [path, file] of sources) {
     if (file.missed) skipped.push(path);
@@ -453,10 +455,11 @@ export function writeInlineSnapshots(): {
         source.slice(edit.end);
     }
 
+    // Not a skip: the matcher passed expecting this to land, so the run fails
     try {
       writeFileSync(path, source);
-    } catch {
-      skipped.push(path);
+    } catch (err) {
+      errors.push({ file: path, message: errorMessage(err) });
       continue;
     }
 
@@ -470,5 +473,9 @@ export function writeInlineSnapshots(): {
 
   sources.clear();
 
-  return { added, updated, filesWritten, skipped };
+  return { added, updated, filesWritten, skipped, errors };
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
