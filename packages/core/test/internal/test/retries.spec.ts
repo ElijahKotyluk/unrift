@@ -19,14 +19,15 @@ function runWith(config: string, ...args: string[]) {
   );
 }
 
+// One JSON run shared by the tests that read results.
+let report: { results: { description: string }[] } | undefined;
+function result(name: string) {
+  report ??= JSON.parse(run("--json").stdout);
+  return report!.results.find((r) => r.description.endsWith(name)) as any;
+}
+
 describe("retries", () => {
   it("retries failed tests and reports attempts", () => {
-    const report = JSON.parse(run("--json").stdout);
-    const result = (name: string) =>
-      report.results.find((r: { description: string }) =>
-        r.description.endsWith(name),
-      );
-
     expect(result("flaky")).toMatchObject({ status: "pass", attempts: 3 });
     expect(result("always fails")).toMatchObject({
       status: "fail",
@@ -36,11 +37,23 @@ describe("retries", () => {
       status: "pass",
       attempts: 2,
     });
+    expect(result("opts out").status).toBe("fail");
+    expect(result("opts out").attempts).toBeUndefined();
+    // A passing retry must not keep the earlier attempt's error.
+    expect(result("flaky").error).toBeUndefined();
+  });
+
+  it("retries hook failures", () => {
+    for (const name of ["recovers from setup", "recovers from teardown"]) {
+      expect(result(name)).toMatchObject({ status: "pass", attempts: 2 });
+      expect(result(name).error).toBeUndefined();
+    }
+
     // Timeouts aren't retried: the first body may still be running.
     expect(result("times out").status).toBe("fail");
     expect(result("times out").attempts).toBeUndefined();
-    expect(result("opts out").status).toBe("fail");
-    expect(result("opts out").attempts).toBeUndefined();
+    expect(result("times out").error.message).toContain("teardown failed");
+    expect(result("times out").error.message).toContain("not retried");
   });
 
   it("shows the attempt count in the output", () => {

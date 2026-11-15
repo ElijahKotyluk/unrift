@@ -317,13 +317,14 @@ export class Suite {
           // another attempt could race with it. Stop here instead.
           if (test.timedOut) {
             if (attempt < maxAttempts && test.error) {
-              const original = test.error.message;
-              const note = `${original} (not retried: the timed-out attempt may still be running)`;
+              const note =
+                "\n\n[retries] not retried: the timed-out attempt may still be running";
+              // Read the stack before touching the message: V8 builds it lazily,
+              // and an afterEach failure may have already combined it.
+              const stack = test.error.stack ?? test.error.message;
 
-              // The printed stack is usually built lazily from the message, but
-              // an afterEach failure already rebuilt it, so update it too.
-              test.error.message = note;
-              test.error.stack = test.error.stack?.replace(original, note);
+              test.error.message += note;
+              test.error.stack = stack + note;
             }
             break;
           }

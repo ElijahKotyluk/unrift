@@ -1,20 +1,28 @@
-import { describe, it, beforeEach } from "@unrift/core";
+import { describe, it, beforeEach, afterEach } from "@unrift/core";
 
 // Run by test/internal/test/retries.spec.ts. Config sets retries: 1.
-let state = 0;
-let flakyRuns = 0;
-let defaultRuns = 0;
 
-describe("retries", () => {
+describe("body failures", () => {
+  let state = 0;
+  let cleaned = true;
+  let flakyRuns = 0;
+  let defaultRuns = 0;
+
   beforeEach(() => {
     state = 0;
+  });
+
+  afterEach(() => {
+    cleaned = true;
   });
 
   it(
     "flaky",
     () => {
-      // Fails if beforeEach didn't reset state for this attempt.
+      // Both hooks must run around every attempt.
       if (++state !== 1) throw new Error("beforeEach did not rerun");
+      if (!cleaned) throw new Error("afterEach did not run");
+      cleaned = false;
       if (++flakyRuns < 3) throw new Error(`attempt ${flakyRuns} failed`);
     },
     { retries: 2 },
@@ -32,11 +40,6 @@ describe("retries", () => {
     if (++defaultRuns < 2) throw new Error("first attempt failed");
   });
 
-  it("times out", () => new Promise<void>(() => {}), {
-    timeout: 20,
-    retries: 2,
-  });
-
   it(
     "opts out",
     () => {
@@ -44,4 +47,35 @@ describe("retries", () => {
     },
     { retries: 0 },
   );
+});
+
+describe("beforeEach failure", () => {
+  let calls = 0;
+
+  beforeEach(() => {
+    if (++calls === 1) throw new Error("setup flaked");
+  });
+
+  it("recovers from setup", () => {});
+});
+
+describe("afterEach failure", () => {
+  let calls = 0;
+
+  afterEach(() => {
+    if (++calls === 1) throw new Error("teardown flaked");
+  });
+
+  it("recovers from teardown", () => {});
+});
+
+describe("timeout with failing teardown", () => {
+  afterEach(() => {
+    throw new Error("teardown failed");
+  });
+
+  it("times out", () => new Promise<void>(() => {}), {
+    timeout: 20,
+    retries: 2,
+  });
 });
