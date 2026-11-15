@@ -1,4 +1,5 @@
 import { describe, it, expect } from "@unrift/core";
+import { runInNewContext } from "node:vm";
 
 describe("core matchers", () => {
   it("toBe passes on Object.is()", () => {
@@ -221,12 +222,138 @@ describe("async matchers", () => {
     await expect(Promise.reject(new Error("boom"))).rejects.not.toBe("other");
   });
 
+  it("rejects.toThrow matches the rejection reason", async () => {
+    const boom = () => Promise.reject(new TypeError("boom"));
+
+    await expect(boom()).rejects.toThrow("boom");
+    await expect(boom()).rejects.toThrow(TypeError);
+    await expect(boom()).rejects.not.toThrow("other");
+    // A function returning a promise works too, like Jest.
+    await expect(boom).rejects.toThrow(/boo/);
+    await expect(async () => 42).resolves.toBe(42);
+    // A real rejection with this exact text must not be mistaken for "it resolved".
+    await expect(
+      Promise.reject(new Error("Expected promise to reject, but it resolved")),
+    ).rejects.toThrow("but it resolved");
+  });
+
+  it("rejects/resolves follow Jest for bad input and non-Error reasons", async () => {
+    // The assertion's own failure message, or undefined if it passed.
+    const failure = (run: () => void | Promise<void>) =>
+      Promise.resolve()
+        .then(run)
+        .then(
+          () => undefined,
+          (e: Error) => e.message,
+        );
+
+    // Bad received values throw right away, even before any await. A sync
+    // throw must not count as a rejection (that would pass this toThrow).
+    expect(() =>
+      expect(() => {
+        throw new Error("sync");
+      }).rejects.toThrow("sync"),
+    ).toThrow("sync");
+    expect(() => expect(42).resolves.toBe(42)).toThrow("must be a promise");
+    expect(() => expect(() => 42).resolves.toBe(42)).toThrow(
+      "must be a promise",
+    );
+
+    // Only an Error counts as thrown, including one from another realm.
+    expect(
+      await failure(() => expect(Promise.reject("boom")).rejects.toThrow()),
+    ).toBe(
+      "Expected promise to reject with an Error, but it rejected with a non-Error value: boom",
+    );
+    await expect(Promise.reject("boom")).rejects.not.toThrow();
+    await expect(
+      Promise.reject(runInNewContext('new Error("boom")')),
+    ).rejects.toThrow("boom");
+    expect(
+      await failure(() => expect(Promise.resolve(1)).resolves.toThrow()),
+    ).toBe(
+      "Expected promise to resolve with an Error, but it resolved with a non-Error value: 1",
+    );
+    await expect(Promise.resolve(1)).resolves.not.toThrow();
+
+    // A function as the settled value is called, like a sync toThrow.
+    await expect(
+      Promise.resolve(() => {
+        throw new Error("from fn");
+      }),
+    ).resolves.toThrow("from fn");
+
+    expect(
+      await failure(() =>
+        expect(Promise.reject(new TypeError("boom"))).rejects.toThrow(
+          RangeError,
+        ),
+      ),
+    ).toBe(
+      "Expected promise to reject with RangeError, but it rejected with TypeError: boom",
+    );
+
+    // Values that can't be inspected or stringified must not crash the matcher.
+    const hostile = Object.create(null, {
+      [Symbol.toStringTag]: {
+        get() {
+          throw new Error("tag getter");
+        },
+      },
+    });
+    await expect(Promise.reject(hostile)).rejects.not.toThrow();
+    expect(
+      await failure(() =>
+        expect(Promise.reject<number>(hostile)).resolves.toBe(1),
+      ),
+    ).toBe(
+      "Expected promise to resolve, but it rejected with: [unprintable value]",
+    );
+
+    const nullProto = Object.create(null);
+    expect(
+      await failure(() =>
+        expect(Promise.reject<number>(nullProto)).resolves.toBe(1),
+      ),
+    ).toContain("Expected promise to resolve, but it rejected with");
+    expect(() =>
+      expect(() => {
+        throw nullProto;
+      }).toThrow("x"),
+    ).toThrow("Expected function to throw");
+  });
+
+  it("custom matchers see which modifier they ran under", async () => {
+    expect.extend({
+      toRunUnder(_received: unknown, expected: unknown) {
+        if (this.promise !== expected) {
+          throw new Error(`ran under "${this.promise}"`);
+        }
+      },
+    });
+    type WithRunUnder = { toRunUnder(promise: string): void | Promise<void> };
+
+    (expect(1) as unknown as WithRunUnder).toRunUnder("");
+    await (
+      expect(Promise.resolve(1)).resolves as unknown as WithRunUnder
+    ).toRunUnder("resolves");
+    await (
+      expect(Promise.reject(1)).rejects as unknown as WithRunUnder
+    ).toRunUnder("rejects");
+  });
+
   it("toThrow detects async functions and gives helpful error", () => {
     const result = expect(() =>
       expect(async () => {
         throw new Error("x");
       }).toThrow(),
     ).toThrow("toThrow() received an async function");
+
+    // a bare thenable has no .catch
+    const thenable = { then: (resolve: (v: number) => void) => resolve(42) };
+    expect(() => expect(() => thenable).toThrow()).toThrow(
+      "toThrow() received an async function",
+    );
   });
 });
 
@@ -410,5 +537,7 @@ describe("stateful regex matchers (/g, /y)", () => {
     };
     expect(throwBoom).toThrow(re);
     expect(throwBoom).toThrow(re);
+    expect(throwBoom).toThrow({ message: re });
+    expect(throwBoom).toThrow({ message: re });
   });
 });

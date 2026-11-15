@@ -51,6 +51,7 @@ Inside a matcher function, `this` is a `MatcherContext` with:
 | Property | Type | Description |
 |----------|------|-------------|
 | `isNot` | `boolean` | `true` when called via `.not` |
+| `promise` | `"" \| "resolves" \| "rejects"` | Which modifier the matcher was called through, `""` if neither (same as Jest) |
 | `diff(received, expected)` | `(a, b) => string` | Formats a diff message for the error |
 
 The `isNot` flag is critical - your matcher must handle both the normal and negated case:

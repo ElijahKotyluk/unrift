@@ -155,3 +155,34 @@ export function assertValidRetries(retries: unknown, where: string): void {
     );
   }
 }
+
+/** String() throws for e.g. null-prototype objects; fall back to the tag. */
+export function safeString(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    // The tag lookup can throw too (a throwing Symbol.toStringTag getter).
+    try {
+      return Object.prototype.toString.call(value);
+    } catch {
+      return "[unprintable value]";
+    }
+  }
+}
+
+/**
+ * Error check that also works across realms (vm, workers, jsdom), where
+ * `instanceof Error` is false. Same test Jest uses.
+ */
+export function isErrorLike(value: unknown): value is Error {
+  // Both checks can throw (Proxy traps, a throwing Symbol.toStringTag getter).
+  // A value that can't be inspected isn't treated as an Error.
+  try {
+    return (
+      value instanceof Error ||
+      Object.prototype.toString.call(value) === "[object Error]"
+    );
+  } catch {
+    return false;
+  }
+}
