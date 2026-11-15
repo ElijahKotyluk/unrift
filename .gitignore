@@ -4,6 +4,8 @@ node_modules
 **/dist-pack
 
 coverage
+# The coverage source, not a report
+!packages/core/src/coverage
 
 # Nested lockfiles (root lockfile is the source of truth)
 packages/*/pnpm-lock.yaml
@@ -15,3 +17,4 @@ packages/*/pnpm-lock.yaml
 
 # Scratch dirs from the snapshot tests
 packages/core/test/snapshots/.work
+packages/core/test/coverage/.work

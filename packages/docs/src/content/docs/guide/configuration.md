@@ -35,6 +35,7 @@ Unrift searches upward from your project root for a config file named `unrift.co
 | `includes` | `string[]` | - | Glob or regex patterns - only matching files are included |
 | `excludes` | `string[]` | - | Glob or regex patterns - matching files are excluded |
 | `matchers` | `string[]` | - | Module specifiers for custom matcher packages |
+| `coverage` | `object` | - | Coverage settings, see [Coverage](/guide/coverage/#config) |
 
 ## Test file discovery
 

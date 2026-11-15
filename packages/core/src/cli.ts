@@ -47,6 +47,9 @@ Options:
   -t, --timeout <ms>       Default test timeout in milliseconds
   -w, --watch              Re-run tests on file changes
   -u, --update-snapshots   Rewrite failing snapshots and remove obsolete ones
+      --coverage           Report code coverage
+      --coverage-reporter <name>
+                           text, lcov or json, repeat for more than one
   -d, --debug              Enable debug logging
   -l, --list               List discovered test files
   -j, --json               Output test results as JSON
@@ -62,6 +65,7 @@ Examples:
   unrift --timeout 10000
   unrift --watch
   unrift -u
+  unrift --coverage --coverage-reporter lcov
 `);
 }
 
@@ -79,6 +83,8 @@ function parseArgs(argv: string[]) {
   let cacheClean = false;
   let watch = false;
   let updateSnapshots = false;
+  let coverage = false;
+  let coverageReporters: string[] | undefined;
 
   const rest: string[] = [];
 
@@ -167,6 +173,25 @@ function parseArgs(argv: string[]) {
       continue;
     }
 
+    if (a === "--coverage") {
+      coverage = true;
+
+      continue;
+    }
+
+    if (a === "--coverage-reporter") {
+      const next = argv[i + 1];
+
+      if (!next) throw new Error(`${a} requires a reporter name`);
+
+      // A reporter turns coverage on, it's no use without it
+      coverage = true;
+      coverageReporters = [...(coverageReporters ?? []), ...next.split(",")];
+      i++;
+
+      continue;
+    }
+
     if (a === "--cache-clean" || a === "--clear-cache") {
       cacheClean = true;
 
@@ -191,6 +216,8 @@ function parseArgs(argv: string[]) {
     cacheClean,
     watch,
     updateSnapshots,
+    coverage,
+    coverageReporters,
     help,
     showVersion,
   };
@@ -208,6 +235,8 @@ const {
   cacheClean,
   watch,
   updateSnapshots,
+  coverage,
+  coverageReporters,
   help,
   showVersion,
 } = parseArgs(process.argv.slice(2));
@@ -233,6 +262,8 @@ const runOpts = {
   json,
   cacheClean,
   updateSnapshots,
+  coverage: coverage || undefined,
+  coverageReporters,
 };
 
 (watch ? watchTestsCLI(runOpts) : runTestsCLI(runOpts)).catch((err) => {

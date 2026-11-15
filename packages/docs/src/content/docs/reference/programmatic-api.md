@@ -33,6 +33,7 @@ console.log(`Failed: ${result.results.filter(r => r.status === "fail").length}`)
 | `retries` | `number` | `0` | Retry failing tests this many times |
 | `matchers` | `string[]` | - | Module specifiers for custom matchers to load |
 | `updateSnapshots` | `"all" \| "new" \| "none"` | `"none"` on CI, otherwise `"new"` | `"all"` is `-u`, `"new"` writes new snapshots only, `"none"` writes nothing |
+| `coverage` | `boolean \| { root?, include?, exclude? }` | - | Collect coverage. Files outside `root` (default: the working directory) aren't reported |
 
 ## Return value
 
@@ -61,7 +62,21 @@ type RunEngineResult = {
     inlineSkipped: string[]; // test files that changed during the run, inline snapshots not written
     errors: Array<{ file: string; message: string }>; // files that couldn't be read or written, these fail the run
   };
+  coverage?: {           // set when coverage was asked for
+    files: Array<{
+      file: string;                       // absolute path
+      lines: Record<number, number>;      // line to times it ran, only lines with code
+      functions: Array<{ name: string; line: number; count: number }>;
+      branches: Array<{ line: number; count: number }>;
+    }>;
+    summary: {
+      total: { lines: Metric; functions: Metric; branches: Metric };
+      files: Array<{ file: string; lines: Metric; functions: Metric; branches: Metric; uncoveredLines: number[] }>;
+    };
+  };
 };
+
+type Metric = { covered: number; total: number; pct: number };
 ```
 
 :::note

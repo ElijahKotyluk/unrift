@@ -47,6 +47,7 @@ export default defineConfig({
             { label: "Custom Matchers", slug: "guide/custom-matchers" },
             { label: "Async Testing", slug: "guide/async-testing" },
             { label: "Snapshot Testing", slug: "guide/snapshot-testing" },
+            { label: "Coverage", slug: "guide/coverage" },
             { label: "Migrating from Jest", slug: "guide/migrating-from-jest" },
           ],
         },

@@ -159,16 +159,43 @@ export function cleanUnriftCaches(projectRoot: string): {
 type Mode = "bundle-config" | "bundle-test";
 type CacheKey = string;
 
-const cache = new Map<CacheKey, { hash: string; outUrl: string }>();
+type CacheEntry = {
+  outUrl: string;
+  // Every file esbuild read for the bundle and its hash. The test file
+  // alone isn't enough: an edit to a file it imports has to rebuild too.
+  inputs: Array<{ path: string; hash: string }>;
+};
+
+const cache = new Map<CacheKey, CacheEntry>();
+
+function hashFile(path: string): string | null {
+  try {
+    return hashString(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function inputsUnchanged(entry: CacheEntry): boolean {
+  return entry.inputs.every(({ path, hash }) => hashFile(path) === hash);
+}
 
 function cacheDirForMode(cacheRoot: string, mode: Mode) {
   return join(cacheRoot, mode === "bundle-config" ? "config" : "tests");
 }
 
-function cacheOutPath(cacheDir: string, filePath: string, h: string): string {
+function cacheOutPath(
+  cacheDir: string,
+  filePath: string,
+  h: string,
+  coverage: boolean,
+): string {
   const base = basename(filePath, extname(filePath));
   const pathHash = hashString(resolve(filePath));
-  return join(cacheDir, `${base}.${pathHash}.${h}.mjs`);
+  return join(
+    cacheDir,
+    `${base}.${pathHash}.${h}${coverage ? ".cov" : ""}.mjs`,
+  );
 }
 
 /**
@@ -225,19 +252,26 @@ function pickCacheRoot(projectRoot: string, selfHost: boolean): string {
   return getTmpCacheRoot(projectRoot);
 }
 
+export type TransformOptions = {
+  /** Keep code no test uses, so it shows up as uncovered. */
+  coverage?: boolean;
+};
+
 export function toImportUrl(
   filePath: string,
   mode: Mode = "bundle-test",
+  options: TransformOptions = {},
 ): string {
   if (!isTsLike(filePath)) return pathToFileURL(filePath).href;
 
+  const coverage = options.coverage ?? false;
   const source = readFileSync(filePath, "utf8");
   const hashStr = hashString(source);
-  const key: CacheKey = `${mode}:${filePath}`;
+  const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${filePath}`;
 
   const existing = cache.get(key);
 
-  if (existing && existing.hash === hashStr) return existing.outUrl;
+  if (existing && inputsUnchanged(existing)) return existing.outUrl;
 
   const projectRoot = findProjectRoot(dirname(filePath));
   const selfHost = readPackageName(projectRoot) === "@unrift/core";
@@ -259,10 +293,17 @@ export function toImportUrl(
 
   // Node reports the bundle by its real path (macOS /var is a symlink), so
   // write it there and the source map's relative paths resolve from it.
-  const outFile = cacheOutPath(safeRealpath(outDir), filePath, hashStr);
+  const outFile = cacheOutPath(
+    safeRealpath(outDir),
+    filePath,
+    hashStr,
+    coverage,
+  );
+
+  let inputs: CacheEntry["inputs"];
 
   try {
-    buildSync({
+    const result = buildSync({
       entryPoints: [filePath],
       outfile: outFile,
       bundle: true,
@@ -280,7 +321,18 @@ export function toImportUrl(
       },
       sourcemap: "inline",
       sourcesContent: true,
+      // An export no test imports would be dropped and never count as uncovered
+      treeShaking: !coverage,
+      metafile: true,
       logLevel: "silent",
+    });
+
+    // Inputs that aren't files on disk (esbuild's own) can't change
+    inputs = Object.keys(result.metafile.inputs).flatMap((input) => {
+      const path = resolve(projectRoot, input);
+      const hash = hashFile(path);
+
+      return hash === null ? [] : [{ path, hash }];
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -299,7 +351,7 @@ export function toImportUrl(
 
   const outUrl = pathToFileURL(outFile).href;
 
-  cache.set(key, { hash: hashStr, outUrl });
+  cache.set(key, { outUrl, inputs });
 
   return outUrl;
 }

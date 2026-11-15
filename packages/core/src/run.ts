@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 
 import {
   clearContext,
@@ -21,6 +22,22 @@ import {
   type SnapshotSummary,
   type SnapshotUpdateMode,
 } from "./snapshot/state";
+import { startCoverage, stopCoverage, takeCoverage } from "./coverage/collect";
+import { toFileCoverage, type FileCoverage } from "./coverage/convert";
+import { summarize, type CoverageSummary } from "./coverage/report";
+
+export type RunEngineCoverageOptions = {
+  /** Files outside it aren't reported. Defaults to the working directory. */
+  root?: string;
+  /** Only report files matching one of these globs or regexes. */
+  include?: string[];
+  exclude?: string[];
+};
+
+export type RunEngineCoverage = {
+  files: FileCoverage[];
+  summary: CoverageSummary;
+};
 
 type RunEngineOptions = {
   files: string[];
@@ -31,6 +48,8 @@ type RunEngineOptions = {
   matchers?: string[];
   /** Defaults to "none" when the CI env var is set, otherwise "new". */
   updateSnapshots?: SnapshotUpdateMode;
+  /** Collect coverage of the files the tests ran. */
+  coverage?: boolean | RunEngineCoverageOptions;
 };
 
 export type RunEngineResult = {
@@ -39,6 +58,8 @@ export type RunEngineResult = {
   bail: boolean;
   results: TestResult[];
   snapshots: SnapshotSummary;
+  /** Set when coverage was asked for. */
+  coverage?: RunEngineCoverage;
 };
 
 // Node caches a module by URL, so a file that didn't change would come back
@@ -114,6 +135,15 @@ export async function runEngine(
 
   ensureInternalMatchers();
 
+  const coverage =
+    options.coverage === true ? {} : options.coverage || undefined;
+
+  // Before any user code loads, code compiled earlier isn't counted
+  if (coverage) await startCoverage();
+  else await stopCoverage();
+
+  const bundles = new Set<string>();
+
   await loadMatcherModules(options.matchers);
 
   const timeoutMs = options.timeoutMs;
@@ -134,7 +164,15 @@ export async function runEngine(
 
       try {
         forgetCommonJs(file);
-        await import(freshImportUrl(toImportUrl(file, "bundle-test")));
+
+        const built = toImportUrl(file, "bundle-test", {
+          coverage: !!coverage,
+        });
+        const url = freshImportUrl(built);
+
+        if (built !== pathToFileURL(file).href) bundles.add(url);
+
+        await import(url);
       } catch (err) {
         const error = toError(err);
 
@@ -165,6 +203,19 @@ export async function runEngine(
 
     const results = rootSuite.getResults();
 
+    let coverageResult: RunEngineCoverage | undefined;
+
+    if (coverage) {
+      const covered = toFileCoverage(await takeCoverage(), bundles, {
+        root: coverage.root ?? process.cwd(),
+        include: coverage.include,
+        exclude: coverage.exclude,
+        testFiles: files,
+      });
+
+      coverageResult = { files: covered, summary: summarize(covered) };
+    }
+
     // A file that failed to import never ran, leave its snapshots alone
     const snapshots = finishSnapshots(
       rootSuite.suites
@@ -181,6 +232,7 @@ export async function runEngine(
       bail,
       results,
       snapshots,
+      coverage: coverageResult,
     };
   } finally {
     unriftGlobalContext.state = RunState.Idle;
