@@ -20,6 +20,7 @@ A lightweight, fast TypeScript test framework with ESM-first design.
 - **Extensible matchers** via `expect.extend()`
 - **Async assertions** - `resolves` / `rejects` with full `.not` support
 - **Test modifiers** - `.only`, `.skip`, `.todo`
+- **Snapshot testing** - `toMatchSnapshot` and `toMatchInlineSnapshot`, Jest-compatible keys and file format, `-u` to update
 - **Built-in mocking suite** - spies, `mock.fetch`, fake timers and `Date`, an in-memory `mock.fs`, plus Tier A module mocking
 - **Watch mode** - re-runs tests on file changes (`--watch`)
 - **Bail mode** and configurable timeouts
