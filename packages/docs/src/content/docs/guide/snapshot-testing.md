@@ -95,7 +95,15 @@ If a test is retried, only the last attempt's value is written.
 
 ## Obsolete snapshots
 
-A stored snapshot that no test used is obsolete, like when you rename or delete a test. Obsolete snapshots fail the run until you remove them with `-u`.
+A stored snapshot that no test used is obsolete, like when you rename or delete a test. Obsolete snapshots fail the run until you remove them with `-u`. The run lists each one so you can check before you do:
+
+```
+ ! 1 obsolete snapshot, run with -u to remove it
+   test/__snapshots__/user.spec.ts.snap
+     › user old name 1
+```
+
+Watch out for a snapshot that only runs sometimes, like inside `if (process.platform === "win32")`. On other platforms it shows up as obsolete, and `-u` there would delete it.
 
 Snapshots for tests that didn't run aren't obsolete. A skipped test, a test filtered out with `--grep` or `.only`, or a test that failed before reaching its snapshot keeps what it has. If a test file fails to import, its snapshot file isn't touched.
 

@@ -244,6 +244,29 @@ function extractTestName(description: string): string {
   return description.replace(/^.*?›\s*/, "");
 }
 
+const MAX_OBSOLETE_SHOWN = 20;
+
+/** Grouped by .snap file, so a rename is easy to tell from a snapshot that only runs sometimes. */
+function formatObsolete(keys: SnapshotSummary["obsoleteKeys"]): string {
+  const lines: string[] = [];
+  let lastFile = "";
+
+  for (const { file, key } of keys.slice(0, MAX_OBSOLETE_SHOWN)) {
+    if (file !== lastFile) {
+      lines.push(`   ${colors.dim(shortenPath(file))}`);
+      lastFile = file;
+    }
+
+    lines.push(`     ${colors.yellow("›")} ${key}`);
+  }
+
+  if (keys.length > MAX_OBSOLETE_SHOWN) {
+    lines.push(colors.dim(`     and ${keys.length - MAX_OBSOLETE_SHOWN} more`));
+  }
+
+  return lines.join("\n");
+}
+
 function formatSnapshotSummary(s: SnapshotSummary): string {
   const parts: string[] = [];
 
@@ -445,6 +468,10 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
       snapshots: {
         ...snapshots,
         filesWritten: snapshots.filesWritten.map(normalizePath),
+        obsoleteKeys: snapshots.obsoleteKeys.map(({ file, key }) => ({
+          file: normalizePath(file),
+          key,
+        })),
         inlineSkipped: snapshots.inlineSkipped.map(normalizePath),
       },
       results: serializedResults,
@@ -603,6 +630,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     console.log(
       `\n ${colors.boldYellow("!")} ${obsoleteLeft} obsolete snapshot${obsoleteLeft === 1 ? "" : "s"}, run with -u to remove ${obsoleteLeft === 1 ? "it" : "them"}`,
     );
+    console.log(formatObsolete(snapshots.obsoleteKeys));
   }
 
   for (const file of snapshots.inlineSkipped) {

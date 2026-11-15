@@ -41,22 +41,29 @@ function workspace(name: string) {
     },
     snap: () => readFileSync(snapPath, "utf8"),
     run(env: Record<string, string> = {}, ...args: string[]) {
-      const res = spawnSync(
-        process.execPath,
-        [
-          resolve(process.cwd(), "bin/unrift.mjs"),
-          "--config",
-          join(dir, "unrift.config.ts"),
-          "--json",
-          ...args,
-        ],
-        // CI is set on GitHub Actions and would stop new snapshots being written
-        { encoding: "utf8", env: { ...process.env, CI: "", ...env } },
-      );
+      const stdout = cli(dir, env, "--json", ...args);
 
-      return { status: res.status, report: JSON.parse(res.stdout) };
+      return { status: stdout.status, report: JSON.parse(stdout.output) };
     },
+    /** The terminal output, for what a person reads. */
+    text: () => cli(dir, {}).output,
   };
+}
+
+function cli(dir: string, env: Record<string, string>, ...args: string[]) {
+  const res = spawnSync(
+    process.execPath,
+    [
+      resolve(process.cwd(), "bin/unrift.mjs"),
+      "--config",
+      join(dir, "unrift.config.ts"),
+      ...args,
+    ],
+    // CI is set on GitHub Actions and would stop new snapshots being written
+    { encoding: "utf8", env: { ...process.env, CI: "", ...env } },
+  );
+
+  return { status: res.status, output: res.stdout };
 }
 
 describe("snapshots", () => {
@@ -152,11 +159,17 @@ it.skip("b", () => expect(2).toMatchSnapshot());
     expect(stale.status).toBe(1);
     expect(stale.report.ok).toBe(false);
     expect(stale.report.snapshots).toMatchObject({ obsolete: 1, removed: 0 });
+    // Says which one, so a rename can be told from a snapshot that only runs sometimes
+    expect(stale.report.snapshots.obsoleteKeys).toEqual([
+      { file: ws.snapPath.replace(/\\/g, "/"), key: "c 1" },
+    ]);
+    expect(ws.text()).toContain("a.spec.ts.snap\n     › c 1");
 
     const cleaned = ws.run({}, "-u");
 
     expect(cleaned.status).toBe(0);
     expect(cleaned.report.snapshots).toMatchObject({ obsolete: 1, removed: 1 });
+    expect(cleaned.report.snapshots.obsoleteKeys).toEqual([]);
     expect(ws.snap()).toContain("exports[`b 1`]");
     expect(ws.snap()).not.toContain("exports[`c 1`]");
 

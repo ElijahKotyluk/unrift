@@ -56,6 +56,7 @@ type RunEngineResult = {
     failed: number;      // didn't match, or not written on CI
     obsolete: number;    // stored but no test used them
     removed: number;     // obsolete ones deleted ("all" only)
+    obsoleteKeys: Array<{ file: string; key: string }>; // obsolete ones still in their .snap file
     filesWritten: string[];  // .snap files, and test files with inline snapshots written
     inlineSkipped: string[]; // test files whose inline snapshots weren't written (changed during the run, or the write failed)
   };

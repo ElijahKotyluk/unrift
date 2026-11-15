@@ -36,6 +36,8 @@ export interface SnapshotSummary {
   /** Stored snapshots no test used. Removed with `-u`, otherwise they fail the run. */
   obsolete: number;
   removed: number;
+  /** The obsolete snapshots still in their file, so you can tell which ones before -u. */
+  obsoleteKeys: Array<{ file: string; key: string }>;
   /** Snapshot files that were written or deleted, and test files with inline snapshots written. */
   filesWritten: string[];
   /** Test files whose inline snapshots weren't written: changed during the run, or the write failed. */
@@ -276,6 +278,7 @@ export function finishSnapshots(
     obsolete: 0,
     removed: 0,
     filesWritten: [],
+    obsoleteKeys: [],
     inlineSkipped: [],
   };
 
@@ -304,6 +307,8 @@ export function finishSnapshots(
       if (mode === "all") {
         file.data.delete(key);
         summary.removed++;
+      } else {
+        summary.obsoleteKeys.push({ file: file.path, key });
       }
     }
 
