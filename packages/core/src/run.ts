@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
+
 import {
   clearContext,
   computeOnlyFlags,
@@ -45,6 +48,22 @@ let runCount = 0;
 
 function freshImportUrl(url: string): string {
   return runCount > 1 ? `${url}?run=${runCount}` : url;
+}
+
+// The query string only reloads ESM. A CommonJS file (.cjs, or .js in a
+// CommonJS package) is cached by filename, so drop it from that cache.
+const requireCache = createRequire(import.meta.url).cache;
+
+function forgetCommonJs(file: string) {
+  for (const key of [file, safeRealpath(file)]) delete requireCache[key];
+}
+
+function safeRealpath(file: string): string {
+  try {
+    return realpathSync(file);
+  } catch {
+    return file;
+  }
 }
 
 function isCI(): boolean {
@@ -114,6 +133,7 @@ export async function runEngine(
       unriftGlobalContext.currentSuite = fileSuite;
 
       try {
+        forgetCommonJs(file);
         await import(freshImportUrl(toImportUrl(file, "bundle-test")));
       } catch (err) {
         const error = toError(err);
@@ -123,6 +143,9 @@ export async function runEngine(
           error,
         });
 
+        // Tests registered before the error mustn't run. The run loop goes by
+        // mode, so marking statuses alone wasn't enough.
+        fileSuite.mode = TaskMode.Skip;
         fileSuite.markSubtreeSkipped();
       } finally {
         unriftGlobalContext.currentSuite = rootSuite;

@@ -712,11 +712,32 @@ function watchRecursive(
   }
 
   const watchers: FSWatcher[] = [];
+  const watched = new Set<string>();
+
+  // A folder made after startup (the first __snapshots__, a new test dir)
+  // gets its own watcher, before its creation event is checked below
+  function watchIfNewDir(path: string) {
+    if (watched.has(path)) return;
+
+    try {
+      if (!statSync(path).isDirectory()) return;
+    } catch {
+      return;
+    }
+
+    const name = basename(path);
+
+    if (!name.startsWith(".") && name !== "node_modules") watchDir(path);
+  }
 
   function watchDir(d: string) {
+    watched.add(d);
+
     try {
       watchers.push(
         fsWatch(d, (_event, filename) => {
+          if (filename) watchIfNewDir(join(d, filename));
+
           // Our own snapshot writes shouldn't trigger another run, edits by
           // the user (fixing or deleting a .snap) should
           // (macOS also reports a change to the watched folder itself by its name)

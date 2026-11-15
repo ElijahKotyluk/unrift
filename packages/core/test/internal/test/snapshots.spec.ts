@@ -188,12 +188,23 @@ it("d", () => { throw new Error("broken"); });
 
     expect(ws.snap()).toContain("exports[`d: hinted 1`]");
 
-    // A file that fails to import never ran, -u mustn't wipe its snapshots
+    // A file that fails to import never ran, -u mustn't wipe its snapshots.
+    // A test registered before the error doesn't run either, so it can't
+    // write an inline snapshot into the broken file.
     const kept = ws.snap();
-    ws.spec(`throw new Error("broken");\n`);
-    ws.run({}, "-u");
+    ws.spec(
+      `it("early", () => expect(1).toMatchInlineSnapshot());\nthrow new Error("broken");\n`,
+    );
+    const brokenSource = ws.source();
+    const broken = ws.run({}, "-u");
 
     expect(ws.snap()).toBe(kept);
+    expect(ws.source()).toBe(brokenSource);
+    expect(
+      broken.report.results.find((r: { description: string }) =>
+        r.description.endsWith("early"),
+      ).status,
+    ).toBe("skipped");
 
     // Nothing left: the file and the folder go
     ws.spec(`it("a", () => {});\n`);
@@ -518,6 +529,17 @@ it("template", () => expect(1).toMatchInlineSnapshot(\`\${two}\`));
     expect(broken.status).toBe(1);
     expect(errors(broken)[0]).toContain("Couldn't read snapshot file");
 
+    // Read once, then a retry passes without it: still reported
+    ws.spec(`let n = 0;
+it("a", () => {
+  if (++n === 1) expect(1).toMatchSnapshot();
+}, { retries: 1 });
+`);
+    const retried = ws.run();
+
+    expect(retried.status).toBe(1);
+    expect(errors(retried)[0]).toContain("Couldn't read snapshot file");
+
     // __snapshots__ is a file, so the .snap can't be written
     rmSync(join(ws.snapPath, ".."), { recursive: true });
     writeFileSync(join(ws.snapPath, ".."), "");
@@ -583,13 +605,20 @@ it("a", () => {
       fileSpec,
       `import { it, expect } from "@unrift/core";\nit("x", () => expect(1).toMatchSnapshot());\n`,
     );
+    // CommonJS is cached by filename, not URL, so it needs its own handling
+    const cjsSpec = join(ws.dir, "z.spec.cjs");
+
+    writeFileSync(
+      cjsSpec,
+      `const { it, expect } = require("@unrift/core");\nit("z", () => expect(3).toMatchSnapshot());\n`,
+    );
     ws.spec(`it("y", () => expect(2).toMatchInlineSnapshot());\n`);
     writeFileSync(
       join(ws.dir, "run.mjs"),
       `import { runEngine } from "@unrift/core";
-const both = [${JSON.stringify(fileSpec)}, ${JSON.stringify(ws.specPath)}];
+const all = [${JSON.stringify(fileSpec)}, ${JSON.stringify(cjsSpec)}, ${JSON.stringify(ws.specPath)}];
 const runs = [];
-for (const [files, updateSnapshots] of [[both, "none"], [both, "new"], [both.slice(0, 1), "all"]]) {
+for (const [files, updateSnapshots] of [[all, "none"], [all, "new"], [all.slice(0, 2), "all"]]) {
   const res = await runEngine({ files, updateSnapshots });
   runs.push({ tests: res.results.length, snapshots: res.snapshots });
 }
@@ -602,14 +631,17 @@ console.log(JSON.stringify(runs));
     });
     const [, second, third] = JSON.parse(res.stdout);
 
-    // Second run: nothing changed on disk since the first, both files still run
-    expect(second.tests).toBe(2);
-    expect(second.snapshots.added).toBe(2);
+    // Second run: nothing changed on disk since the first, every file still runs
+    expect(second.tests).toBe(3);
+    expect(second.snapshots.added).toBe(3);
     expect(ws.source()).toContain("toMatchInlineSnapshot(`2`)");
-    // Third run with -u: x is unchanged and cached, its snapshot must survive
-    expect(third.tests).toBe(1);
+    // Third run with -u: x and z are unchanged and cached, their snapshots must survive
+    expect(third.tests).toBe(2);
     expect(third.snapshots.removed).toBe(0);
     expect(existsSync(join(ws.dir, "__snapshots__", "x.spec.ts.snap"))).toBe(
+      true,
+    );
+    expect(existsSync(join(ws.dir, "__snapshots__", "z.spec.cjs.snap"))).toBe(
       true,
     );
   });
@@ -617,7 +649,8 @@ console.log(JSON.stringify(runs));
   it("watch mode reruns on edits to a .snap but not on its own writes", async () => {
     const ws = workspace("watch");
 
-    ws.spec(`it("a", () => expect(1).toMatchSnapshot());\n`);
+    // No __snapshots__ yet, a rerun makes it
+    ws.spec(`it("a", () => {});\n`);
 
     const child = spawn(
       process.execPath,
@@ -643,15 +676,26 @@ console.log(JSON.stringify(runs));
       return output.includes(text);
     };
 
+    const reruns = () => output.split("re-running").length - 1;
+
     try {
       expect(await waitFor("for changes")).toBe(true);
-      // The first run wrote the .snap, that alone mustn't rerun
-      await new Promise((r) => setTimeout(r, 600));
-      expect(output).not.toContain("re-running");
 
-      // Breaking it by hand does
+      // This rerun writes the first .snap. That write alone mustn't rerun.
+      ws.spec(`it("a", () => expect(1).toMatchSnapshot());\n`);
+      expect(await waitFor("1 written")).toBe(true);
+      await new Promise((r) => setTimeout(r, 600));
+      expect(reruns()).toBe(1);
+
+      // Breaking it by hand does, even though the folder is newer than the watcher
       writeFileSync(ws.snapPath, "exports[`a 1`] = `2`;\n");
-      expect(await waitFor("re-running")).toBe(true);
+      const start = Date.now();
+
+      while (reruns() < 2 && Date.now() - start < 5000) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      expect(reruns()).toBe(2);
     } finally {
       child.kill();
     }

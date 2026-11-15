@@ -287,21 +287,15 @@ export function finishSnapshots(
 
   for (const { file: testFile, keep } of testFiles) {
     // Don't create (and read) a file for every test file that never used snapshots
-    const used = files.get(testFile);
-    const file = used ?? peekFile(testFile);
+    const file = files.get(testFile) ?? peekFile(testFile);
 
     if (!file) continue;
 
+    // Always reported. Even when a matcher hit it, a retry that didn't call
+    // the matcher again could pass, and one nobody used (merge conflict
+    // markers) would pass unnoticed.
     if (file.loadError) {
-      // A test that used it already failed on this. One nobody used (a .snap
-      // left with merge conflict markers) would otherwise pass unnoticed.
-      if (!used) {
-        summary.errors.push({
-          file: file.path,
-          message: file.loadError.message,
-        });
-      }
-
+      summary.errors.push({ file: file.path, message: file.loadError.message });
       continue;
     }
 
