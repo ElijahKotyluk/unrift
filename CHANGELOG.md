@@ -9,7 +9,7 @@ Versions are `@unrift/core` / `unrift`.
 - `--coverage-reporter <name>`, turns coverage on too
 - A threshold that isn't met fails the run
 - `runEngine` takes `coverage` and returns `coverage` with per-file data and a summary, `--json` gets a `coverage` block
-- Fix: in watch mode (or a second `runEngine` call) an edit to a file a test imports was ignored until the test file itself changed
+- Fix: in watch mode (or a second `runEngine` call) an edit to a file a test or the config imports was ignored until the test or config file itself changed
 
 ## 0.7.0 / 0.8.0 - 2026-11-15
 

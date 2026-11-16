@@ -8,6 +8,7 @@ import {
   lstatSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import { join, basename, extname, resolve, dirname, sep } from "node:path";
@@ -265,8 +266,6 @@ export function toImportUrl(
   if (!isTsLike(filePath)) return pathToFileURL(filePath).href;
 
   const coverage = options.coverage ?? false;
-  const source = readFileSync(filePath, "utf8");
-  const hashStr = hashString(source);
   const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${filePath}`;
 
   const existing = cache.get(key);
@@ -293,19 +292,18 @@ export function toImportUrl(
 
   // Node reports the bundle by its real path (macOS /var is a symlink), so
   // write it there and the source map's relative paths resolve from it.
-  const outFile = cacheOutPath(
-    safeRealpath(outDir),
-    filePath,
-    hashStr,
-    coverage,
-  );
+  const realOutDir = safeRealpath(outDir);
 
   let inputs: CacheEntry["inputs"];
+  let outFile: string;
 
   try {
     const result = buildSync({
       entryPoints: [filePath],
-      outfile: outFile,
+      // Only sets where the source map's paths are relative to, the real
+      // name needs the inputs
+      outfile: join(realOutDir, "bundle.mjs"),
+      write: false,
       bundle: true,
       format: "esm",
       platform: "node",
@@ -334,6 +332,16 @@ export function toImportUrl(
 
       return hash === null ? [] : [{ path, hash }];
     });
+
+    // Named after every input, not just the entry. Node caches a module by
+    // its URL, so a config rebuilt for an edited import needs a new one.
+    outFile = cacheOutPath(
+      realOutDir,
+      filePath,
+      hashString(inputs.map((i) => `${i.path}\0${i.hash}`).join("\n")),
+      coverage,
+    );
+    writeFileSync(outFile, result.outputFiles[0].contents);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
 

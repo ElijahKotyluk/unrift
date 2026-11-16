@@ -256,4 +256,30 @@ console.log(JSON.stringify({ seen: globalThis.__seen, lines: [first, second].map
       lines: [{ 1: 1 }, { 2: 1 }],
     });
   });
+
+  it("a config reloaded in the same process sees edits to files it imports", () => {
+    // Watch mode loads the config again on every run
+    const ws = workspace("config-reload", {
+      "settings.ts": `export const testDir = "a";\n`,
+      "unrift.config.ts": `import { testDir } from "./settings";\nexport default { testDir };\n`,
+    });
+    const script = join(ws.dir, "load.mjs");
+    const settings = join(ws.dir, "settings.ts");
+    const config = join(ws.dir, "unrift.config.ts");
+
+    writeFileSync(
+      script,
+      `import { loadConfigFromPath } from ${JSON.stringify(pathToFileURL(resolve(process.cwd(), "dist/esm/utils/loadConfig.js")).href)};
+import { writeFileSync } from "node:fs";
+const first = await loadConfigFromPath(${JSON.stringify(config)});
+writeFileSync(${JSON.stringify(settings)}, 'export const testDir = "b";\\n');
+const second = await loadConfigFromPath(${JSON.stringify(config)});
+console.log(JSON.stringify([first.config.testDir, second.config.testDir]));
+`,
+    );
+
+    const res = spawnSync(process.execPath, [script], { encoding: "utf8" });
+
+    expect(JSON.parse(res.stdout)).toEqual(["a", "b"]);
+  });
 });
