@@ -111,9 +111,11 @@ it("hello", () => expect(hello("x")).toBe("hi x"));
 
     expect(status).toBe(0);
     // Test files aren't reported, only the code they ran
+    const dir = ws.dir.replace(/\\/g, "/");
+
     expect(report.coverage.files.map((f: FileSummary) => f.file)).toEqual([
-      `${ws.dir}/src/math.ts`,
-      `${ws.dir}/src/plain.js`,
+      `${dir}/src/math.ts`,
+      `${dir}/src/plain.js`,
     ]);
 
     const math = fileIn(report, "src/math.ts")!;
