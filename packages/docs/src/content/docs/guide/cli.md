@@ -21,6 +21,8 @@ The first positional argument is a regex pattern to filter test files by path. U
 | `-t, --timeout <ms>` | Default test timeout in milliseconds |
 | `-w, --watch` | Re-run tests automatically when files change |
 | `-u, --update-snapshots` | Rewrite snapshots that don't match and remove obsolete ones |
+| `--coverage` | Report code coverage, see [Coverage](/guide/coverage/) |
+| `--coverage-reporter <name>` | `text`, `lcov` or `json`. Repeat or comma-separate for more than one, turns coverage on |
 | `-d, --debug` | Enable debug logging |
 | `-l, --list` | List discovered test files without running them |
 | `-j, --json` | Output results as JSON |
@@ -48,6 +50,9 @@ unrift --watch
 
 # Update snapshots
 unrift -u
+
+# Coverage, with an lcov file for CI
+unrift --coverage --coverage-reporter text,lcov
 
 # Use a specific config file
 unrift --config ./test/custom.config.ts
@@ -104,6 +109,8 @@ The `--json` flag outputs a structured report to stdout:
 }
 ```
 
+With coverage on, the report also has a `coverage` block: `total` and per-file `files` with `lines`, `functions` and `branches` (`covered`, `total`, `pct`) and `uncoveredLines`, threshold `failures`, and the `reports` files written.
+
 When `--json` is active, debug output goes to stderr to keep stdout clean.
 
 ## Exit codes
@@ -111,7 +118,7 @@ When `--json` is active, debug output goes to stderr to keep stdout clean.
 | Code | Meaning |
 |------|---------|
 | `0` | All tests passed |
-| `1` | One or more tests failed, there are obsolete snapshots, or no test files found |
+| `1` | One or more tests failed, there are obsolete snapshots, coverage is under a threshold, or no test files found |
 
 ## Cache management
 

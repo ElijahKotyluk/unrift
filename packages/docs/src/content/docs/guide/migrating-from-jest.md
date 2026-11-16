@@ -63,6 +63,9 @@ The main difference is explicit imports. Unrift doesn't inject globals:
 | `jest --config path` | `unrift --config path` | Same concept |
 | `jest --testTimeout 5000` | `unrift --timeout 5000` | Different flag name |
 | `jest.retryTimes(3)` | `retries: 3` | Set in the config or per test with `it(name, fn, { retries: 3 })` |
+| `jest --coverage` | `unrift --coverage` | V8 coverage, like Jest's `coverageProvider: "v8"` |
+| `collectCoverageFrom` | `coverage.include` | Unrift only reports files the tests loaded |
+| `coverageThreshold.global` | `coverage.thresholds` | `lines`, `functions` and `branches`, no `statements` |
 
 ## Matcher differences
 
@@ -147,7 +150,6 @@ The hoisted `mock.module` API for static imports is on the roadmap (Tier B). See
 These Jest features are planned but not yet available:
 
 - **Hoisted `jest.mock`** for static imports - `mock.doMock` covers dynamic imports today; the hoisted variant is planned (Tier B)
-- **Coverage** - `--coverage` flag
 - **Parallel execution** - tests run sequentially
 - **Custom reporters** - only built-in pretty and JSON output
 - **Browser/DOM environment** - Node.js only

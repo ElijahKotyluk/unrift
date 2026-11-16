@@ -1,5 +1,9 @@
 export { beforeEach, afterEach, beforeAll, afterAll } from "./hooks";
-export { defineConfig, type UnriftConfigOptions } from "./utils/defineConfig";
+export {
+  defineConfig,
+  type UnriftConfigOptions,
+  type UnriftCoverageOptions,
+} from "./utils/defineConfig";
 export { describe, it, test, type TestOptions } from "./interface";
 export { expect, extendMatchers } from "./expect";
 
@@ -11,7 +15,18 @@ export type {
   Promisable,
 } from "./types";
 export { runEngine } from "./run";
-export type { RunEngineResult } from "./run";
+export type {
+  RunEngineResult,
+  RunEngineCoverage,
+  RunEngineCoverageOptions,
+} from "./run";
+export type { FileCoverage } from "./coverage/convert";
+export type {
+  CoverageMetric,
+  CoverageReporter,
+  CoverageSummary,
+  CoverageThresholds,
+} from "./coverage/report";
 export type { SnapshotSummary, SnapshotUpdateMode } from "./snapshot/state";
 
 // Mocking suite

@@ -19,12 +19,15 @@ export default defineConfig(
       "**/dist",
       "**/build",
       "**/coverage",
+      // The coverage source, not a report
+      "!packages/core/src/coverage",
       "**/out",
       "**/lib",
       "**/test/**.*",
       "packages/docs/**",
-      // Scratch dirs from the snapshot tests
+      // Scratch dirs from the snapshot and coverage tests
       "packages/core/test/snapshots/.work",
+      "packages/core/test/coverage/.work",
     ],
   },
   {

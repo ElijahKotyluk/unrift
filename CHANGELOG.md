@@ -2,6 +2,15 @@
 
 Versions are `@unrift/core` / `unrift`.
 
+## Unreleased
+
+- Coverage: `--coverage` reports lines, functions and branches of the files the tests loaded, TypeScript mapped back to its source
+- `coverage` config: `include`, `exclude`, `reporter` (`text`, `lcov`, `json`), `reportsDirectory`, `thresholds`
+- `--coverage-reporter <name>`, turns coverage on too
+- A threshold that isn't met fails the run
+- `runEngine` takes `coverage` and returns `coverage` with per-file data and a summary, `--json` gets a `coverage` block
+- Fix: in watch mode (or a second `runEngine` call) an edit to a file a test or the config imports was ignored until the test or config file itself changed
+
 ## 0.7.0 / 0.8.0 - 2026-11-15
 
 - Breaking: Node 18 and 20 are no longer supported, Unrift needs Node 22.12+. Both are end-of-life and Node 20 didn't get the October and November 2026 security fixes. 22.12 is also the first 22.x that can `require()` an ES module, so CommonJS test files work

@@ -18,6 +18,14 @@ import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
 import type { TestResult } from "./suite";
 import type { SnapshotSummary } from "./snapshot/state";
+import {
+  assertValidCoverageConfig,
+  checkThresholds,
+  formatCoverageTable,
+  writeCoverageReports,
+  type CoverageReporter,
+  type CoverageSummary,
+} from "./coverage/report";
 
 import { normalizePath } from "./utils/normalizePath";
 import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
@@ -41,6 +49,8 @@ interface RunnerOptions {
   json?: boolean;
   cacheClean?: boolean;
   updateSnapshots?: boolean;
+  coverage?: boolean;
+  coverageReporters?: string[];
 }
 
 type JsonReport = {
@@ -57,6 +67,7 @@ type JsonReport = {
   files: string[];
   durationMs: number;
   snapshots?: SnapshotSummary;
+  coverage?: CoverageSummary & { failures: string[]; reports: string[] };
   results: Array<{
     description: string;
     status: TaskStatus;
@@ -404,6 +415,21 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   const timeoutMs = options.timeoutMs ?? config?.timeoutMs;
   const bail = options.bail ?? config?.bail ?? false;
 
+  const coverageConfig = config?.coverage;
+  const coverageOn = options.coverage ?? coverageConfig?.enabled ?? false;
+  let reporters: CoverageReporter[] = [];
+
+  if (coverageOn) {
+    const named: unknown =
+      options.coverageReporters ??
+      (coverageConfig?.reporter === undefined
+        ? ["text"]
+        : [coverageConfig.reporter].flat());
+
+    assertValidCoverageConfig(named, coverageConfig?.thresholds);
+    reporters = named;
+  }
+
   const engine = await runEngine({
     files,
     timeoutMs,
@@ -412,6 +438,13 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     retries: config?.retries,
     matchers: config?.matchers,
     updateSnapshots: options.updateSnapshots ? "all" : undefined,
+    coverage: coverageOn
+      ? {
+          root: configDir,
+          include: coverageConfig?.include,
+          exclude: coverageConfig?.exclude,
+        }
+      : undefined,
   });
 
   debugLog(options.debug, options.json, "Only mode:", engine.isOnly);
@@ -450,13 +483,29 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   }
 
   const snapshots = engine.snapshots;
+  const coverage = engine.coverage;
+  const coverageReports = coverage
+    ? writeCoverageReports(
+        coverage.files,
+        coverage.summary,
+        reporters,
+        resolve(configDir, coverageConfig?.reportsDirectory ?? "coverage"),
+      )
+    : [];
+  const coverageFailures = coverage
+    ? checkThresholds(coverage.summary.total, coverageConfig?.thresholds)
+    : [];
 
-  noteOwnWrites(snapshots.filesWritten);
+  // Reports inside the test dir would set off watch mode again
+  noteOwnWrites([...snapshots.filesWritten, ...coverageReports]);
   // Obsolete snapshots fail the run until they're removed with -u, and so
   // does a snapshot that couldn't be read or written
   const obsoleteLeft = snapshots.obsolete - snapshots.removed;
   const ok =
-    failed === 0 && obsoleteLeft === 0 && snapshots.errors.length === 0;
+    failed === 0 &&
+    obsoleteLeft === 0 &&
+    snapshots.errors.length === 0 &&
+    coverageFailures.length === 0;
   const durationMs = realPerformanceNow() - runStart;
 
   // JSON mode: stdout must be JSON only
@@ -486,6 +535,15 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
           file: normalizePath(file),
           message,
         })),
+      },
+      coverage: coverage && {
+        total: coverage.summary.total,
+        files: coverage.summary.files.map((f) => ({
+          ...f,
+          file: normalizePath(f.file),
+        })),
+        failures: coverageFailures,
+        reports: coverageReports.map(normalizePath),
       },
       results: serializedResults,
     };
@@ -615,6 +673,28 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     console.log(`\n${horizontalRule()}`);
   }
 
+  if (coverage && reporters.includes("text")) {
+    console.log(`\n${horizontalRule(colors.bold(" COVERAGE "))}\n`);
+
+    if (coverage.files.length === 0) {
+      console.log(
+        `  ${colors.dim("No files to report, the tests didn't load any")}`,
+      );
+    } else {
+      const [header, ...rows] = formatCoverageTable(
+        coverage.summary,
+        configDir,
+      );
+
+      console.log(`  ${colors.dim(header)}`);
+      rows.forEach((row, i) =>
+        console.log(`  ${i === rows.length - 1 ? colors.bold(row) : row}`),
+      );
+    }
+
+    console.log(`\n${horizontalRule()}`);
+  }
+
   // Summary
   console.log("");
 
@@ -648,6 +728,10 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
 
   for (const { file, message } of snapshots.errors) {
     console.log(`\n ${colors.boldRed("✘")} ${shortenPath(file)}: ${message}`);
+  }
+
+  for (const failure of coverageFailures) {
+    console.log(`\n ${colors.boldRed("✘")} ${failure}`);
   }
 
   for (const file of snapshots.inlineSkipped) {
