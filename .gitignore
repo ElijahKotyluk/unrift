@@ -1,4 +1,6 @@
 node_modules
+# A package the mock.module tests mock
+!packages/core/test/node_modules
 
 **/dist
 **/dist-pack

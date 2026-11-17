@@ -66,6 +66,7 @@ Code that already ran with the old exports, like a value a module computed when 
 - A factory at the top of the file runs before the file's other code. It can use Unrift's exports (`mock.fn()` and the rest), globals and `importActual`, not the file's own variables or imports.
 - Only the test file's own calls count, not `mock.module` in a helper it imports.
 - A `require()` of the mocked module gets the real one.
+- To know what a CommonJS module exports, Unrift runs it once when it bundles the file. An ES module isn't run.
 - A spy the factory makes is reset by `mock.resetAll()` and `mock.restoreAll()`, from any test file, since spies are shared across the run. Set its return value in the test or a `beforeEach`.
 
 ## mock.doMock

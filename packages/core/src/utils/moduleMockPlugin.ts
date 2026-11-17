@@ -1,6 +1,6 @@
 import { build, type Plugin } from "esbuild";
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
+import { createRequire, isBuiltin } from "node:module";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -259,45 +259,126 @@ export function moduleMockPlugin(
   };
 }
 
-/** What the real module exports, so the stand-in can export the same. */
+/**
+ * What the real module exports, so the stand-in can export the same. An ES
+ * module is read without running it. A CommonJS one has to run, its exports
+ * are only known then.
+ */
 async function exportNames(t: Target, testFile: string): Promise<string[]> {
-  const require = createRequire(testFile);
-
-  if (t.path) {
-    const result = await build({
-      entryPoints: [t.path],
-      bundle: true,
-      write: false,
-      metafile: true,
-      format: "esm",
-      platform: "node",
-      target: "node22",
-      packages: "external",
-      absWorkingDir: dirname(t.path),
-      logLevel: "silent",
-    });
-    const input = Object.entries(result.metafile.inputs).find(
-      ([path]) => resolve(dirname(t.path!), path) === t.path,
-    );
-
-    if (input?.[1].format !== "cjs") {
-      return Object.values(result.metafile.outputs)[0]?.exports ?? [];
-    }
-
-    return namesOf(require(t.path));
-  }
-
   try {
-    // The stand-in loads it with import(), so read the names the same way
-    const resolved = require.resolve(t.spec);
-    const url = isAbsolute(resolved) ? pathToFileURL(resolved).href : resolved;
+    if (!t.path && isBuiltin(t.spec)) return namesOf(await import(t.spec));
 
-    return namesOf(await import(url));
+    // A package resolves the way the stand-in's import() will
+    const file = t.path ?? (await resolveImport(t.spec, dirname(testFile)));
+
+    if (!file) throw new Error("can't find the module");
+
+    const names = await esmExportNames(file, new Set());
+
+    if (names) return names;
+
+    // Bundled into the test file, so it gets esbuild's CommonJS interop
+    if (t.path) return namesOf(createRequire(testFile)(file));
+
+    return namesOf(await import(pathToFileURL(file).href));
   } catch (err) {
     throw new Error(
       `mock.module("${t.spec}"): can't read the module's exports: ${(err as Error).message}`,
     );
   }
+}
+
+/** An ES module's export names, or null for CommonJS. */
+async function esmExportNames(
+  file: string,
+  seen: Set<string>,
+): Promise<string[] | null> {
+  const result = await build({
+    entryPoints: [file],
+    bundle: false,
+    write: false,
+    metafile: true,
+    format: "esm",
+    platform: "node",
+    target: "node22",
+    absWorkingDir: dirname(file),
+    logLevel: "silent",
+  });
+  const input = Object.entries(result.metafile.inputs).find(
+    ([path]) => resolve(dirname(file), path) === file,
+  );
+
+  if (input?.[1].format === "cjs") return null;
+
+  const names = new Set(Object.values(result.metafile.outputs)[0]?.exports);
+
+  seen.add(file);
+
+  // esbuild leaves `export * from` as is, follow it
+  for (const [, spec] of result.outputFiles[0].text.matchAll(STAR_EXPORT)) {
+    const from = JSON.parse(spec) as string;
+    const star = isBuiltin(from)
+      ? null
+      : await resolveImport(from, dirname(file));
+
+    if (star && seen.has(star)) continue;
+
+    const starNames =
+      (star && (await esmExportNames(star, seen))) ??
+      namesOf(await import(star ? pathToFileURL(star).href : from));
+
+    for (const name of starNames) if (name !== "default") names.add(name);
+  }
+
+  return [...names];
+}
+
+const STAR_EXPORT = /^export \* from ("[^"\n]*");$/gm;
+
+/** Resolves `spec` from `resolveDir` with Node's import conditions. */
+async function resolveImport(
+  spec: string,
+  resolveDir: string,
+): Promise<string | null> {
+  let found: string | null = null;
+
+  await build({
+    stdin: {
+      contents: `import ${JSON.stringify(spec)};`,
+      resolveDir,
+      loader: "js",
+    },
+    bundle: true,
+    write: false,
+    platform: "node",
+    format: "esm",
+    // Node's conditions and fields, without esbuild's "module"
+    conditions: [],
+    mainFields: ["main"],
+    logLevel: "silent",
+    plugins: [
+      {
+        name: "unrift-resolve-only",
+        setup(b) {
+          b.onResolve({ filter: /.*/ }, async (args) => {
+            if (args.pluginData?.inner) return;
+
+            const r = await b.resolve(args.path, {
+              kind: args.kind,
+              resolveDir: args.resolveDir,
+              pluginData: { inner: true },
+            });
+
+            if (r.errors.length === 0 && !r.external) found = r.path;
+
+            return { path: args.path, external: true };
+          });
+        },
+      },
+    ],
+  });
+
+  return found;
 }
 
 function namesOf(value: unknown): string[] {

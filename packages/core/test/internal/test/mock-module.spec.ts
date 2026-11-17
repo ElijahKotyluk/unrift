@@ -6,6 +6,7 @@ import { findMockCalls } from "../../../src/mock/hoist.js";
 
 import { greet } from "../../mock-module/greet";
 import label, { getUser } from "../../mock-module/user-service";
+import { value, extra } from "fixture-esm-only";
 
 // Runs before the imports above, and the real module never loads
 mock.module("../../mock-module/user-service", () => ({
@@ -18,6 +19,12 @@ mock.module("node:path", async (importActual) => {
 
   return { ...real, basename: () => "mocked basename" };
 });
+
+// Import-only, and throws if it runs
+mock.module("fixture-esm-only", () => ({
+  value: "mocked",
+  extra: "mocked",
+}));
 
 describe("mock.module", () => {
   it("replaces static imports, in the test and in files it imports", () => {
@@ -33,6 +40,10 @@ describe("mock.module", () => {
     expect((globalThis as Record<string, unknown>).__userServiceLoads).toBe(
       undefined,
     );
+  });
+
+  it("mocks a package without running it, export * names included", () => {
+    expect([value, extra]).toEqual(["mocked", "mocked"]);
   });
 
   it("mocks a built-in, with the real module from importActual", () => {
@@ -91,6 +102,12 @@ it("t", () => { mock.module("./c", () => ({})); });
 const x = mock.module("./d", f);
 mock.unmock("./a");
 mock.module(spec, f);
+if (ok)
+  mock.module("./e", f);
+else mock.module("./f", f);
+for (const k of ks) await mock.module("./g", f);
+unmock("./h");
+x.unmock("./i");
 `;
     const calls = findMockCalls(source).map((c) => ({
       spec: c.spec,
@@ -135,6 +152,30 @@ mock.module(spec, f);
         kind: "unmock",
         topLevel: true,
         text: 'mock.unmock("./a");',
+      },
+      {
+        spec: "./e",
+        kind: "module",
+        topLevel: false,
+        text: 'mock.module("./e", f);',
+      },
+      {
+        spec: "./f",
+        kind: "module",
+        topLevel: false,
+        text: 'mock.module("./f", f);',
+      },
+      {
+        spec: "./g",
+        kind: "module",
+        topLevel: false,
+        text: 'await mock.module("./g", f);',
+      },
+      {
+        spec: "./h",
+        kind: "unmock",
+        topLevel: true,
+        text: 'unmock("./h");',
       },
     ]);
   });

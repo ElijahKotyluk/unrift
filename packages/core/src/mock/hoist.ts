@@ -26,6 +26,12 @@ const IDENT = /[A-Za-z0-9_$]/;
 // A line ending in one of these goes on to the next
 const CONTINUES = /[=,.([{+\-*/%&|^!?:<>~]/;
 const CALL = /mock\s*\.\s*(module|unmock)\s*\(\s*/y;
+// The `unmock` export, called on its own
+const UNMOCK = /unmock\s*\(\s*/y;
+// Before a `(`, it holds an `if` or loop condition, and the body may follow
+const CONTROL = /(?:^|[^\w$.])(?:if|for|while|with|for\s+await)\s*$/;
+// After these the next statement is the body of an `else` or `do`
+const ELSE_DO = /(?:^|[^\w$.])(?:else|do)$/;
 
 // After these a `/` starts a regex, not a division
 const BEFORE_REGEX = new Set([..."(,=:[!&|?{};+-*%<>~^"]);
@@ -42,6 +48,10 @@ export function findMockCalls(source: string): MockCall[] {
   let prevEnd = 0;
   let newline = true;
   let i = 0;
+  // Open brackets, true for the `(` of an `if` or loop
+  const brackets: boolean[] = [];
+  // End of the last `if` or loop condition, a statement there is its body
+  let controlEnd = -1;
 
   const skipString = (quote: string) => {
     i++;
@@ -105,11 +115,16 @@ export function findMockCalls(source: string): MockCall[] {
     BEFORE_REGEX.has(prev) ||
     KEYWORDS_BEFORE_REGEX.test(source.slice(Math.max(0, prevEnd - 7), prevEnd));
 
+  // A statement after `if (...)`, `else` or a loop is its body
+  const isBody = (end: number) =>
+    end === controlEnd || ELSE_DO.test(source.slice(Math.max(0, end - 5), end));
+
   const statementStart = () =>
-    prev === "" ||
-    prev === ";" ||
-    prev === "}" ||
-    (newline && !CONTINUES.test(prev));
+    !isBody(prevEnd) &&
+    (prev === "" ||
+      prev === ";" ||
+      prev === "}" ||
+      (newline && !CONTINUES.test(prev)));
 
   // Reads a string literal at i, or returns null
   const readSpec = (): { spec: string; start: number; end: number } | null => {
@@ -138,16 +153,32 @@ export function findMockCalls(source: string): MockCall[] {
       } else if (c === "/" && regexAllowed()) {
         skipRegex();
       } else if (c === "(" || c === "[" || c === "{") {
+        brackets.push(
+          c === "(" && CONTROL.test(source.slice(Math.max(0, i - 20), i)),
+        );
         depth++;
         i++;
       } else if (c === ")" || c === "]" || c === "}") {
+        const control = brackets.pop();
         depth--;
         i++;
+        if (control && c === ")") controlEnd = i;
       } else if (c === "m" && (i === 0 || !IDENT.test(source[i - 1]))) {
         CALL.lastIndex = i;
         const m = CALL.exec(source);
         if (m) {
           tryCall(m[1] as MockCall["kind"], CALL.lastIndex);
+          continue;
+        }
+        i++;
+      } else if (
+        c === "u" &&
+        prev !== "." &&
+        (i === 0 || !IDENT.test(source[i - 1]))
+      ) {
+        UNMOCK.lastIndex = i;
+        if (UNMOCK.exec(source)) {
+          tryCall("unmock", UNMOCK.lastIndex);
           continue;
         }
         i++;
@@ -213,11 +244,13 @@ export function findMockCalls(source: string): MockCall[] {
 
   // Whether `at` begins a statement, looking back past whitespace and comments
   function statementStartAt(at: number): boolean {
+    // Blank out comments, keeping offsets
     const text = source
       .slice(0, at)
-      .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+      .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (m) => m.replace(/[^\n]/g, " "));
     const trimmed = text.trimEnd();
     if (trimmed === "") return true;
+    if (isBody(trimmed.length)) return false;
     const last = trimmed[trimmed.length - 1];
     if (last === ";" || last === "}") return true;
     return (
