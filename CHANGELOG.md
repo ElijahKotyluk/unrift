@@ -2,7 +2,7 @@
 
 Versions are `@unrift/core` / `unrift`.
 
-## Unreleased
+## 0.8.0 / 0.9.0 - 2026-11-16
 
 - Coverage: `--coverage` reports lines, functions and branches of the files the tests loaded, TypeScript mapped back to its source
 - `coverage` config: `include`, `exclude`, `reporter` (`text`, `lcov`, `json`), `reportsDirectory`, `thresholds`
