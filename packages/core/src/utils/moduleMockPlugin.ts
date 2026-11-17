@@ -1,8 +1,9 @@
+import { init as initCjsLexer, parse as parseCjs } from "cjs-module-lexer";
 import { build, type Plugin } from "esbuild";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createRequire, isBuiltin } from "node:module";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import { scanSource, type MockCall } from "../mock/hoist";
 import { MODULE_MOCKS_GLOBAL_KEY } from "../mock/module";
@@ -286,9 +287,8 @@ export function moduleMockPlugin(
 }
 
 /**
- * What the real module exports, so the stand-in can export the same. An ES
- * module is read without running it. A CommonJS one has to run, its exports
- * are only known then.
+ * What the real module exports, so the stand-in can export the same. Read
+ * from the source, the module doesn't run.
  */
 async function exportNames(t: Target, testFile: string): Promise<string[]> {
   try {
@@ -299,14 +299,11 @@ async function exportNames(t: Target, testFile: string): Promise<string[]> {
 
     if (!file) throw new Error("can't find the module");
 
-    const names = await esmExportNames(file, new Set());
+    const seen = new Set<string>();
 
-    if (names) return names;
-
-    // Bundled into the test file, so it gets esbuild's CommonJS interop
-    if (t.path) return namesOf(createRequire(testFile)(file));
-
-    return namesOf(await import(pathToFileURL(file).href));
+    return (
+      (await esmExportNames(file, seen)) ?? (await cjsExportNames(file, seen))
+    );
   } catch (err) {
     throw new Error(
       `mock.module("${t.spec}"): can't read the module's exports: ${(err as Error).message}`,
@@ -343,20 +340,71 @@ async function esmExportNames(
   // esbuild leaves `export * from` as is, follow it
   for (const [, spec] of result.outputFiles[0].text.matchAll(STAR_EXPORT)) {
     const from = JSON.parse(spec) as string;
-    const star = isBuiltin(from)
-      ? null
-      : await resolveImport(from, dirname(file));
 
-    if (star && seen.has(star)) continue;
-
-    const starNames =
-      (star && (await esmExportNames(star, seen))) ??
-      namesOf(await import(star ? pathToFileURL(star).href : from));
-
-    for (const name of starNames) if (name !== "default") names.add(name);
+    for (const name of await starNames(from, file, seen, "import")) {
+      names.add(name);
+    }
   }
 
   return [...names];
+}
+
+/**
+ * A CommonJS module's export names, found the way Node finds them for an
+ * import of it, with the lexer Node uses.
+ */
+async function cjsExportNames(
+  file: string,
+  seen: Set<string>,
+): Promise<string[]> {
+  await initCjsLexer();
+  seen.add(file);
+
+  const { exports, reexports } = parseCjs(readFileSync(file, "utf8"));
+  const names = new Set(["default", ...exports]);
+
+  // `module.exports = require("./other")` and the like
+  for (const from of reexports) {
+    for (const name of await starNames(from, file, seen, "require")) {
+      names.add(name);
+    }
+  }
+
+  names.delete("__esModule");
+
+  return [...names];
+}
+
+/** The names `from` adds to `file` when `file` re-exports all of it. */
+async function starNames(
+  from: string,
+  file: string,
+  seen: Set<string>,
+  kind: "import" | "require",
+): Promise<string[]> {
+  if (isBuiltin(from)) {
+    return namesOf(await import(from)).filter((n) => n !== "default");
+  }
+
+  let target: string | null;
+
+  try {
+    target =
+      kind === "import"
+        ? await resolveImport(from, dirname(file))
+        : createRequire(file).resolve(from);
+  } catch {
+    target = null;
+  }
+
+  if (!target) throw new Error(`can't find "${from}" from ${file}`);
+  if (seen.has(target)) return [];
+
+  const names =
+    (await esmExportNames(target, seen)) ??
+    (await cjsExportNames(target, seen));
+
+  return names.filter((n) => n !== "default");
 }
 
 const STAR_EXPORT = /^export \* from ("[^"\n]*");$/gm;

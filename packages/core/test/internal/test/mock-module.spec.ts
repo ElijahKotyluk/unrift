@@ -7,6 +7,7 @@ import { findMockCalls } from "../../../src/mock/hoist.js";
 import { greet } from "../../mock-module/greet";
 import label, { getUser } from "../../mock-module/user-service";
 import { value, extra } from "fixture-esm-only";
+import { direct } from "fixture-cjs";
 import { tool, restore } from "../../mock-module/tool";
 
 // Runs before the imports above, and the real module never loads
@@ -21,11 +22,12 @@ mock.module("node:path", async (importActual) => {
   return { ...real, basename: () => "mocked basename" };
 });
 
-// Import-only, and throws if it runs
+// Both packages throw if they run
 mock.module("fixture-esm-only", () => ({
   value: "mocked",
   extra: "mocked",
 }));
+mock.module("fixture-cjs", () => ({ direct: "mocked" }));
 
 // The unmock inside the factory is keyed too
 mock.module("../../mock-module/tool", () => ({
@@ -49,8 +51,8 @@ describe("mock.module", () => {
     );
   });
 
-  it("mocks a package without running it, export * names included", () => {
-    expect([value, extra]).toEqual(["mocked", "mocked"]);
+  it("mocks packages without running them, re-exported names included", () => {
+    expect([value, extra, direct]).toEqual(["mocked", "mocked", "mocked"]);
   });
 
   it("keys a call inside a hoisted factory", async () => {
