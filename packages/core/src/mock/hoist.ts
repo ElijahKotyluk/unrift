@@ -46,7 +46,19 @@ const TYPE_PARAMS = /<\s*[\w$]+\s*(?:,|extends\b)/y;
  * back in source order, an enclosing call before the ones inside it.
  */
 export function findMockCalls(source: string, jsx = false): MockCall[] {
+  return scanSource(source, jsx).calls;
+}
+
+/**
+ * The mock calls, and where each top-level `import` declaration starts.
+ * Strings, comments and template literals are skipped for both.
+ */
+export function scanSource(
+  source: string,
+  jsx = false,
+): { calls: MockCall[]; imports: number[] } {
   const calls: MockCall[] = [];
+  const imports: number[] = [];
   const n = source.length;
   let depth = 0;
   // Last character that wasn't whitespace or a comment, and whether a
@@ -117,10 +129,14 @@ export function findMockCalls(source: string, jsx = false): MockCall[] {
     return i > from;
   };
 
+  // `value!` is TypeScript's non-null assertion, a `/` after it divides
+  const nonNull = () =>
+    prev === "!" && prevEnd >= 2 && /[\w$)\]]/.test(source[prevEnd - 2]);
+
   const regexAllowed = () =>
     prev === "" ||
     prevEnd === controlEnd ||
-    BEFORE_REGEX.has(prev) ||
+    (BEFORE_REGEX.has(prev) && !nonNull()) ||
     KEYWORDS_BEFORE_REGEX.test(source.slice(Math.max(0, prevEnd - 7), prevEnd));
 
   // A statement after `if (...)`, `else` or a loop is its body
@@ -230,6 +246,17 @@ export function findMockCalls(source: string, jsx = false): MockCall[] {
         i++;
         if (control && c === ")") controlEnd = i;
       } else if (
+        c === "i" &&
+        depth === 0 &&
+        prev !== "." &&
+        (i === 0 || !IDENT.test(source[i - 1])) &&
+        source.startsWith("import", i) &&
+        /[\s{*]/.test(source[i + 6] ?? "") &&
+        statementStart()
+      ) {
+        imports.push(i);
+        i += 6;
+      } else if (
         c === "m" &&
         prev !== "." &&
         (i === 0 || !IDENT.test(source[i - 1]))
@@ -333,5 +360,5 @@ export function findMockCalls(source: string, jsx = false): MockCall[] {
   skipCode();
 
   // A call is recorded once its arguments are scanned, after the calls in them
-  return calls.sort((a, b) => a.start - b.start);
+  return { calls: calls.sort((a, b) => a.start - b.start), imports };
 }

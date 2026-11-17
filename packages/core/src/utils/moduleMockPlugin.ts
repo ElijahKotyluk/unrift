@@ -4,15 +4,17 @@ import { createRequire, isBuiltin } from "node:module";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { findMockCalls, type MockCall } from "../mock/hoist";
+import { scanSource, type MockCall } from "../mock/hoist";
 import { MODULE_MOCKS_GLOBAL_KEY } from "../mock/module";
 
 const NAMESPACE = "unrift-mock";
 const PRELUDE = "unrift-mock-prelude";
 
-// Imports from these give the hoisted factories `mock` and the rest
+// An import from these gives the hoisted factories `mock` and the rest.
+// Matched where the scanner found an `import`, comments allowed inside.
 const UNRIFT_IMPORT =
-  /(?:^|[;\n])[ \t]*import\s+(?!type\b)([\w$*{}\s,]+?)\s+from\s*(["'])(unrift|@unrift\/core)\2/g;
+  /import((?:[\w$*{},\s]|\/\*[\s\S]*?\*\/|\/\/[^\n]*)+?)from\s*(["'])(unrift|@unrift\/core)\2/y;
+const COMMENT = /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g;
 
 type Target = {
   key: string;
@@ -35,12 +37,17 @@ function loaderFor(file: string) {
  * The calls to bundle around, or none when the test file doesn't use
  * `mock.module`.
  */
-export function moduleMockCalls(source: string, file: string): MockCall[] {
-  if (!source.includes("mock")) return [];
+export function moduleMockCalls(
+  source: string,
+  file: string,
+): { calls: MockCall[]; imports: number[] } {
+  const none = { calls: [], imports: [] };
 
-  const calls = findMockCalls(source, loaderFor(file) === "tsx");
+  if (!source.includes("mock")) return none;
 
-  return calls.some((c) => c.kind === "module") ? calls : [];
+  const scan = scanSource(source, loaderFor(file) === "tsx");
+
+  return scan.calls.some((c) => c.kind === "module") ? scan : none;
 }
 
 /**
@@ -55,7 +62,7 @@ export function moduleMockCalls(source: string, file: string): MockCall[] {
 export function moduleMockPlugin(
   testFile: string,
   source: string,
-  calls: MockCall[],
+  { calls, imports: importStarts }: { calls: MockCall[]; imports: number[] },
   injected: string,
 ): Plugin {
   const fileKey = createHash("sha256")
@@ -170,9 +177,15 @@ export function moduleMockPlugin(
             return text + source.slice(from, outer.end);
           };
 
-          const imports = [...source.matchAll(UNRIFT_IMPORT)].map(
-            (m) => `import ${m[1]} from ${JSON.stringify(m[3])};`,
-          );
+          const imports = importStarts.flatMap((at) => {
+            UNRIFT_IMPORT.lastIndex = at;
+            const m = UNRIFT_IMPORT.exec(source);
+            const clause = m?.[1].replace(COMMENT, " ").trim();
+
+            if (!m || !clause || /^type\b/.test(clause)) return [];
+
+            return [`import ${clause} from ${JSON.stringify(m[3])};`];
+          });
           const entries = [...specs.values()].map(
             (t) =>
               `__mocks.set(${JSON.stringify(t.key)}, { spec: ${JSON.stringify(t.spec)}, mocked: false, ` +

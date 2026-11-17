@@ -1,8 +1,5 @@
 import { describe, it, expect } from "@unrift/core";
-import {
-  isGlobPattern,
-  globToRegex,
-} from "../../../src/utils/helpers.js";
+import { isGlobPattern, globToRegex } from "../../../src/utils/helpers.js";
 
 // ── isGlobPattern ─────────────────────────────────────────────────────────────
 

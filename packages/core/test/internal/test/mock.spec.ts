@@ -413,9 +413,9 @@ describe("mock.stub / mock.global", () => {
     const fakeFetch = spy();
     const restore = mock.global("__unrift_test_fetch__", fakeFetch);
 
-    expect(
-      (globalThis as Record<string, unknown>).__unrift_test_fetch__,
-    ).toBe(fakeFetch);
+    expect((globalThis as Record<string, unknown>).__unrift_test_fetch__).toBe(
+      fakeFetch,
+    );
 
     restore();
 
@@ -879,9 +879,9 @@ describe("spyOn - getter/setter spies (3-arg form)", () => {
 
   it("throws when the property doesn't exist anywhere in the chain", () => {
     const obj = {};
-    expect(() =>
-      spyOn(obj as never, "missing" as never, "get"),
-    ).toThrow("could not find property");
+    expect(() => spyOn(obj as never, "missing" as never, "get")).toThrow(
+      "could not find property",
+    );
   });
 });
 

@@ -128,6 +128,8 @@ x.unmock("./i");
 obj.mock.module("./j", f);
 if (ok) /[)]/.test("");
 mock.module("./k", () => ({ r: () => mock.unmock("./k") }));
+const half = value! / 2;
+mock.module("./l", f);
 `;
     const calls = findMockCalls(source).map((c) => ({
       spec: c.spec,
@@ -208,6 +210,12 @@ mock.module("./k", () => ({ r: () => mock.unmock("./k") }));
         kind: "unmock",
         topLevel: false,
         text: 'mock.unmock("./k")',
+      },
+      {
+        spec: "./l",
+        kind: "module",
+        topLevel: true,
+        text: 'mock.module("./l", f);',
       },
     ]);
   });

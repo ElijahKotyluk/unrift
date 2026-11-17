@@ -347,7 +347,7 @@ export async function toImportUrl(
 
   try {
     const source = mode === "bundle-test" ? readFileSync(filePath, "utf8") : "";
-    const mockCalls = moduleMockCalls(source, filePath);
+    const mocks = moduleMockCalls(source, filePath);
     const result = await build({
       entryPoints: [filePath],
       // Only sets where the source map's paths are relative to, the real
@@ -374,12 +374,12 @@ export async function toImportUrl(
       metafile: true,
       logLevel: "silent",
       plugins:
-        mockCalls.length > 0
+        mocks.calls.length > 0
           ? [
               moduleMockPlugin(
                 filePath,
                 source,
-                mockCalls,
+                mocks,
                 resolveInjectedGlobals(),
               ),
             ]

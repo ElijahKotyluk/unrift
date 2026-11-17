@@ -227,9 +227,7 @@ describe("mock.fetch - matchers", () => {
 
     await fetch("https://x.test/", { method: "POST" });
 
-    expect(mock.fetch).toHaveFetched(
-      (req) => req.method === "POST",
-    );
+    expect(mock.fetch).toHaveFetched((req) => req.method === "POST");
     expect(() =>
       expect(mock.fetch).toHaveFetched((req) => req.method === "DELETE"),
     ).toThrow();

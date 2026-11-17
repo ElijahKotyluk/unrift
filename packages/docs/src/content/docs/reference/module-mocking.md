@@ -5,7 +5,7 @@ description: Replace a module with a test double, static imports included.
 
 ## mock.module
 
-`mock.module(spec, factory)` replaces a module for the whole test file. Every import of it gets the factory's exports, in the test file and in the files it imports.
+`mock.module(spec, factory)` replaces a module for the whole test file. Every import of it gets the factory's exports, in the test file and in the files it imports. Packages in `node_modules` aren't bundled, so their own imports get the real module.
 
 ```ts
 import { it, expect, mock } from "unrift";
@@ -65,7 +65,7 @@ Code that already ran with the old exports, like a value a module computed when 
 - The test file has to be TypeScript, and `spec` a string literal. Unrift finds the calls when it bundles the file.
 - A factory at the top of the file runs before the file's other code. It can use Unrift's exports (`mock.fn()` and the rest), globals and `importActual`, not the file's own variables or imports.
 - Only the test file's own calls count, not `mock.module` in a helper it imports.
-- A `require()` of the mocked module gets the real one.
+- A `require()` of the mocked module gets the real one, and so does an import inside a package in `node_modules`.
 - To know what a CommonJS module exports, Unrift runs it once when it bundles the file. An ES module isn't run.
 - A spy the factory makes is reset by `mock.resetAll()` and `mock.restoreAll()`, from any test file, since spies are shared across the run. Set its return value in the test or a `beforeEach`.
 
