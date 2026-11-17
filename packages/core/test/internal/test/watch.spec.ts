@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@unrift/core";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   readFileSync,
@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const WORK = resolve(process.cwd(), "test/watch/.work");
 
@@ -193,4 +194,32 @@ it("value", () => expect(value).toBe(1));
       w.kill();
     }
   }, 25000);
+
+  it("reloads an edited config Node runs without bundling", () => {
+    // Watch mode loads the config again on every run
+    const ws = workspace("native-config", {
+      "unrift.config.mjs": `export default { testDir: "a" };\n`,
+      "unrift.config.cjs": `module.exports = { testDir: "a" };\n`,
+    });
+    const script = join(ws.dir, "load.mjs");
+
+    writeFileSync(
+      script,
+      `import { loadConfigFromPath } from ${JSON.stringify(pathToFileURL(resolve(process.cwd(), "dist/esm/utils/loadConfig.js")).href)};
+import { readFileSync, writeFileSync } from "node:fs";
+const out = [];
+for (const name of ["unrift.config.mjs", "unrift.config.cjs"]) {
+  const path = ${JSON.stringify(ws.dir)} + "/" + name;
+  out.push((await loadConfigFromPath(path)).config.testDir);
+  writeFileSync(path, readFileSync(path, "utf8").replace('"a"', '"b"'));
+  out.push((await loadConfigFromPath(path)).config.testDir);
+}
+console.log(JSON.stringify(out));
+`,
+    );
+
+    const res = spawnSync(process.execPath, [script], { encoding: "utf8" });
+
+    expect(JSON.parse(res.stdout)).toEqual(["a", "b", "a", "b"]);
+  });
 });
