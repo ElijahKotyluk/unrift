@@ -70,6 +70,12 @@ unrift --json
 
 Tests that don't match show up as skipped so the totals stay the same, and a matching `it.todo` still shows as todo. Hooks for a describe block only run if a matching test inside it actually runs.
 
+## Watch mode
+
+`--watch` reruns when anything in the test dir changes, or a file a TypeScript test or config imports, like your source files. A new import is watched from the run that first loads it.
+
+Files imported only by `.js` test files or a `.js` config aren't watched, Node loads those without bundling.
+
 ## JSON output
 
 The `--json` flag outputs a structured report to stdout:

@@ -96,7 +96,7 @@ function pathExists(path: string): boolean {
 }
 
 // True if child is inside parent (after resolving symlinks when possible).
-function isSubpath(child: string, parent: string): boolean {
+export function isSubpath(child: string, parent: string): boolean {
   const parentReal = safeRealpath(parent);
   const childReal = safeRealpath(child);
   const p = parentReal.endsWith(sep) ? parentReal : parentReal + sep;
@@ -179,6 +179,17 @@ function hashFile(path: string): string | null {
 
 function inputsUnchanged(entry: CacheEntry): boolean {
   return entry.inputs.every(({ path, hash }) => hashFile(path) === hash);
+}
+
+/** Every file read for a bundle so far: test files, the config and what they import. */
+export function bundledFiles(): string[] {
+  const files = new Set<string>();
+
+  for (const entry of cache.values()) {
+    for (const { path } of entry.inputs) files.add(path);
+  }
+
+  return [...files];
 }
 
 function cacheDirForMode(cacheRoot: string, mode: Mode) {

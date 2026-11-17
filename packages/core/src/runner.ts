@@ -12,7 +12,7 @@ import {
   type LoadedConfig,
 } from "./utils/loadConfig";
 
-import { cleanUnriftCaches } from "./utils/transform";
+import { bundledFiles, cleanUnriftCaches, isSubpath } from "./utils/transform";
 import { colors } from "./utils/colors";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
@@ -901,6 +901,58 @@ function watchRecursive(
   };
 }
 
+/**
+ * Watch single files, calling `onChange` after a debounce. Each file's folder
+ * is watched, not the file: an editor that saves by renaming a new file over
+ * the old one would leave a watcher on the file looking at nothing.
+ */
+function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let files = new Set<string>();
+  const watched = new Map<string, FSWatcher>();
+
+  function watchDir(d: string) {
+    try {
+      const watcher = fsWatch(d, (_event, filename) => {
+        if (!filename) return;
+
+        const path = join(d, filename);
+
+        if (!files.has(path) || isOwnWrite(path)) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => onChange(path), debounceMs);
+      });
+
+      watcher.on("error", () => {});
+      watched.set(d, watcher);
+    } catch {
+      // The folder is gone, nothing to watch
+    }
+  }
+
+  return {
+    /** Replaces what's watched with these files. */
+    set(paths: string[]) {
+      files = new Set(paths.map((p) => resolve(p)));
+
+      const dirs = new Set([...files].map((f) => dirname(f)));
+
+      for (const [d, watcher] of watched) {
+        if (!dirs.has(d)) {
+          closeWatcher(watcher);
+          watched.delete(d);
+        }
+      }
+
+      for (const d of dirs) if (!watched.has(d)) watchDir(d);
+    },
+    close() {
+      if (timer) clearTimeout(timer);
+      for (const watcher of watched.values()) closeWatcher(watcher);
+    },
+  };
+}
+
 function closeWatcher(watcher: FSWatcher) {
   try {
     watcher.close();
@@ -931,7 +983,19 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
   let running = false;
 
-  const stop = watchRecursive(testDir, async (filename) => {
+  // Source files and the config live outside the test dir. Watch the ones
+  // the last run bundled, the test dir is already watched as a whole.
+  const imports = watchFiles((filename) => rerun(filename));
+  const watchImports = () =>
+    imports.set(
+      bundledFiles().filter(
+        (f) => !isSubpath(f, testDir) && !f.split(sep).includes("node_modules"),
+      ),
+    );
+
+  watchImports();
+
+  const rerun = async (filename: string) => {
     if (running) return;
     running = true;
 
@@ -951,17 +1015,21 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
       // mismatch saved mid-edit, or drop snapshots of a test being renamed.
       await runTestsCLI({ ...options, updateSnapshots: false });
     } finally {
+      watchImports();
       running = false;
     }
 
     console.log(
       ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,
     );
-  });
+  };
+
+  const stop = watchRecursive(testDir, rerun);
 
   // Keep process alive and clean up on exit
   process.on("SIGINT", () => {
     stop();
+    imports.close();
     process.exit(0);
   });
 }
