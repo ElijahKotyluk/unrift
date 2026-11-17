@@ -35,10 +35,10 @@ function loaderFor(file: string) {
  * The calls to bundle around, or none when the test file doesn't use
  * `mock.module`.
  */
-export function moduleMockCalls(source: string): MockCall[] {
+export function moduleMockCalls(source: string, file: string): MockCall[] {
   if (!source.includes("mock")) return [];
 
-  const calls = findMockCalls(source);
+  const calls = findMockCalls(source, loaderFor(file) === "tsx");
 
   return calls.some((c) => c.kind === "module") ? calls : [];
 }
@@ -151,14 +151,23 @@ export function moduleMockPlugin(
 
           out += source.slice(at);
 
-          const keyed = (call: MockCall) => {
-            const target = specs.get(call.spec)!;
+          // The hoisted call's text, it and the calls inside it keyed
+          const keyed = (outer: MockCall) => {
+            let text = "";
+            let from = outer.start;
 
-            return (
-              source.slice(call.start, call.specStart) +
-              JSON.stringify(target.key) +
-              source.slice(call.specEnd, call.end)
-            );
+            for (const call of calls) {
+              const target = specs.get(call.spec);
+
+              if (call.start < outer.start || call.end > outer.end) continue;
+              if (!target || call.specStart < from) continue;
+
+              text += source.slice(from, call.specStart);
+              text += JSON.stringify(target.key);
+              from = call.specEnd;
+            }
+
+            return text + source.slice(from, outer.end);
           };
 
           const imports = [...source.matchAll(UNRIFT_IMPORT)].map(
@@ -216,9 +225,9 @@ export function moduleMockPlugin(
         if (isBare(args.path)) {
           const t = targetsByPath.get(args.path);
 
-          return t && !t.path
-            ? { path: t.key, namespace: NAMESPACE, pluginData: t }
-            : undefined;
+          if (t && !t.path) {
+            return { path: t.key, namespace: NAMESPACE, pluginData: t };
+          }
         }
 
         const r = await b.resolve(args.path, {
@@ -228,7 +237,11 @@ export function moduleMockPlugin(
           pluginData: { unriftSkip: true },
         });
 
-        const t = r.errors.length === 0 ? targetsByPath.get(r.path) : undefined;
+        // A path alias can resolve to a mocked file
+        const t =
+          r.errors.length === 0 && !r.external
+            ? targetsByPath.get(r.path)
+            : undefined;
 
         if (t) return { path: t.key, namespace: NAMESPACE, pluginData: t };
 

@@ -38,7 +38,14 @@ const BEFORE_REGEX = new Set([..."(,=:[!&|?{};+-*%<>~^"]);
 const KEYWORDS_BEFORE_REGEX =
   /(?:^|[^\w$])(?:return|typeof|case|do|else|in|of|void|yield|await|delete|throw|new)$/;
 
-export function findMockCalls(source: string): MockCall[] {
+// After `<` in expression position, a type parameter rather than JSX
+const TYPE_PARAMS = /<\s*[\w$]+\s*(?:,|extends\b)/y;
+
+/**
+ * `jsx` is for a .tsx or .jsx file, where `<div>` starts JSX. The calls come
+ * back in source order, an enclosing call before the ones inside it.
+ */
+export function findMockCalls(source: string, jsx = false): MockCall[] {
   const calls: MockCall[] = [];
   const n = source.length;
   let depth = 0;
@@ -112,6 +119,7 @@ export function findMockCalls(source: string): MockCall[] {
 
   const regexAllowed = () =>
     prev === "" ||
+    prevEnd === controlEnd ||
     BEFORE_REGEX.has(prev) ||
     KEYWORDS_BEFORE_REGEX.test(source.slice(Math.max(0, prevEnd - 7), prevEnd));
 
@@ -137,6 +145,62 @@ export function findMockCalls(source: string): MockCall[] {
     return { spec: raw, start, end: i };
   };
 
+  // A JSX element at i, up to its closing tag
+  const skipJsxElement = () => {
+    i++;
+    if (source[i] === ">") {
+      i++;
+      skipJsxChildren();
+      return;
+    }
+    while (i < n) {
+      const c = source[i];
+      if (c === "/" && source[i + 1] === ">") {
+        i += 2;
+        return;
+      }
+      if (c === ">") {
+        i++;
+        skipJsxChildren();
+        return;
+      }
+      if (c === "{") {
+        i++;
+        skipCode("}");
+        i++;
+      } else if (c === '"' || c === "'") {
+        const close = source.indexOf(c, i + 1);
+        i = close === -1 ? n : close + 1;
+      } else i++;
+    }
+  };
+
+  // Text, expressions and elements, up to and past the closing tag
+  const skipJsxChildren = () => {
+    while (i < n) {
+      const c = source[i];
+      if (c === "{") {
+        i++;
+        skipCode("}");
+        i++;
+      } else if (c === "<" && source[i + 1] === "/") {
+        const close = source.indexOf(">", i);
+        i = close === -1 ? n : close + 1;
+        return;
+      } else if (c === "<") {
+        skipJsxElement();
+      } else i++;
+    }
+  };
+
+  const startsJsx = () => {
+    if (!jsx || !regexAllowed()) return false;
+    const next = source[i + 1];
+    if (next !== ">" && !/[A-Za-z_$]/.test(next ?? "")) return false;
+    TYPE_PARAMS.lastIndex = i;
+    return !TYPE_PARAMS.test(source);
+  };
+
   // Scans code until `close` at the current depth (or the end)
   function skipCode(close?: string): void {
     const base = depth;
@@ -152,6 +216,8 @@ export function findMockCalls(source: string): MockCall[] {
         skipTemplate();
       } else if (c === "/" && regexAllowed()) {
         skipRegex();
+      } else if (c === "<" && startsJsx()) {
+        skipJsxElement();
       } else if (c === "(" || c === "[" || c === "{") {
         brackets.push(
           c === "(" && CONTROL.test(source.slice(Math.max(0, i - 20), i)),
@@ -163,7 +229,11 @@ export function findMockCalls(source: string): MockCall[] {
         depth--;
         i++;
         if (control && c === ")") controlEnd = i;
-      } else if (c === "m" && (i === 0 || !IDENT.test(source[i - 1]))) {
+      } else if (
+        c === "m" &&
+        prev !== "." &&
+        (i === 0 || !IDENT.test(source[i - 1]))
+      ) {
         CALL.lastIndex = i;
         const m = CALL.exec(source);
         if (m) {
@@ -262,5 +332,6 @@ export function findMockCalls(source: string): MockCall[] {
 
   skipCode();
 
-  return calls;
+  // A call is recorded once its arguments are scanned, after the calls in them
+  return calls.sort((a, b) => a.start - b.start);
 }

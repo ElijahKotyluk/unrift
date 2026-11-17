@@ -7,6 +7,7 @@ import { findMockCalls } from "../../../src/mock/hoist.js";
 import { greet } from "../../mock-module/greet";
 import label, { getUser } from "../../mock-module/user-service";
 import { value, extra } from "fixture-esm-only";
+import { tool, restore } from "../../mock-module/tool";
 
 // Runs before the imports above, and the real module never loads
 mock.module("../../mock-module/user-service", () => ({
@@ -24,6 +25,12 @@ mock.module("node:path", async (importActual) => {
 mock.module("fixture-esm-only", () => ({
   value: "mocked",
   extra: "mocked",
+}));
+
+// The unmock inside the factory is keyed too
+mock.module("../../mock-module/tool", () => ({
+  tool: () => "mocked",
+  restore: () => mock.unmock("../../mock-module/tool"),
 }));
 
 describe("mock.module", () => {
@@ -46,6 +53,12 @@ describe("mock.module", () => {
     expect([value, extra]).toEqual(["mocked", "mocked"]);
   });
 
+  it("keys a call inside a hoisted factory", async () => {
+    expect(tool()).toBe("mocked");
+    await restore();
+    expect(tool()).toBe("real");
+  });
+
   it("mocks a built-in, with the real module from importActual", () => {
     expect(basename("/a/b.txt")).toBe("mocked basename");
   });
@@ -63,7 +76,7 @@ describe("mock.module", () => {
 });
 
 describe("mock.module errors", () => {
-  it("explains a factory that uses the file's code, and a specifier it can't see", () => {
+  it("explains a factory that uses the file's code, and a specifier it can't see, and follows path aliases", () => {
     const res = spawnSync(
       process.execPath,
       [
@@ -74,11 +87,12 @@ describe("mock.module errors", () => {
       ],
       { encoding: "utf8" },
     );
-    const errors = (
-      JSON.parse(res.stdout).results as Array<{ error?: { message: string } }>
-    )
-      .map((r) => r.error?.message)
-      .join("\n");
+    const results = JSON.parse(res.stdout).results as Array<{
+      description: string;
+      status: string;
+      error?: { message: string };
+    }>;
+    const errors = results.map((r) => r.error?.message).join("\n");
 
     expect(errors).toContain(
       "name is not defined. A call at the top of the file runs before",
@@ -86,6 +100,9 @@ describe("mock.module errors", () => {
     expect(errors).toContain(
       "Unrift didn't find this call when it bundled the test file",
     );
+    expect(
+      results.find((r) => r.description.includes("path alias"))?.status,
+    ).toBe("pass");
   });
 });
 
@@ -108,6 +125,9 @@ else mock.module("./f", f);
 for (const k of ks) await mock.module("./g", f);
 unmock("./h");
 x.unmock("./i");
+obj.mock.module("./j", f);
+if (ok) /[)]/.test("");
+mock.module("./k", () => ({ r: () => mock.unmock("./k") }));
 `;
     const calls = findMockCalls(source).map((c) => ({
       spec: c.spec,
@@ -177,6 +197,31 @@ x.unmock("./i");
         topLevel: true,
         text: 'unmock("./h");',
       },
+      {
+        spec: "./k",
+        kind: "module",
+        topLevel: true,
+        text: 'mock.module("./k", () => ({ r: () => mock.unmock("./k") }));',
+      },
+      {
+        spec: "./k",
+        kind: "unmock",
+        topLevel: false,
+        text: 'mock.unmock("./k")',
+      },
+    ]);
+  });
+
+  it("skips JSX in a .tsx file", () => {
+    const source = `const id = <T,>(x: T) => x;
+mock.module("./Button", () => ({ Button: () => <p a="(" b={")"}>it's ( <b/></p> }));
+mock.module("./a", f);
+`;
+    const calls = findMockCalls(source, true).map((c) => [c.spec, c.topLevel]);
+
+    expect(calls).toEqual([
+      ["./Button", true],
+      ["./a", true],
     ]);
   });
 });
