@@ -963,6 +963,10 @@ function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
   const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
   // Folders that are gone, watched for when they're made again
   const waiting = new Map<string, () => void>();
+  // Folders that saw a file deleted or renamed since the last set(). The
+  // folder itself may be deleted and made again, and Linux gives the new one
+  // the same inode number, so these always get a new watcher.
+  const renamed = new Set<string>();
 
   function trigger(path: string) {
     if (timer) clearTimeout(timer);
@@ -997,7 +1001,8 @@ function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
     }
 
     try {
-      const watcher = fsWatch(d, (_event, filename) => {
+      const watcher = fsWatch(d, (event, filename) => {
+        if (event === "rename") renamed.add(d);
         if (!filename) return;
 
         const path = join(d, filename);
@@ -1039,12 +1044,14 @@ function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
             // Gone, watchDir waits for it
           }
 
-          if (ino === entry.ino) continue;
+          if (ino === entry.ino && !renamed.has(d)) continue;
           unwatch(d);
         }
 
         watchDir(d);
       }
+
+      renamed.clear();
     },
     close() {
       if (timer) clearTimeout(timer);
