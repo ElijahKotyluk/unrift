@@ -96,7 +96,7 @@ function pathExists(path: string): boolean {
 }
 
 // True if child is inside parent (after resolving symlinks when possible).
-function isSubpath(child: string, parent: string): boolean {
+export function isSubpath(child: string, parent: string): boolean {
   const parentReal = safeRealpath(parent);
   const childReal = safeRealpath(child);
   const p = parentReal.endsWith(sep) ? parentReal : parentReal + sep;
@@ -169,6 +169,20 @@ type CacheEntry = {
 
 const cache = new Map<CacheKey, CacheEntry>();
 
+// Files a failed build's errors point at. Watch mode watches them too, so
+// fixing a broken import reruns even if the bundle never built.
+const failedInputs = new Map<CacheKey, string[]>();
+
+// The run each entry was last used in. Watch mode only watches what the
+// latest run used, an entry for a deleted test stays in the cache unused.
+let generation = 0;
+const usedIn = new Map<CacheKey, number>();
+
+/** Starts a new run for `bundledFiles`. */
+export function startBundleRun(): void {
+  generation++;
+}
+
 function hashFile(path: string): string | null {
   try {
     return hashString(readFileSync(path, "utf8"));
@@ -179,6 +193,31 @@ function hashFile(path: string): string | null {
 
 function inputsUnchanged(entry: CacheEntry): boolean {
   return entry.inputs.every(({ path, hash }) => hashFile(path) === hash);
+}
+
+/**
+ * Every file read for a bundle this run: test files, the config and what
+ * they import. `failed` is true when a build failed, its imports are unknown.
+ */
+export function bundledFiles(): { files: string[]; failed: boolean } {
+  const files = new Set<string>();
+  let failed = false;
+
+  for (const [key, run] of usedIn) {
+    if (run !== generation) continue;
+
+    // A bundle that broke keeps what it read the last time it built
+    for (const { path } of cache.get(key)?.inputs ?? []) files.add(path);
+
+    const broken = failedInputs.get(key);
+
+    if (broken) {
+      failed = true;
+      for (const path of broken) files.add(path);
+    }
+  }
+
+  return { files: [...files], failed };
 }
 
 function cacheDirForMode(cacheRoot: string, mode: Mode) {
@@ -268,9 +307,16 @@ export function toImportUrl(
   const coverage = options.coverage ?? false;
   const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${filePath}`;
 
+  usedIn.set(key, generation);
+
   const existing = cache.get(key);
 
-  if (existing && inputsUnchanged(existing)) return existing.outUrl;
+  if (existing && inputsUnchanged(existing)) {
+    // Back to what last built, an earlier failure is over
+    failedInputs.delete(key);
+
+    return existing.outUrl;
+  }
 
   const projectRoot = findProjectRoot(dirname(filePath));
   const selfHost = readPackageName(projectRoot) === "@unrift/core";
@@ -343,6 +389,16 @@ export function toImportUrl(
     );
     writeFileSync(outFile, result.outputFiles[0].contents);
   } catch (err) {
+    const errors = (err as { errors?: Array<{ location?: { file: string } }> })
+      .errors;
+
+    failedInputs.set(key, [
+      filePath,
+      ...(errors ?? []).flatMap((e) =>
+        e.location ? [resolve(projectRoot, e.location.file)] : [],
+      ),
+    ]);
+
     const msg = err instanceof Error ? err.message : String(err);
 
     if (
@@ -360,6 +416,7 @@ export function toImportUrl(
   const outUrl = pathToFileURL(outFile).href;
 
   cache.set(key, { outUrl, inputs });
+  failedInputs.delete(key);
 
   return outUrl;
 }

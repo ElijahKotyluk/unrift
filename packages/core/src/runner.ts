@@ -1,5 +1,6 @@
 import {
   watch as fsWatch,
+  existsSync,
   readdirSync,
   statSync,
   type FSWatcher,
@@ -12,7 +13,12 @@ import {
   type LoadedConfig,
 } from "./utils/loadConfig";
 
-import { cleanUnriftCaches } from "./utils/transform";
+import {
+  bundledFiles,
+  cleanUnriftCaches,
+  isSubpath,
+  startBundleRun,
+} from "./utils/transform";
 import { colors } from "./utils/colors";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
@@ -893,11 +899,164 @@ function watchRecursive(
     }
   }
 
+  // A test dir that doesn't exist yet is watched from when it's made
+  const stopWaiting = waitForDir(dir, () => {
+    watchDir(dir);
+    trigger(dir);
+  });
+
   watchDir(dir);
 
   return () => {
+    stopWaiting();
     if (timer) clearTimeout(timer);
     for (const { watcher } of watched.values()) closeWatcher(watcher);
+  };
+}
+
+/**
+ * Calls `onCreated` once `dir` is made, by watching the closest folder above
+ * it that exists. Does nothing if it's already there.
+ */
+function waitForDir(dir: string, onCreated: () => void): () => void {
+  let watcher: FSWatcher | null = null;
+  const close = () => {
+    if (watcher) closeWatcher(watcher);
+    watcher = null;
+  };
+
+  const check = () => {
+    close();
+    if (existsSync(dir)) return;
+
+    let parent = dirname(dir);
+
+    while (!existsSync(parent) && dirname(parent) !== parent) {
+      parent = dirname(parent);
+    }
+
+    try {
+      watcher = fsWatch(parent, () => {
+        if (!existsSync(dir)) return check();
+        close();
+        onCreated();
+      });
+      watcher.on("error", () => {});
+    } catch {
+      // Nothing above it to watch
+    }
+  };
+
+  check();
+
+  return close;
+}
+
+/**
+ * Watch single files, calling `onChange` after a debounce. Each file's folder
+ * is watched, not the file: an editor that saves by renaming a new file over
+ * the old one would leave a watcher on the file looking at nothing.
+ */
+function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let files = new Set<string>();
+  const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
+  // Folders that are gone, watched for when they're made again
+  const waiting = new Map<string, () => void>();
+  // Folders that saw a file deleted or renamed since the last set(). The
+  // folder itself may be deleted and made again, and Linux gives the new one
+  // the same inode number, so these always get a new watcher.
+  const renamed = new Set<string>();
+
+  function trigger(path: string) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => onChange(path), debounceMs);
+  }
+
+  function unwatch(d: string) {
+    const entry = watched.get(d);
+
+    if (entry) closeWatcher(entry.watcher);
+    watched.delete(d);
+    waiting.get(d)?.();
+    waiting.delete(d);
+  }
+
+  function watchDir(d: string) {
+    let ino: number;
+
+    try {
+      ino = statSync(d).ino;
+    } catch {
+      // Gone, rerun once it's back. Its files are probably back with it.
+      waiting.set(
+        d,
+        waitForDir(d, () => {
+          waiting.delete(d);
+          watchDir(d);
+          trigger(d);
+        }),
+      );
+      return;
+    }
+
+    try {
+      const watcher = fsWatch(d, (event, filename) => {
+        if (event === "rename") renamed.add(d);
+        if (!filename) return;
+
+        const path = join(d, filename);
+
+        if (files.has(path) && !isOwnWrite(path)) trigger(path);
+      });
+
+      watcher.on("error", () => {});
+      watched.set(d, { watcher, ino });
+    } catch {
+      // Gone between the stat and the watch, the next set() tries again
+    }
+  }
+
+  return {
+    /** Replaces what's watched with these files. */
+    set(paths: string[]) {
+      files = new Set(paths.map((p) => resolve(p)));
+
+      const dirs = new Set([...files].map((f) => dirname(f)));
+
+      for (const d of [...watched.keys(), ...waiting.keys()]) {
+        if (!dirs.has(d)) unwatch(d);
+      }
+
+      for (const d of dirs) {
+        if (waiting.has(d)) continue;
+
+        // Linux keeps a watcher on a deleted folder, not on one made again
+        // at the same path
+        const entry = watched.get(d);
+
+        if (entry) {
+          let ino: number | null = null;
+
+          try {
+            ino = statSync(d).ino;
+          } catch {
+            // Gone, watchDir waits for it
+          }
+
+          if (ino === entry.ino && !renamed.has(d)) continue;
+          unwatch(d);
+        }
+
+        watchDir(d);
+      }
+
+      renamed.clear();
+    },
+    close() {
+      if (timer) clearTimeout(timer);
+      for (const d of [...watched.keys(), ...waiting.keys()]) unwatch(d);
+    },
   };
 }
 
@@ -909,29 +1068,69 @@ function closeWatcher(watcher: FSWatcher) {
   }
 }
 
-export async function watchTestsCLI(options: RunnerOptions = {}) {
-  // Run once immediately
-  await runTestsCLI(options);
-
-  // Resolve the directory to watch (same logic as runTestsCLI)
+async function resolveDirs(options: RunnerOptions) {
+  // Same logic as runTestsCLI
   const loaded = options.configPath
     ? await loadConfigFromPath(options.configPath)
     : await loadConfig(process.cwd());
-
-  const config = loaded?.config ?? null;
   const configDir = loaded?.configDir ?? process.cwd();
-  const testDir = resolve(
-    configDir,
-    config?.testDir ?? options.testDir ?? "test",
-  );
 
+  return {
+    configDir,
+    configPath: loaded?.configPath ?? null,
+    testDir: resolve(
+      configDir,
+      loaded?.config.testDir ?? options.testDir ?? "test",
+    ),
+  };
+}
+
+function logWatching(testDir: string) {
   console.log(
     `\n ${colors.dim("↺")} ${colors.dim("Watching")} ${colors.bold(shortenPath(testDir))} ${colors.dim("for changes…  Ctrl+C to quit")}\n`,
   );
+}
+
+export async function watchTestsCLI(options: RunnerOptions = {}) {
+  // Run once immediately
+  startBundleRun();
+  await runTestsCLI(options);
+
+  let { testDir, configDir, configPath } = await resolveDirs(options);
+
+  logWatching(testDir);
 
   let running = false;
 
-  const stop = watchRecursive(testDir, async (filename) => {
+  // Source files and the config live outside the test dir. Watch the ones
+  // the last run bundled, the test dir is already watched as a whole.
+  const imports = watchFiles((filename) => rerun(filename));
+  // A build that failed doesn't say what it imports, so until it builds
+  // anything under the config's folder reruns
+  let stopFallback: (() => void) | null = null;
+
+  const watchImports = () => {
+    const { files, failed } = bundledFiles();
+
+    // The config is watched even when it didn't load (deleted, say), so
+    // putting it back reruns
+    if (configPath) files.push(configPath);
+
+    imports.set(
+      files.filter(
+        (f) => !isSubpath(f, testDir) && !f.split(sep).includes("node_modules"),
+      ),
+    );
+
+    if (failed && !stopFallback) {
+      stopFallback = watchRecursive(configDir, rerun);
+    } else if (!failed && stopFallback) {
+      stopFallback();
+      stopFallback = null;
+    }
+  };
+
+  const rerun = async (filename: string) => {
     if (running) return;
     running = true;
 
@@ -946,22 +1145,52 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     // Reset exit code so each run is evaluated independently
     process.exitCode = 0;
 
+    let moved = false;
+
     try {
+      startBundleRun();
       // -u is for the first run only. On every save it would overwrite a
       // mismatch saved mid-edit, or drop snapshots of a test being renamed.
       await runTestsCLI({ ...options, updateSnapshots: false });
+
+      // An edit to the config (or a file it imports) can move the test dir
+      const next = await resolveDirs(options);
+
+      configDir = next.configDir;
+      configPath = next.configPath;
+
+      if (next.testDir !== testDir) {
+        stop();
+        testDir = next.testDir;
+        stop = watchRecursive(testDir, rerun);
+        moved = true;
+      }
+    } catch (err) {
+      // A config that doesn't load, keep watching so the next save can fix it
+      console.error(err);
+      process.exitCode = 1;
     } finally {
+      watchImports();
       running = false;
     }
 
-    console.log(
-      ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,
-    );
-  });
+    if (moved) logWatching(testDir);
+    else {
+      console.log(
+        ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,
+      );
+    }
+  };
+
+  let stop = watchRecursive(testDir, rerun);
+
+  watchImports();
 
   // Keep process alive and clean up on exit
   process.on("SIGINT", () => {
     stop();
+    stopFallback?.();
+    imports.close();
     process.exit(0);
   });
 }

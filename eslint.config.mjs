@@ -25,9 +25,10 @@ export default defineConfig(
       "**/lib",
       "**/test/**.*",
       "packages/docs/**",
-      // Scratch dirs from the snapshot and coverage tests
+      // Scratch dirs from the tests
       "packages/core/test/snapshots/.work",
       "packages/core/test/coverage/.work",
+      "packages/core/test/watch/.work",
     ],
   },
   {

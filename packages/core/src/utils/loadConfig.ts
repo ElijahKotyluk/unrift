@@ -1,8 +1,11 @@
 import { toImportUrl } from "./transform";
 import { toError } from "./toError";
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { UnriftConfigOptions } from "./defineConfig";
 
@@ -26,6 +29,16 @@ function isConfigFileName(name: string): boolean {
   return CONFIG_RE.test(name);
 }
 
+const requireCache = createRequire(import.meta.url).cache;
+
+function safeRealpath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
 async function importConfigFile(configPath: string): Promise<unknown> {
   if (configPath.endsWith(".json")) {
     try {
@@ -39,7 +52,25 @@ async function importConfigFile(configPath: string): Promise<unknown> {
     }
   }
 
-  const module = await import(toImportUrl(configPath, "bundle-config"));
+  let url = toImportUrl(configPath, "bundle-config");
+
+  // A bundled config gets a new URL when anything in it changes. One Node
+  // runs as is keeps its URL, so watch mode would get the cached module:
+  // version it by its contents, and drop CommonJS from require's cache.
+  if (url === pathToFileURL(configPath).href) {
+    for (const key of [configPath, safeRealpath(configPath)]) {
+      delete requireCache[key];
+    }
+
+    const hash = createHash("sha256")
+      .update(readFileSync(configPath))
+      .digest("hex")
+      .slice(0, 16);
+
+    url += `?v=${hash}`;
+  }
+
+  const module = await import(url);
 
   return module.default ?? module.config;
 }

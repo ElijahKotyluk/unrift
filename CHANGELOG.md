@@ -4,6 +4,10 @@ Versions are `@unrift/core` / `unrift`.
 
 ## Unreleased
 
+- Watch mode reruns when a file the tests or config import changes, not only files in the test dir
+
+## 0.8.0 / 0.9.0 - 2026-11-16
+
 - Coverage: `--coverage` reports lines, functions and branches of the files the tests loaded, TypeScript mapped back to its source
 - `coverage` config: `include`, `exclude`, `reporter` (`text`, `lcov`, `json`), `reportsDirectory`, `thresholds`
 - `--coverage-reporter <name>`, turns coverage on too
