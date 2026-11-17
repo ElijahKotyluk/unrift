@@ -36,7 +36,13 @@ import {
   setSystemTime,
   getRealSystemTime,
 } from "./timers";
-import { doMock, unmock, listMockedSpecs, fromModule } from "./module";
+import {
+  doMock,
+  unmock,
+  listMockedSpecs,
+  fromModule,
+  mockModule,
+} from "./module";
 import { fs as mockFs } from "./fs";
 
 export {
@@ -115,16 +121,14 @@ export const mock = {
   getTimerCount,
   setSystemTime,
   getRealSystemTime,
-  // Tier A module mocking - dynamic imports of external specs only.
-  // The hoisted `mock.module(spec, factory)` for static imports is
-  // planned for Tier B and intentionally not exposed yet.
+  // Replaces a module for the test file, static imports too
+  module: mockModule,
+  // Mocks an external module for later `await import()` calls
   doMock,
   unmock,
   fromModule,
   listMockedSpecs,
-  // File system mocking - backed by memfs, layered on Tier A module
-  // mocking. Works with `await import("node:fs")`; static imports of
-  // node:fs are not intercepted yet (planned for Tier B).
+  // File system mocking, layered on doMock. Works with `await import("node:fs")`
   fs: mockFs,
   clearAll: clearAllMocks,
   resetAll: resetAllMocks,

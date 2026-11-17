@@ -1,5 +1,5 @@
 /**
- * Node module customization hook for unrift module mocking (Tier A).
+ * Node module customization hook for `mock.doMock`.
  *
  * Registered by `bin/unrift.mjs` via `module.register()`. Runs in a
  * worker thread (Node 20.6+ / 18.19+ behavior). Communicates with the
@@ -70,9 +70,6 @@ function drainMessages(): void {
  * Generate ESM source for a mocked spec. The source executes in the
  * MAIN thread (not the loader thread) - that's where the actual mock
  * object lives, keyed in `globalThis.__unriftMocks`.
- *
- * Pure function so future tiers can reuse this for hoisted (Tier B)
- * and relative (Tier C) mocks without rewriting the emitter.
  */
 export function generateMockSource(
   spec: string,

@@ -36,6 +36,7 @@ describe("mock namespace surface", () => {
         "getTimerCount",
         "global",
         "listMockedSpecs",
+        "module",
         "object",
         "resetAll",
         "restoreAll",

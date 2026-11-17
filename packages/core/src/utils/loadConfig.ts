@@ -52,7 +52,7 @@ async function importConfigFile(configPath: string): Promise<unknown> {
     }
   }
 
-  let url = toImportUrl(configPath, "bundle-config");
+  let url = await toImportUrl(configPath, "bundle-config");
 
   // A bundled config gets a new URL when anything in it changes. One Node
   // runs as is keeps its URL, so watch mode would get the cached module:

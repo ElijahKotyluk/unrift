@@ -21,7 +21,7 @@ it("reads config from disk", async () => {
 });
 ```
 
-`mock.fs()` is layered on the [Tier A module-mocking](./module-mocking) machinery, which means it inherits Tier A's limits - see [Supported and not-yet-supported](#supported-and-not-yet-supported) below.
+`mock.fs()` is built on [`mock.doMock`](./module-mocking#mockdomock), so it only affects `await import("node:fs")`. See [Supported and not-yet-supported](#supported-and-not-yet-supported) below.
 
 ## The handle
 
@@ -125,7 +125,7 @@ afterEach(() => {
 
 ## Supported and not-yet-supported
 
-`mock.fs()` is built on the [Tier A module-mocking](./module-mocking) implementation, so it inherits the same import-shape limits.
+`mock.fs()` is built on [`mock.doMock`](./module-mocking#mockdomock) and has the same limits.
 
 ### Supported
 
@@ -138,7 +138,7 @@ afterEach(() => {
 
 | Limit | Workaround today | Lifted by |
 | --- | --- | --- |
-| **Static** imports of `node:fs` (`import { readFileSync } from "node:fs"`) see the real fs. ESM hoists static imports above your test body, so `mock.fs()` runs too late. | Use `await import("node:fs")` for the call sites you want to mock. Other static imports in the same file are unaffected. | Tier B module mocking |
+| **Static** imports of `node:fs` (`import { readFileSync } from "node:fs"`) see the real fs. ESM hoists static imports above your test body, so `mock.fs()` runs too late. | Use `await import("node:fs")` for the call sites you want to mock, or [`mock.module("node:fs", factory)`](./module-mocking) with your own fake. | Not planned yet |
 | Code under test compiled by a bundler that **inlines** `node:fs` access | Refactor the code to import `node:fs` at runtime, or skip mocking and use real temp dirs. | n/a (bundler concern, not unrift's) |
 | Reading from / writing to the **real** filesystem alongside the fake | After `mock.fs()`, `node:fs` IS the fake - temporarily call `mock.restoreAll()` if you need real-fs access mid-test. | n/a (intentional) |
 

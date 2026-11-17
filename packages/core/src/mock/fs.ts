@@ -6,12 +6,11 @@
  * package later; consumers of this module should only depend on the public
  * `FakeFsHandle` surface, not on memfs types directly.
  *
- * Interception is layered on Tier A module mocking - `mock.doMock` is
+ * Interception is layered on `mock.doMock`, which is
  * called for `node:fs` and `node:fs/promises`, so the fake takes effect
  * when test code does `await import("node:fs")` or `await import("node:fs/promises")`.
- * Static `import { readFileSync } from "node:fs"` is NOT intercepted in
- * Tier A (planned for Tier B). See the docs page for the explicit limit
- * list and workarounds.
+ * Static `import { readFileSync } from "node:fs"` is NOT intercepted. See
+ * the docs page for the explicit limit list and workarounds.
  */
 
 import { Volume, createFsFromVolume } from "memfs";
