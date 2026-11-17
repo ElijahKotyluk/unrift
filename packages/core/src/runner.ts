@@ -1077,6 +1077,7 @@ async function resolveDirs(options: RunnerOptions) {
 
   return {
     configDir,
+    configPath: loaded?.configPath ?? null,
     testDir: resolve(
       configDir,
       loaded?.config.testDir ?? options.testDir ?? "test",
@@ -1095,7 +1096,7 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
   startBundleRun();
   await runTestsCLI(options);
 
-  let { testDir, configDir } = await resolveDirs(options);
+  let { testDir, configDir, configPath } = await resolveDirs(options);
 
   logWatching(testDir);
 
@@ -1110,6 +1111,10 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
   const watchImports = () => {
     const { files, failed } = bundledFiles();
+
+    // The config is watched even when it didn't load (deleted, say), so
+    // putting it back reruns
+    if (configPath) files.push(configPath);
 
     imports.set(
       files.filter(
@@ -1152,6 +1157,7 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
       const next = await resolveDirs(options);
 
       configDir = next.configDir;
+      configPath = next.configPath;
 
       if (next.testDir !== testDir) {
         stop();

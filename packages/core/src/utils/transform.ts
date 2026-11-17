@@ -311,7 +311,12 @@ export function toImportUrl(
 
   const existing = cache.get(key);
 
-  if (existing && inputsUnchanged(existing)) return existing.outUrl;
+  if (existing && inputsUnchanged(existing)) {
+    // Back to what last built, an earlier failure is over
+    failedInputs.delete(key);
+
+    return existing.outUrl;
+  }
 
   const projectRoot = findProjectRoot(dirname(filePath));
   const selfHost = readPackageName(projectRoot) === "@unrift/core";

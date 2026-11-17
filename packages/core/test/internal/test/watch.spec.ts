@@ -1,6 +1,12 @@
 import { describe, it, expect } from "@unrift/core";
 import { spawn } from "node:child_process";
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const WORK = resolve(process.cwd(), "test/watch/.work");
@@ -94,33 +100,42 @@ it("b", () => void b);
       writeFileSync(value, `export const value = 3;\n`);
       expect(await w.waitFor(() => w.reruns() === 3)).toBe(true);
 
+      // Broken, then put back as it was. That's a cache hit, the failure
+      // must still be over: nothing else reruns after it (below).
+      await sleep(600);
+      writeFileSync(value, `export const value = ;\n`);
+      expect(await w.waitFor(() => w.reruns() === 4)).toBe(true);
+      await sleep(600);
+      writeFileSync(value, `export const value = 3;\n`);
+      expect(await w.waitFor(() => w.reruns() === 5)).toBe(true);
+
       // A deleted test's imports aren't watched anymore, nor is a file
       // nothing imports
       await sleep(600);
       rmSync(join(ws.dir, "test/b.spec.ts"));
-      expect(await w.waitFor(() => w.reruns() === 4)).toBe(true);
+      expect(await w.waitFor(() => w.reruns() === 6)).toBe(true);
       await sleep(600);
       ws.write("src/only-b.ts", `export const b = 2;\n`);
       ws.write("src/other.ts", `export const other = 2;\n`);
       await sleep(600);
-      expect(w.reruns()).toBe(4);
+      expect(w.reruns()).toBe(6);
 
       // The folder deleted and made again: its files are still watched
       rmSync(join(ws.dir, "src"), { recursive: true });
       ws.write("src/value.ts", `export const value = 1;\n`);
-      expect(await w.waitFor(() => w.reruns() === 5)).toBe(true);
+      expect(await w.waitFor(() => w.reruns() === 7)).toBe(true);
       await sleep(600);
       writeFileSync(value, `export const value = 4;\n`);
-      expect(await w.waitFor(() => w.reruns() === 6)).toBe(true);
+      expect(await w.waitFor(() => w.reruns() === 8)).toBe(true);
 
       // A file the config imports
       await sleep(600);
       ws.write("settings.ts", `export const bail = true;\n`);
-      expect(await w.waitFor(() => w.reruns() === 7)).toBe(true);
+      expect(await w.waitFor(() => w.reruns() === 9)).toBe(true);
     } finally {
       w.kill();
     }
-  }, 20000);
+  }, 25000);
 
   it("keeps watching through broken files and a moved test dir", async () => {
     // Starts with an import that never built. esbuild puts the error on the
@@ -163,8 +178,19 @@ it("value", () => expect(value).toBe(1));
         `import { it } from "@unrift/core";\nit("b", () => {});\n`,
       );
       expect(await w.waitFor(() => w.reruns() === 4)).toBe(true);
+
+      // The config deleted, then put back
+      const config = join(ws.dir, "unrift.config.ts");
+      const text = readFileSync(config, "utf8");
+
+      await sleep(600);
+      rmSync(config);
+      expect(await w.waitFor(() => w.reruns() === 5)).toBe(true);
+      await sleep(600);
+      writeFileSync(config, text);
+      expect(await w.waitFor(() => w.reruns() === 6)).toBe(true);
     } finally {
       w.kill();
     }
-  }, 20000);
+  }, 25000);
 });
