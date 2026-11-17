@@ -59,11 +59,16 @@ describe("watch mode", () => {
     const ws = workspace("imports", {
       "src/value.ts": `export const value = 1;\n`,
       "src/other.ts": `export const other = 1;\n`,
+      "src/only-b.ts": `export const b = 1;\n`,
       "settings.ts": `export const bail = false;\n`,
       "unrift.config.ts": `import { bail } from "./settings";\nexport default { testDir: "test", bail };\n`,
       "test/a.spec.ts": `import { it, expect } from "@unrift/core";
 import { value } from "../src/value";
 it("value", () => expect(value).toBe(1));
+`,
+      "test/b.spec.ts": `import { it } from "@unrift/core";
+import { b } from "../src/only-b";
+it("b", () => void b);
 `,
     });
     const value = join(ws.dir, "src/value.ts");
@@ -89,24 +94,39 @@ it("value", () => expect(value).toBe(1));
       writeFileSync(value, `export const value = 3;\n`);
       expect(await w.waitFor(() => w.reruns() === 3)).toBe(true);
 
-      // A file nothing imports
+      // A deleted test's imports aren't watched anymore, nor is a file
+      // nothing imports
       await sleep(600);
+      rmSync(join(ws.dir, "test/b.spec.ts"));
+      expect(await w.waitFor(() => w.reruns() === 4)).toBe(true);
+      await sleep(600);
+      ws.write("src/only-b.ts", `export const b = 2;\n`);
       ws.write("src/other.ts", `export const other = 2;\n`);
       await sleep(600);
-      expect(w.reruns()).toBe(3);
+      expect(w.reruns()).toBe(4);
+
+      // The folder deleted and made again: its files are still watched
+      rmSync(join(ws.dir, "src"), { recursive: true });
+      ws.write("src/value.ts", `export const value = 1;\n`);
+      expect(await w.waitFor(() => w.reruns() === 5)).toBe(true);
+      await sleep(600);
+      writeFileSync(value, `export const value = 4;\n`);
+      expect(await w.waitFor(() => w.reruns() === 6)).toBe(true);
 
       // A file the config imports
+      await sleep(600);
       ws.write("settings.ts", `export const bail = true;\n`);
-      expect(await w.waitFor(() => w.reruns() === 4)).toBe(true);
+      expect(await w.waitFor(() => w.reruns() === 7)).toBe(true);
     } finally {
       w.kill();
     }
-  }, 15000);
+  }, 20000);
 
   it("keeps watching through broken files and a moved test dir", async () => {
-    // Starts with a syntax error in an import that never built
+    // Starts with an import that never built. esbuild puts the error on the
+    // test file, not on value.ts.
     const ws = workspace("recover", {
-      "src/value.ts": `export const value = ;\n`,
+      "src/value.ts": `export const other = 1;\n`,
       "settings.ts": `export const testDir = "test";\n`,
       "unrift.config.ts": `import { testDir } from "./settings";\nexport default { testDir };\n`,
       "test/a.spec.ts": `import { it, expect } from "@unrift/core";
@@ -124,17 +144,19 @@ it("value", () => expect(value).toBe(1));
       // Fixing it reruns
       ws.write("src/value.ts", `export const value = 1;\n`);
       expect(await w.waitFor(() => w.out.text.includes("1 passed"))).toBe(true);
+      expect(w.reruns()).toBe(1);
 
       // A config that doesn't load fails the run, watch mode stays up
-      await sleep(300);
+      await sleep(600);
       ws.write("settings.ts", `export const testDir = ;\n`);
       expect(await w.waitFor(() => w.reruns() === 2)).toBe(true);
+
+      // Moved to a test dir that doesn't exist yet
       await sleep(600);
-      mkdirSync(join(ws.dir, "moved"));
       ws.write("settings.ts", `export const testDir = "moved";\n`);
       expect(await w.waitFor(() => w.reruns() === 3)).toBe(true);
 
-      // The config moved the test dir, a test made there reruns
+      // Making it with a test in it reruns
       await sleep(600);
       ws.write(
         "moved/b.spec.ts",
@@ -144,5 +166,5 @@ it("value", () => expect(value).toBe(1));
     } finally {
       w.kill();
     }
-  }, 15000);
+  }, 20000);
 });

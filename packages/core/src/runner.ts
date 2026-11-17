@@ -1,5 +1,6 @@
 import {
   watch as fsWatch,
+  existsSync,
   readdirSync,
   statSync,
   type FSWatcher,
@@ -12,7 +13,12 @@ import {
   type LoadedConfig,
 } from "./utils/loadConfig";
 
-import { bundledFiles, cleanUnriftCaches, isSubpath } from "./utils/transform";
+import {
+  bundledFiles,
+  cleanUnriftCaches,
+  isSubpath,
+  startBundleRun,
+} from "./utils/transform";
 import { colors } from "./utils/colors";
 import { discoverTestFiles } from "./utils/discoverTestFiles";
 import { runEngine } from "./run";
@@ -893,12 +899,57 @@ function watchRecursive(
     }
   }
 
+  // A test dir that doesn't exist yet is watched from when it's made
+  const stopWaiting = waitForDir(dir, () => {
+    watchDir(dir);
+    trigger(dir);
+  });
+
   watchDir(dir);
 
   return () => {
+    stopWaiting();
     if (timer) clearTimeout(timer);
     for (const { watcher } of watched.values()) closeWatcher(watcher);
   };
+}
+
+/**
+ * Calls `onCreated` once `dir` is made, by watching the closest folder above
+ * it that exists. Does nothing if it's already there.
+ */
+function waitForDir(dir: string, onCreated: () => void): () => void {
+  let watcher: FSWatcher | null = null;
+  const close = () => {
+    if (watcher) closeWatcher(watcher);
+    watcher = null;
+  };
+
+  const check = () => {
+    close();
+    if (existsSync(dir)) return;
+
+    let parent = dirname(dir);
+
+    while (!existsSync(parent) && dirname(parent) !== parent) {
+      parent = dirname(parent);
+    }
+
+    try {
+      watcher = fsWatch(parent, () => {
+        if (!existsSync(dir)) return check();
+        close();
+        onCreated();
+      });
+      watcher.on("error", () => {});
+    } catch {
+      // Nothing above it to watch
+    }
+  };
+
+  check();
+
+  return close;
 }
 
 /**
@@ -909,24 +960,55 @@ function watchRecursive(
 function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let files = new Set<string>();
-  const watched = new Map<string, FSWatcher>();
+  const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
+  // Folders that are gone, watched for when they're made again
+  const waiting = new Map<string, () => void>();
+
+  function trigger(path: string) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => onChange(path), debounceMs);
+  }
+
+  function unwatch(d: string) {
+    const entry = watched.get(d);
+
+    if (entry) closeWatcher(entry.watcher);
+    watched.delete(d);
+    waiting.get(d)?.();
+    waiting.delete(d);
+  }
 
   function watchDir(d: string) {
+    let ino: number;
+
+    try {
+      ino = statSync(d).ino;
+    } catch {
+      // Gone, rerun once it's back. Its files are probably back with it.
+      waiting.set(
+        d,
+        waitForDir(d, () => {
+          waiting.delete(d);
+          watchDir(d);
+          trigger(d);
+        }),
+      );
+      return;
+    }
+
     try {
       const watcher = fsWatch(d, (_event, filename) => {
         if (!filename) return;
 
         const path = join(d, filename);
 
-        if (!files.has(path) || isOwnWrite(path)) return;
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(() => onChange(path), debounceMs);
+        if (files.has(path) && !isOwnWrite(path)) trigger(path);
       });
 
       watcher.on("error", () => {});
-      watched.set(d, watcher);
+      watched.set(d, { watcher, ino });
     } catch {
-      // The folder is gone, nothing to watch
+      // Gone between the stat and the watch, the next set() tries again
     }
   }
 
@@ -937,18 +1019,36 @@ function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
 
       const dirs = new Set([...files].map((f) => dirname(f)));
 
-      for (const [d, watcher] of watched) {
-        if (!dirs.has(d)) {
-          closeWatcher(watcher);
-          watched.delete(d);
-        }
+      for (const d of [...watched.keys(), ...waiting.keys()]) {
+        if (!dirs.has(d)) unwatch(d);
       }
 
-      for (const d of dirs) if (!watched.has(d)) watchDir(d);
+      for (const d of dirs) {
+        if (waiting.has(d)) continue;
+
+        // Linux keeps a watcher on a deleted folder, not on one made again
+        // at the same path
+        const entry = watched.get(d);
+
+        if (entry) {
+          let ino: number | null = null;
+
+          try {
+            ino = statSync(d).ino;
+          } catch {
+            // Gone, watchDir waits for it
+          }
+
+          if (ino === entry.ino) continue;
+          unwatch(d);
+        }
+
+        watchDir(d);
+      }
     },
     close() {
       if (timer) clearTimeout(timer);
-      for (const watcher of watched.values()) closeWatcher(watcher);
+      for (const d of [...watched.keys(), ...waiting.keys()]) unwatch(d);
     },
   };
 }
@@ -961,16 +1061,20 @@ function closeWatcher(watcher: FSWatcher) {
   }
 }
 
-async function resolveTestDir(options: RunnerOptions): Promise<string> {
+async function resolveDirs(options: RunnerOptions) {
   // Same logic as runTestsCLI
   const loaded = options.configPath
     ? await loadConfigFromPath(options.configPath)
     : await loadConfig(process.cwd());
+  const configDir = loaded?.configDir ?? process.cwd();
 
-  return resolve(
-    loaded?.configDir ?? process.cwd(),
-    loaded?.config.testDir ?? options.testDir ?? "test",
-  );
+  return {
+    configDir,
+    testDir: resolve(
+      configDir,
+      loaded?.config.testDir ?? options.testDir ?? "test",
+    ),
+  };
 }
 
 function logWatching(testDir: string) {
@@ -981,9 +1085,10 @@ function logWatching(testDir: string) {
 
 export async function watchTestsCLI(options: RunnerOptions = {}) {
   // Run once immediately
+  startBundleRun();
   await runTestsCLI(options);
 
-  let testDir = await resolveTestDir(options);
+  let { testDir, configDir } = await resolveDirs(options);
 
   logWatching(testDir);
 
@@ -992,14 +1097,26 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
   // Source files and the config live outside the test dir. Watch the ones
   // the last run bundled, the test dir is already watched as a whole.
   const imports = watchFiles((filename) => rerun(filename));
-  const watchImports = () =>
+  // A build that failed doesn't say what it imports, so until it builds
+  // anything under the config's folder reruns
+  let stopFallback: (() => void) | null = null;
+
+  const watchImports = () => {
+    const { files, failed } = bundledFiles();
+
     imports.set(
-      bundledFiles().filter(
+      files.filter(
         (f) => !isSubpath(f, testDir) && !f.split(sep).includes("node_modules"),
       ),
     );
 
-  watchImports();
+    if (failed && !stopFallback) {
+      stopFallback = watchRecursive(configDir, rerun);
+    } else if (!failed && stopFallback) {
+      stopFallback();
+      stopFallback = null;
+    }
+  };
 
   const rerun = async (filename: string) => {
     if (running) return;
@@ -1019,16 +1136,19 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     let moved = false;
 
     try {
+      startBundleRun();
       // -u is for the first run only. On every save it would overwrite a
       // mismatch saved mid-edit, or drop snapshots of a test being renamed.
       await runTestsCLI({ ...options, updateSnapshots: false });
 
       // An edit to the config (or a file it imports) can move the test dir
-      const next = await resolveTestDir(options);
+      const next = await resolveDirs(options);
 
-      if (next !== testDir) {
+      configDir = next.configDir;
+
+      if (next.testDir !== testDir) {
         stop();
-        testDir = next;
+        testDir = next.testDir;
         stop = watchRecursive(testDir, rerun);
         moved = true;
       }
@@ -1051,9 +1171,12 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
   let stop = watchRecursive(testDir, rerun);
 
+  watchImports();
+
   // Keep process alive and clean up on exit
   process.on("SIGINT", () => {
     stop();
+    stopFallback?.();
     imports.close();
     process.exit(0);
   });
