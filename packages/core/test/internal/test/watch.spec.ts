@@ -195,6 +195,32 @@ it("value", () => expect(value).toBe(1));
     }
   }, 25000);
 
+  it("reruns for a change saved during a run", async () => {
+    const ws = workspace("during", {
+      "unrift.config.ts": `export default { testDir: "test" };\n`,
+      "test/slow.spec.ts": `import { it } from "@unrift/core";
+it("slow", () => new Promise((r) => setTimeout(r, 1000)));
+`,
+    });
+    const spec = join(ws.dir, "test/slow.spec.ts");
+    const w = watch(ws.dir);
+
+    try {
+      expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
+        true,
+      );
+
+      writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
+      expect(await w.waitFor(() => w.reruns() === 1)).toBe(true);
+      // The run takes a second, this lands during it
+      await sleep(300);
+      writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
+      expect(await w.waitFor(() => w.reruns() === 2)).toBe(true);
+    } finally {
+      w.kill();
+    }
+  }, 15000);
+
   it("reloads an edited config Node runs without bundling", () => {
     // Watch mode loads the config again on every run
     const ws = workspace("native-config", {
