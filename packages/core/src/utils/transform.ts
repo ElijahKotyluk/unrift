@@ -169,6 +169,10 @@ type CacheEntry = {
 
 const cache = new Map<CacheKey, CacheEntry>();
 
+// Files a failed build's errors point at. Watch mode watches them too, so
+// fixing a broken import reruns even if the bundle never built.
+const failedInputs = new Map<CacheKey, string[]>();
+
 function hashFile(path: string): string | null {
   try {
     return hashString(readFileSync(path, "utf8"));
@@ -187,6 +191,10 @@ export function bundledFiles(): string[] {
 
   for (const entry of cache.values()) {
     for (const { path } of entry.inputs) files.add(path);
+  }
+
+  for (const paths of failedInputs.values()) {
+    for (const path of paths) files.add(path);
   }
 
   return [...files];
@@ -354,6 +362,16 @@ export function toImportUrl(
     );
     writeFileSync(outFile, result.outputFiles[0].contents);
   } catch (err) {
+    const errors = (err as { errors?: Array<{ location?: { file: string } }> })
+      .errors;
+
+    failedInputs.set(key, [
+      filePath,
+      ...(errors ?? []).flatMap((e) =>
+        e.location ? [resolve(projectRoot, e.location.file)] : [],
+      ),
+    ]);
+
     const msg = err instanceof Error ? err.message : String(err);
 
     if (
@@ -371,6 +389,7 @@ export function toImportUrl(
   const outUrl = pathToFileURL(outFile).href;
 
   cache.set(key, { outUrl, inputs });
+  failedInputs.delete(key);
 
   return outUrl;
 }

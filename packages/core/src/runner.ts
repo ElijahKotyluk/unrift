@@ -961,25 +961,31 @@ function closeWatcher(watcher: FSWatcher) {
   }
 }
 
-export async function watchTestsCLI(options: RunnerOptions = {}) {
-  // Run once immediately
-  await runTestsCLI(options);
-
-  // Resolve the directory to watch (same logic as runTestsCLI)
+async function resolveTestDir(options: RunnerOptions): Promise<string> {
+  // Same logic as runTestsCLI
   const loaded = options.configPath
     ? await loadConfigFromPath(options.configPath)
     : await loadConfig(process.cwd());
 
-  const config = loaded?.config ?? null;
-  const configDir = loaded?.configDir ?? process.cwd();
-  const testDir = resolve(
-    configDir,
-    config?.testDir ?? options.testDir ?? "test",
+  return resolve(
+    loaded?.configDir ?? process.cwd(),
+    loaded?.config.testDir ?? options.testDir ?? "test",
   );
+}
 
+function logWatching(testDir: string) {
   console.log(
     `\n ${colors.dim("↺")} ${colors.dim("Watching")} ${colors.bold(shortenPath(testDir))} ${colors.dim("for changes…  Ctrl+C to quit")}\n`,
   );
+}
+
+export async function watchTestsCLI(options: RunnerOptions = {}) {
+  // Run once immediately
+  await runTestsCLI(options);
+
+  let testDir = await resolveTestDir(options);
+
+  logWatching(testDir);
 
   let running = false;
 
@@ -1010,21 +1016,40 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     // Reset exit code so each run is evaluated independently
     process.exitCode = 0;
 
+    let moved = false;
+
     try {
       // -u is for the first run only. On every save it would overwrite a
       // mismatch saved mid-edit, or drop snapshots of a test being renamed.
       await runTestsCLI({ ...options, updateSnapshots: false });
+
+      // An edit to the config (or a file it imports) can move the test dir
+      const next = await resolveTestDir(options);
+
+      if (next !== testDir) {
+        stop();
+        testDir = next;
+        stop = watchRecursive(testDir, rerun);
+        moved = true;
+      }
+    } catch (err) {
+      // A config that doesn't load, keep watching so the next save can fix it
+      console.error(err);
+      process.exitCode = 1;
     } finally {
       watchImports();
       running = false;
     }
 
-    console.log(
-      ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,
-    );
+    if (moved) logWatching(testDir);
+    else {
+      console.log(
+        ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,
+      );
+    }
   };
 
-  const stop = watchRecursive(testDir, rerun);
+  let stop = watchRecursive(testDir, rerun);
 
   // Keep process alive and clean up on exit
   process.on("SIGINT", () => {
