@@ -32,9 +32,7 @@ describe("mock.useFakeTimers - install / uninstall", () => {
   });
 
   it("operations throw a clear error when timers aren't faked", () => {
-    expect(() => mock.advanceTimersByTime(100)).toThrow(
-      "requires fake timers",
-    );
+    expect(() => mock.advanceTimersByTime(100)).toThrow("requires fake timers");
     expect(() => mock.runAllTimers()).toThrow("requires fake timers");
     expect(() => mock.getTimerCount()).toThrow("requires fake timers");
   });
@@ -328,7 +326,9 @@ describe("mock fake-timers - invalid time values", () => {
   });
 
   it("useFakeTimers rejects NaN and non-finite numbers", () => {
-    expect(() => mock.useFakeTimers({ now: NaN })).toThrow("invalid time value");
+    expect(() => mock.useFakeTimers({ now: NaN })).toThrow(
+      "invalid time value",
+    );
     expect(() => mock.useFakeTimers({ now: Infinity })).toThrow(
       "invalid time value",
     );
@@ -393,11 +393,7 @@ describe("mock - advanceTimersByTimeAsync", () => {
     // Without microtask flushing between pumps, "first-microtask" would
     // land at the end. With proper flushing it lands before the second
     // timer fires.
-    expect(order).toEqual([
-      "first-timer",
-      "first-microtask",
-      "second-timer",
-    ]);
+    expect(order).toEqual(["first-timer", "first-microtask", "second-timer"]);
   });
 
   it("respects the time window - doesn't fire timers beyond the advance", async () => {

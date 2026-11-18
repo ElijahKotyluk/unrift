@@ -1,14 +1,12 @@
 /**
- * Module mocking - main-thread registry and public API (Tier A).
+ * Module mocking.
  *
- * Tier A scope:
- *   - `mock.doMock(spec, factory)` registers a mock for an external module
- *     specifier (bare package name or `node:*` built-in).
- *   - Subsequent `await import(spec)` calls return the factory's result.
- *   - Static imports are NOT supported in Tier A; see the docs / ISSUES.md
- *     for the planned Tier B (hoisted `mock.module`) work.
+ * `mock.module(spec, factory)` replaces a module for a test file, static
+ * imports too. The transform does most of the work, see
+ * utils/moduleMockPlugin.ts. This file keeps its runtime side.
  *
- * Architecture:
+ * `mock.doMock(spec, factory)` mocks a package or built-in for later
+ * `await import(spec)` calls, through a Node module hook:
  *   - bin/unrift.mjs registers `module-loader.js` via `module.register()` and
  *     pipes a MessagePort into the loader thread.
  *   - The main-side port is stashed on `globalThis.__unriftLoaderPort` before
@@ -19,10 +17,6 @@
  *   - The loader (see module-loader.ts) drains pending messages on every
  *     resolve() and short-circuits matched specs to a synthetic module that
  *     reads back from `globalThis.__unriftMocks`.
- *
- * Future tiers will reuse the same registry shape and IPC protocol -
- * adding `register-hoisted` (Tier B) and `register-relative` (Tier C)
- * message types without breaking the existing surface.
  */
 
 import { activeRestorers, spy } from "./spy";
@@ -45,8 +39,7 @@ export const LOADER_PORT_GLOBAL_KEY = "__unriftLoaderPort";
 export const MOCK_URL_PREFIX = "unrift-mock:";
 
 /**
- * Message contract between main thread and loader thread. Stable across
- * future tiers - new message types extend this union.
+ * Message contract between main thread and loader thread.
  *
  * `registrationId` is a monotonically increasing number embedded in the
  * synthetic mock URL. It defeats Node's URL-keyed module cache so that
@@ -145,7 +138,7 @@ let nextRegistrationId = 0;
  */
 const restoreAllMockedSpecs = (): void => {
   for (const spec of [...mockedSpecs]) {
-    unmock(spec);
+    unmockExternal(spec);
   }
   activeRestorers.delete(restoreAllMockedSpecs);
 };
@@ -154,7 +147,7 @@ const restoreAllMockedSpecs = (): void => {
  * Register a mock for `spec`. Subsequent `await import(spec)` calls will
  * resolve to the factory's return value instead of the real module.
  *
- * Tier A constraints (planned to be lifted in Tier B and beyond):
+ * Limits, `mock.module` has none of them:
  *   - Only **dynamic** imports (`await import(spec)`) hit the mock; static
  *     `import { x } from "spec"` is hoisted by ESM above this call and
  *     will see the real module.
@@ -207,10 +200,33 @@ export function doMock(spec: string, factory: ModuleFactory): void {
 }
 
 /**
- * Remove a previously registered mock. Subsequent `await import(spec)`
- * calls fall through to the real module.
+ * Remove a previously registered mock. Imports of `spec` get the real module
+ * again. For a `mock.module` mock the real module may still have to load,
+ * await the result before using it.
  */
-export function unmock(spec: string): void {
+export function unmock(spec: string): Promise<void> {
+  const entry = moduleMocks().get(spec);
+
+  if (!entry) {
+    unmockExternal(spec);
+
+    return Promise.resolve();
+  }
+
+  entry.mocked = false;
+  entry.exports = undefined;
+
+  const bind = entry.bind;
+
+  if (!bind) return Promise.resolve();
+
+  return entry.loadReal().then((real) => {
+    // Mocked again while the real module loaded
+    if (!entry.mocked) bind(real);
+  });
+}
+
+function unmockExternal(spec: string): void {
   const port = getLoaderPort();
   if (port) {
     port.postMessage({ type: "unregister", spec });
@@ -218,6 +234,105 @@ export function unmock(spec: string): void {
 
   ensureMocksMap().delete(spec);
   mockedSpecs.delete(spec);
+}
+
+/** Global holding `mock.module` mocks, read by the generated modules. */
+export const MODULE_MOCKS_GLOBAL_KEY = "__unriftModuleMocks";
+
+/**
+ * One mocked module in one test file. The transform creates it before the
+ * file's imports run (see moduleMockPlugin.ts) and the module standing in
+ * for the real one sets `bind`, which points its exports at `exports` or at
+ * the real module.
+ */
+export type ModuleMockEntry = {
+  spec: string;
+  loadReal: () => Promise<Record<string, unknown>>;
+  mocked: boolean;
+  exports?: Record<string, unknown>;
+  bind?: (exports: Record<string, unknown>) => void;
+};
+
+function moduleMocks(): Map<string, ModuleMockEntry> {
+  const slots = globalThis as unknown as Record<string, unknown>;
+
+  return ((slots[MODULE_MOCKS_GLOBAL_KEY] as
+    | Map<string, ModuleMockEntry>
+    | undefined) ??= new Map()) as Map<string, ModuleMockEntry>;
+}
+
+export type ModuleFactoryWithActual = (
+  importActual: <T = Record<string, unknown>>() => Promise<T>,
+) => Record<string, unknown> | Promise<Record<string, unknown>>;
+
+/**
+ * Replace a module for the test file: every import of `spec`, in the test
+ * file and in the files it imports, gets the factory's exports.
+ *
+ * A call at the top of the file runs before the file's imports. Unrift
+ * finds the calls when it bundles the file, so `spec` has to be a string
+ * literal in a TypeScript test file. A call inside a test or hook swaps
+ * the exports from then on.
+ *
+ * The factory gets `importActual`, which loads the real module. An async
+ * factory makes the call return a promise.
+ */
+export function mockModule(
+  spec: string,
+  factory: ModuleFactoryWithActual,
+): void | Promise<void> {
+  if (typeof factory !== "function") {
+    throw new TypeError(
+      "mock.module() requires a factory function returning an exports object",
+    );
+  }
+
+  const entry = moduleMocks().get(spec);
+
+  if (!entry) {
+    throw new Error(
+      `mock.module("${spec}"): Unrift didn't find this call when it bundled the test file. ` +
+        "Call it in a TypeScript test file, with the specifier as a string literal.",
+    );
+  }
+
+  const apply = (exports: unknown) => {
+    if (exports === null || typeof exports !== "object") {
+      throw new TypeError(
+        `mock.module("${entry.spec}"): factory must return an object; got ${exports === null ? "null" : typeof exports}`,
+      );
+    }
+
+    entry.mocked = true;
+    entry.exports = exports as Record<string, unknown>;
+    entry.bind?.(entry.exports);
+  };
+
+  const explain = (err: unknown): never => {
+    if (err instanceof ReferenceError) {
+      err.message =
+        `mock.module("${entry.spec}"): ${err.message}. A call at the top of the file runs before ` +
+        "the file's imports and code, its factory can only use Unrift's exports, globals and importActual.";
+    }
+
+    throw err;
+  };
+
+  const importActual = <T>() => entry.loadReal() as Promise<T>;
+
+  let result: ReturnType<ModuleFactoryWithActual>;
+
+  try {
+    result = factory(importActual);
+  } catch (err) {
+    return explain(err);
+  }
+
+  if (result && typeof (result as Promise<unknown>).then === "function") {
+    return (result as Promise<Record<string, unknown>>).then(apply, explain);
+  }
+
+  apply(result);
 }
 
 /** Returns the current set of mocked specs. Useful for tests / debugging. */
@@ -233,7 +348,7 @@ export function listMockedSpecs(): readonly string[] {
  * Non-function exports are passed through unchanged. Tests can customize
  * individual spies with `.mockReturnValue`, `.mockImplementation`, etc.
  *
- * Subject to the same Tier A limits as `doMock` - only affects
+ * Subject to the same limits as `doMock` - only affects
  * `await import(spec)` after the call. Static imports of `spec` see the
  * real module.
  *

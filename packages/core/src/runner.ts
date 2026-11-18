@@ -771,6 +771,14 @@ function stamp(path: string): string {
   }
 }
 
+function modifiedSince(path: string, time: number): boolean {
+  try {
+    return statSync(resolve(path)).mtimeMs >= time;
+  } catch {
+    return false;
+  }
+}
+
 function noteOwnWrites(paths: string[]) {
   ownWrites.clear();
 
@@ -789,16 +797,18 @@ function isOwnWrite(path: string): boolean {
 
 function watchRecursive(
   dir: string,
-  onChange: (filename: string) => void,
+  onChange: (filename: string, path: string) => void,
   debounceMs = 150,
 ): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastFile = "";
+  let lastPath = "";
 
-  function trigger(filename: string) {
+  function trigger(filename: string, path: string) {
     lastFile = filename;
+    lastPath = path;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => onChange(lastFile), debounceMs);
+    timer = setTimeout(() => onChange(lastFile, lastPath), debounceMs);
   }
 
   // A folder deleted and made again at the same path (like __snapshots__)
@@ -868,7 +878,7 @@ function watchRecursive(
         ) {
           return;
         }
-        trigger(filename ?? d);
+        trigger(filename ?? d, filename ? join(d, filename) : d);
       });
 
       // Deleting a watched folder can emit an error on some platforms
@@ -902,7 +912,7 @@ function watchRecursive(
   // A test dir that doesn't exist yet is watched from when it's made
   const stopWaiting = waitForDir(dir, () => {
     watchDir(dir);
-    trigger(dir);
+    trigger(dir, dir);
   });
 
   watchDir(dir);
@@ -1101,6 +1111,9 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
   logWatching(testDir);
 
   let running = false;
+  let runStart = 0;
+  // A change saved during a run, run again for it after
+  let changedDuring: string | null = null;
 
   // Source files and the config live outside the test dir. Watch the ones
   // the last run bundled, the test dir is already watched as a whole.
@@ -1130,9 +1143,15 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     }
   };
 
-  const rerun = async (filename: string) => {
-    if (running) return;
+  const rerun = async (filename: string, path = filename) => {
+    if (running) {
+      // One save can be reported again after the debounce. Only a file
+      // written since the run started is a new change.
+      if (modifiedSince(path, runStart)) changedDuring = filename;
+      return;
+    }
     running = true;
+    runStart = Date.now();
 
     const shortFile = shortenPath(filename);
     console.log(
@@ -1174,7 +1193,12 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
       running = false;
     }
 
-    if (moved) logWatching(testDir);
+    if (changedDuring) {
+      const next = changedDuring;
+
+      changedDuring = null;
+      void rerun(next, next);
+    } else if (moved) logWatching(testDir);
     else {
       console.log(
         ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,

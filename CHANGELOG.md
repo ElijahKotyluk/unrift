@@ -5,6 +5,8 @@ Versions are `@unrift/core` / `unrift`.
 ## Unreleased
 
 - Watch mode reruns when a file the tests or config import changes, not only files in the test dir
+- `mock.module(spec, factory)` replaces a module for the test file, static imports and relative paths too. Calls at the top of the file run before its imports, the factory gets `importActual`
+- `mock.unmock` returns a promise, await it after `mock.module`
 
 ## 0.8.0 / 0.9.0 - 2026-11-16
 

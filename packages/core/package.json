@@ -75,6 +75,7 @@
   },
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
+    "cjs-module-lexer": "^2.3.0",
     "esbuild": "^0.27.2",
     "memfs": "^4.57.7"
   },

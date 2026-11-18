@@ -1,4 +1,4 @@
-import { buildSync } from "esbuild";
+import { build } from "esbuild";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -13,6 +13,8 @@ import {
 import os from "node:os";
 import { join, basename, extname, resolve, dirname, sep } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
+
+import { moduleMockCalls, moduleMockPlugin } from "./moduleMockPlugin";
 
 const injectedFilename = fileURLToPath(import.meta.url);
 const injectedDirname = dirname(injectedFilename);
@@ -297,11 +299,11 @@ export type TransformOptions = {
   coverage?: boolean;
 };
 
-export function toImportUrl(
+export async function toImportUrl(
   filePath: string,
   mode: Mode = "bundle-test",
   options: TransformOptions = {},
-): string {
+): Promise<string> {
   if (!isTsLike(filePath)) return pathToFileURL(filePath).href;
 
   const coverage = options.coverage ?? false;
@@ -344,7 +346,9 @@ export function toImportUrl(
   let outFile: string;
 
   try {
-    const result = buildSync({
+    const source = mode === "bundle-test" ? readFileSync(filePath, "utf8") : "";
+    const mocks = moduleMockCalls(source, filePath);
+    const result = await build({
       entryPoints: [filePath],
       // Only sets where the source map's paths are relative to, the real
       // name needs the inputs
@@ -369,6 +373,17 @@ export function toImportUrl(
       treeShaking: !coverage,
       metafile: true,
       logLevel: "silent",
+      plugins:
+        mocks.calls.length > 0
+          ? [
+              moduleMockPlugin(
+                filePath,
+                source,
+                mocks,
+                resolveInjectedGlobals(),
+              ),
+            ]
+          : [],
     });
 
     // Inputs that aren't files on disk (esbuild's own) can't change

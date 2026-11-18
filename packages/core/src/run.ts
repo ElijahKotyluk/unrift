@@ -165,7 +165,7 @@ export async function runEngine(
       try {
         forgetCommonJs(file);
 
-        const built = toImportUrl(file, "bundle-test", {
+        const built = await toImportUrl(file, "bundle-test", {
           coverage: !!coverage,
         });
         const url = freshImportUrl(built);

@@ -118,38 +118,35 @@ Unrift ships a built-in mocking suite. Drop the `jest.` prefix:
 | `jest.clearAllMocks()` | `mock.clearAll()` |
 | `jest.resetAllMocks()` | `mock.resetAll()` |
 | `jest.restoreAllMocks()` | `mock.restoreAll()` |
-| `jest.mock("path", factory)` | `mock.doMock("path", factory)` (Tier A - see below) |
+| `jest.mock("path", factory)` | `mock.module("path", factory)` |
+| `jest.requireActual("path")` | `importActual()`, passed to the `mock.module` factory |
+| `jest.doMock("path", factory)` | `mock.doMock("path", factory)`, packages and built-ins only |
 | `jest.createMockFromModule("path")` | `await mock.fromModule("path")` |
 | `jest.spyOn(obj, "prop", "get")` | `mock.spyOn(obj, "prop", "get")` |
 | `jest.spyOn(obj, "prop", "set")` | `mock.spyOn(obj, "prop", "set")` |
 
 The full mock API is documented in [Spies and Mocks](../../reference/spies-and-mocks), with dedicated pages for [Request Mocking](../../reference/request-mocking), [Timers and Dates](../../reference/timers-and-dates), and [Module Mocking](../../reference/module-mocking).
 
-### Module mocking is partial
+### Module mocking
 
-Module mocking ships in tiers. Tier A - currently shipped - handles **dynamic** imports (`await import(spec)`) of **external** specifiers only (bare package names, `node:*` built-ins). Static `import` statements and relative paths are not yet intercepted.
+`mock.module` is hoisted like `jest.mock` and works with static imports:
 
 ```diff
-- // Jest - hoisted, works with static imports
 - jest.mock("./userService", () => ({
 -   getUser: jest.fn().mockReturnValue({ id: 1 }),
 - }));
-- import { getUser } from "./userService";
-
-+ // Unrift Tier A - dynamic import only
-+ mock.doMock("node:fs", () => ({
-+   readFileSync: () => "MOCK CONTENT",
++ mock.module("./userService", () => ({
++   getUser: mock.fn().mockReturnValue({ id: 1 }),
 + }));
-+ const fs = await import("node:fs");
+  import { getUser } from "./userService";
 ```
 
-The hoisted `mock.module` API for static imports is on the roadmap (Tier B). See the [Module Mocking reference](../../reference/module-mocking) for the full list of current limits and workarounds.
+The test file has to be TypeScript, and the factory can't use the file's variables, not even ones named `mock*`. See [Module Mocking](../../reference/module-mocking) for the rest.
 
 ## Not yet supported
 
 These Jest features are planned but not yet available:
 
-- **Hoisted `jest.mock`** for static imports - `mock.doMock` covers dynamic imports today; the hoisted variant is planned (Tier B)
 - **Parallel execution** - tests run sequentially
 - **Custom reporters** - only built-in pretty and JSON output
 - **Browser/DOM environment** - Node.js only
