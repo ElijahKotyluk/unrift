@@ -194,7 +194,7 @@ describe("workers", () => {
     mkdirSync(join(dir, "test"), { recursive: true });
     writeFileSync(
       join(dir, "setup.mjs"),
-      `import { beforeAll, afterAll } from "@unrift/core";\nbeforeAll(() => { globalThis.__setup = true; });\nafterAll(() => { throw new Error("after all"); });\n`,
+      `import { beforeAll, afterAll, beforeEach, afterEach } from "@unrift/core";\nbeforeAll(() => { globalThis.__setup = true; });\nafterAll(() => { throw new Error("after all"); });\nbeforeEach(() => { globalThis.__each = (globalThis.__each ?? 0) + 1; });\nafterEach(() => { globalThis.__each = 0; });\n`,
     );
     writeFileSync(
       join(dir, "unrift.config.ts"),
@@ -204,7 +204,7 @@ describe("workers", () => {
     for (const name of ["a", "b"]) {
       writeFileSync(
         join(dir, `test/${name}.spec.ts`),
-        `import { it, expect } from "@unrift/core";\nit("${name}", () => expect((globalThis as Record<string, unknown>).__setup).toBe(true));\n`,
+        `import { it, expect } from "@unrift/core";\nit("${name}", () => expect([(globalThis as Record<string, unknown>).__setup, (globalThis as Record<string, unknown>).__each]).toEqual([true, 1]));\n`,
       );
     }
 
@@ -234,17 +234,39 @@ describe("workers", () => {
         "-e",
         `import { runEngine } from ${JSON.stringify(resolve(process.cwd(), "dist/esm/index.js"))};
 for (let i = 0; i < 2; i++) {
-  const { results } = await runEngine({ files: [${JSON.stringify(join(dir, "test/a.spec.ts"))}], matchers: [${JSON.stringify(join(dir, "setup.mjs"))}] });
+  const { results } = await runEngine({ files: [${JSON.stringify(join(dir, "test/a.spec.ts"))}], matchers: [${JSON.stringify(join(dir, "setup.mjs"))}, ${JSON.stringify(join(dir, "setup.mjs"))}] });
   console.log(results.map((r) => r.description.split("/").pop() + ": " + r.status).join(", "));
 }`,
       ],
       { encoding: "utf8", timeout: 20_000 },
     );
 
+    // Listed twice, its hooks still run once
     expect(twice.stdout.trim().split("\n")).toEqual([
       "root > [afterAll]: fail, a.spec.ts › a: pass",
       "root > [afterAll]: fail, a.spec.ts › a: pass",
     ]);
+
+    // A matchers module that defines tests is an error on every run
+    writeFileSync(
+      join(dir, "tests.mjs"),
+      `import { it } from "@unrift/core";\nit("in setup", () => {});\n`,
+    );
+
+    const tests = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { runEngine } from ${JSON.stringify(resolve(process.cwd(), "dist/esm/index.js"))};
+for (let i = 0; i < 2; i++) {
+  await runEngine({ files: [], matchers: [${JSON.stringify(join(dir, "tests.mjs"))}] }).then(() => console.log("ran"), (e) => console.log(e.message.includes("defined tests") ? "threw" : e.message));
+}`,
+      ],
+      { encoding: "utf8", timeout: 20_000 },
+    );
+
+    expect(tests.stdout.trim().split("\n")).toEqual(["threw", "threw"]);
 
     // Once per worker, and once without workers
     expect(statuses("--workers", "2")).toEqual([
@@ -280,8 +302,9 @@ for (let i = 0; i < 2; i++) {
     const dir = resolve(process.cwd(), "test/workers/.work/inline");
     const helper = join(dir, "helper.ts");
     // Each file is a list of tests: [name, value, mode]. Mode "skip" skips
-    // it, "throw" fails it after the check, "twice" checks at two spots.
-    const runWith = (files: string[][][]) => {
+    // it, "throw" fails it after the check, "twice" checks at two spots,
+    // "wait" only waits.
+    const runWith = (files: string[][][], workers = files.length) => {
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(join(dir, "test"), { recursive: true });
       writeFileSync(
@@ -295,9 +318,10 @@ for (let i = 0; i < 2; i++) {
 
       files.forEach((tests, i) => {
         const body = tests
-          .map(
-            ([name, value, mode]) =>
-              `it${mode === "skip" ? ".skip" : ""}("${name}", () => { ${mode?.includes("twice") ? "twice" : "check"}("${value}");${mode?.includes("throw") ? ' throw new Error("own");' : ""} });`,
+          .map(([name, value, mode]) =>
+            mode === "wait"
+              ? `it("${name}", () => new Promise((r) => setTimeout(r, 500)));`
+              : `it${mode === "skip" ? ".skip" : ""}("${name}", () => { ${mode?.includes("twice") ? "twice" : "check"}("${value}");${mode?.includes("throw") ? ' throw new Error("own");' : ""} });`,
           )
           .join("\n");
 
@@ -315,7 +339,7 @@ for (let i = 0; i < 2; i++) {
           join(dir, "unrift.config.ts"),
           "--json",
           "--workers",
-          String(files.length),
+          String(workers),
         ],
         { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
       );
@@ -356,6 +380,15 @@ for (let i = 0; i < 2; i++) {
       statuses: ["a: fail", "a: skipped", "b: fail", "c: fail"],
     });
     expect(readFileSync(helper, "utf8")).toContain("toMatchInlineSnapshot()");
+
+    // Two files in one worker, while b keeps the other busy: only the later
+    // test fails, like a run without workers
+    expect(
+      runWith([[["a", "one"]], [["b", "", "wait"]], [["c", "two"]]], 2),
+    ).toEqual({
+      failed: 1,
+      statuses: ["a: pass", "b: pass", "c: fail"],
+    });
 
     // A test that found another test's equal value already written fails
     // with them
@@ -415,7 +448,8 @@ for (let i = 0; i < 2; i++) {
 
     // The third matches the first again, that mustn't undo the mismatch
     const result = writeInlineSnapshots(
-      [original, `// changed\n${original}`, original].map((source) => ({
+      [original, `// changed\n${original}`, original].map((source, thread) => ({
+        thread,
         path: file,
         source,
         edits: [edit],

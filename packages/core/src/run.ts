@@ -121,10 +121,11 @@ type RootHooks = Pick<
   "beforeAllHooks" | "afterAllHooks" | "beforeEachHooks" | "afterEachHooks"
 >;
 
-// The top-level hooks each matchers module added when it was first imported.
-// Node caches the module, so a later run in this process (watch mode) gets
-// them from here: clearContext empties the root suite.
-const matcherHooks = new Map<string, RootHooks>();
+// The top-level hooks each matchers module added when it was first imported,
+// and whether it defined tests. Node caches the module, so a later run in
+// this process (watch mode) gets them from here: clearContext empties the
+// root suite.
+const matcherHooks = new Map<string, RootHooks & { tests: boolean }>();
 
 const HOOK_KINDS = [
   "beforeAllHooks",
@@ -134,23 +135,35 @@ const HOOK_KINDS = [
 ] as const;
 
 async function loadMatcherModules(specifiers?: string[]) {
-  for (const spec of specifiers ?? []) {
+  // A module listed twice is imported once, its hooks are added once
+  for (const spec of new Set(specifiers ?? [])) {
     let hooks = matcherHooks.get(spec);
 
     if (!hooks) {
       const before = HOOK_KINDS.map((kind) => rootSuite[kind].length);
+      const suites = rootSuite.suites.length;
+      const tests = rootSuite.tests.length;
 
       await import(spec);
 
-      hooks = Object.fromEntries(
-        HOOK_KINDS.map((kind, i) => [kind, rootSuite[kind].slice(before[i])]),
-      ) as RootHooks;
+      hooks = {
+        ...(Object.fromEntries(
+          HOOK_KINDS.map((kind, i) => [kind, rootSuite[kind].slice(before[i])]),
+        ) as RootHooks),
+        tests:
+          rootSuite.suites.length > suites || rootSuite.tests.length > tests,
+      };
       matcherHooks.set(spec, hooks);
-
-      continue;
+    } else {
+      for (const kind of HOOK_KINDS) rootSuite[kind].push(...hooks[kind]);
     }
 
-    for (const kind of HOOK_KINDS) rootSuite[kind].push(...hooks[kind]);
+    // They'd belong to no file, and a worker would run them once each
+    if (hooks.tests) {
+      throw new Error(
+        `Unrift: matchers module ${spec} defined tests. It can add matchers and hooks, put tests in a test file.`,
+      );
+    }
   }
 }
 
@@ -243,13 +256,6 @@ export async function startRun(
 
   await loadMatcherModules(options.matchers);
 
-  // They'd belong to no file, and a worker would run them once each
-  if (rootSuite.tests.length > 0 || rootSuite.suites.length > 0) {
-    throw new Error(
-      "Unrift: a matchers module defined tests. It can add matchers and hooks, put tests in a test file.",
-    );
-  }
-
   // Hooks a matchers module adds at the top level are the run's own. Its
   // beforeEach and afterEach reach each test through the parent chain, its
   // beforeAll and afterAll run here, once per thread.
@@ -338,10 +344,10 @@ export async function startRun(
 
   /**
    * Writes the snapshot files of the files run since the last take, and
-   * takes their coverage and inline edits. A worker takes after each file,
-   * so a crash later on doesn't lose them.
+   * takes their inline edits. A worker takes after each file, so a crash
+   * later on doesn't lose them. Coverage is taken once, in finish.
    */
-  async function take(): Promise<RunPart> {
+  function take(): RunPart {
     const suites = rootSuite.suites.slice(taken);
 
     taken = rootSuite.suites.length;
@@ -359,21 +365,13 @@ export async function startRun(
           keep: unpassedTestNames(suite),
         })),
     );
-
-    // Packages are never reported, leave them out
-    const scripts = coverage
-      ? (await takeCoverage()).filter(
-          (script) =>
-            bundles.has(script.url) ||
-            (script.url.startsWith("file:") &&
-              !script.url.includes("/node_modules/")),
-        )
-      : [];
     const newBundles = [...bundles].filter((url) => !bundlesTaken.has(url));
 
     for (const url of newBundles) bundlesTaken.add(url);
 
-    return { snapshots, inline, emptied, scripts, bundles: newBundles };
+    // Synchronous: nothing a test left, like a timer, can run between
+    // writing the snapshot files and the worker sending what it wrote
+    return { snapshots, inline, emptied, scripts: [], bundles: newBundles };
   }
 
   /** Runs the top level's afterAll and takes what's left. */
@@ -397,7 +395,17 @@ export async function startRun(
         results: rootSuite.getResults().slice(0, rootErrorCount()),
         hasOnly: false,
       },
-      ...(await take()),
+      ...take(),
+      // Once at the end, a take per file adds up over many files. Packages
+      // are never reported, leave them out.
+      scripts: coverage
+        ? (await takeCoverage()).filter(
+            (script) =>
+              bundles.has(script.url) ||
+              (script.url.startsWith("file:") &&
+                !script.url.includes("/node_modules/")),
+          )
+        : [],
     };
   }
 

@@ -1,4 +1,5 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { threadId } from "node:worker_threads";
 import { SourceMap } from "node:module";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -435,24 +436,27 @@ function skipSpace(source: string, i: number): number {
 
 /** A source file's committed edits, as one thread saw them. */
 export type InlineSource = {
+  /** The thread that saw them. A later take from it has all of an earlier one's. */
+  thread: number;
   path: string;
   source: string;
   edits: InlineEdit[];
   missed: boolean;
 };
 
-/** This thread's committed edits. Workers send them to the main thread. */
+/**
+ * This thread's committed edits so far. Workers send them to the main thread
+ * after each file. They're kept, so the next file's tests still check against
+ * them, the way they do without workers.
+ */
 export function takeInlineEdits(): InlineSource[] {
-  const taken = [...sources].map(([path, file]) => ({
+  return [...sources].map(([path, file]) => ({
+    thread: threadId,
     path,
     source: file.source,
     edits: [...file.edits.values()],
     missed: file.missed,
   }));
-
-  sources.clear();
-
-  return taken;
 }
 
 /**
@@ -487,7 +491,13 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
     }
   >();
 
-  for (const thread of taken) {
+  // Only each thread's latest take of a file, it includes the earlier ones
+  const latest = new Map<string, InlineSource>();
+
+  for (const thread of taken)
+    latest.set(`${thread.thread}\0${thread.path}`, thread);
+
+  for (const thread of latest.values()) {
     let file = merged.get(thread.path);
 
     if (!file) {

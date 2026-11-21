@@ -81,7 +81,7 @@ port.on("message", (message: ToWorker) => {
 
       const result = await run.runFile(message.file);
       // Its snapshots and coverage go with it, a crash later can't lose them
-      const part = await run.take();
+      const part = run.take();
 
       // Until the next file starts, output still goes to this one
       post({
