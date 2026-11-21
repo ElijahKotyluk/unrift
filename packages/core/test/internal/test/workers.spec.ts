@@ -74,7 +74,7 @@ describe("workers", () => {
             status: string;
             error?: { message: string };
           }) =>
-            `${r.description.split("/").pop()}: ${r.status}${r.error ? ` (${r.error.message})` : ""}`,
+            `${r.description.split("/").pop()}: ${r.status}${r.error ? ` (${r.error.message.replace(/\/\S*\//g, "")})` : ""}`,
         ),
       };
     };
@@ -82,17 +82,99 @@ describe("workers", () => {
     // process.exit() while a test runs. One matching file still gets a worker.
     const exit = errors(["--workers", "2", "exit"]);
 
-    expect(exit.results.join("\n")).toContain(
-      "exit.spec.ts > [worker]: fail (Unrift worker stopped with exit code 3 while running",
-    );
+    expect(exit.results).toEqual([
+      "exit.spec.ts > [worker]: fail (Unrift worker stopped with exit code 3\n\nThe worker stopped while running exit.spec.ts.)",
+    ]);
     expect(exit.out).toContain("log: before exit");
 
     // An error thrown from a timer after the test passed
     expect(errors(["--workers", "2", "crash|order-b"]).results).toEqual([
       "crash.spec.ts › leaks: pass",
-      "crash.spec.ts > [worker]: fail (leaked boom)",
+      "crash.spec.ts > [worker]: fail (leaked boom\n\nThe worker stopped after running crash.spec.ts.)",
       "order-b.spec.ts › b: pass",
     ]);
+  });
+
+  it("keeps what a worker sent before it crashed, and runs every file", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/crash");
+    const runWith = (specs: Record<string, string>) => {
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(join(dir, "test"), { recursive: true });
+      writeFileSync(
+        join(dir, "unrift.config.ts"),
+        `export default { testDir: "test" };\n`,
+      );
+
+      for (const [name, body] of Object.entries(specs)) {
+        writeFileSync(
+          join(dir, `test/${name}.spec.ts`),
+          `import { it, expect, afterAll } from "@unrift/core";\nconst wait = (ms: number) => new Promise((r) => setTimeout(r, ms));\nvoid expect; void afterAll; void wait;\n${body}\n`,
+        );
+      }
+
+      const res = spawnSync(
+        process.execPath,
+        [
+          resolve(process.cwd(), "bin/unrift.mjs"),
+          "--config",
+          join(dir, "unrift.config.ts"),
+          "--json",
+          "--workers",
+          "2",
+        ],
+        { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
+      );
+
+      return JSON.parse(res.stdout).results.map(
+        (r: {
+          description: string;
+          status: string;
+          error?: { message: string };
+        }) =>
+          `${r.description.split("/").pop()}: ${r.status}${r.error ? ` (${r.error.message.replace(/\/\S*\//g, "")})` : ""}`,
+      );
+    };
+
+    // The error comes before a's results reach the main thread, c still runs
+    expect(
+      runWith({
+        a: `it("a", () => {});\nafterAll(() => queueMicrotask(() => { throw new Error("boom"); }));`,
+        b: `it("b", () => wait(200));`,
+        c: `it("c", () => wait(200));`,
+      }),
+    ).toEqual([
+      "a.spec.ts › a: pass",
+      "a.spec.ts > [worker]: fail (boom\n\nThe worker stopped after running a.spec.ts.)",
+      "b.spec.ts › b: pass",
+      "c.spec.ts › c: pass",
+    ]);
+
+    // A timer a left throws while the same worker runs c, c says so
+    expect(
+      runWith({
+        a: `it("a", () => { setTimeout(() => { throw new Error("from a"); }, 100); });`,
+        b: `it("b", () => wait(1000));`,
+        c: `it("c", () => wait(300));`,
+      }),
+    ).toEqual([
+      "a.spec.ts › a: pass",
+      "b.spec.ts › b: pass",
+      "c.spec.ts > [worker]: fail (from a\n\nThe worker stopped while running c.spec.ts. It can come from a.spec.ts, which ran before it in the same worker.)",
+    ]);
+
+    // a's snapshots are written though its worker dies in c
+    runWith({
+      a: `it("a", () => { expect(1).toMatchSnapshot(); expect(2).toMatchInlineSnapshot(); });`,
+      b: `it("b", () => wait(300));`,
+      c: `it("c", () => process.exit(3));`,
+    });
+
+    expect(
+      readFileSync(join(dir, "test/__snapshots__/a.spec.ts.snap"), "utf8"),
+    ).toContain("1");
+    expect(readFileSync(join(dir, "test/a.spec.ts"), "utf8")).toContain(
+      "toMatchInlineSnapshot(`2`)",
+    );
   });
 
   it("keeps output written after a file's tests with that file", () => {
@@ -143,6 +225,26 @@ describe("workers", () => {
         (r: { description: string; status: string }) =>
           `${r.description.split("/").pop()}: ${r.status}`,
       );
+
+    // Again on a second run in the same process, like watch mode
+    const twice = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { runEngine } from ${JSON.stringify(resolve(process.cwd(), "dist/esm/index.js"))};
+for (let i = 0; i < 2; i++) {
+  const { results } = await runEngine({ files: [${JSON.stringify(join(dir, "test/a.spec.ts"))}], matchers: [${JSON.stringify(join(dir, "setup.mjs"))}] });
+  console.log(results.map((r) => r.description.split("/").pop() + ": " + r.status).join(", "));
+}`,
+      ],
+      { encoding: "utf8", timeout: 20_000 },
+    );
+
+    expect(twice.stdout.trim().split("\n")).toEqual([
+      "root > [afterAll]: fail, a.spec.ts › a: pass",
+      "root > [afterAll]: fail, a.spec.ts › a: pass",
+    ]);
 
     // Once per worker, and once without workers
     expect(statuses("--workers", "2")).toEqual([

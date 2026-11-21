@@ -7,7 +7,7 @@
 
 import { Worker } from "node:worker_threads";
 
-import type { EngineOptions, FileRun, RunEnd } from "./run";
+import type { EngineOptions, FileRun, RunEnd, RunPart } from "./run";
 import type { SnapshotSummary } from "./snapshot/state";
 import type { TestResult } from "./suite";
 import { TaskStatus } from "./types";
@@ -31,8 +31,9 @@ export type ToWorker =
 /** Worker to main thread. */
 export type FromWorker =
   | { type: "ready" }
+  | { type: "started"; index: number }
   | ({ type: "output"; index: number } & Output)
-  | { type: "file"; index: number; run: CopiedFileRun }
+  | { type: "file"; index: number; run: CopiedFileRun; part: RunPart }
   | {
       type: "end";
       end: Omit<RunEnd, "root"> & { root: CopiedFileRun };
@@ -96,27 +97,39 @@ function mergeSnapshots(summaries: SnapshotSummary[]): SnapshotSummary {
 /** One worker, and where it is in the files. */
 type Slot = {
   worker: Worker;
-  /** The file it's running. */
-  running: number | null;
-  /** The file it ran last, late output and errors belong to it. */
+  /** The file sent to it, until its results are back. */
+  sent: number | null;
+  /** The file it said it started, until its results are back. */
+  started: number | null;
+  /** The file it finished last, late output and errors belong to it. */
   last: number | null;
   ended: boolean;
-  crashed: boolean;
+  /** An error it threw, handled once it has exited and sent everything. */
+  error?: Error;
 };
+
+/** The error's stack frames, without its message. */
+function frames(error: Error): string {
+  return (error.stack ?? "")
+    .split("\n")
+    .filter((line) => /^\s+at /.test(line))
+    .join("\n");
+}
 
 export async function runInWorkers(
   options: EngineOptions,
   count: number,
 ): Promise<{ files: FileRun[]; end: RunEnd }> {
-  const files: Array<FileRun | undefined> = new Array(options.files.length);
-  const outputs: Output[][] = options.files.map(() => []);
+  const total = options.files.length;
+  const files: Array<FileRun | undefined> = Array.from({ length: total });
+  const outputs: Output[][] = Array.from({ length: total }, () => []);
   let printed = 0;
 
   // Each file's output once it and every file before it are done, so it
   // reads like a run without workers. Output for a file already printed,
   // written after its tests, goes out right away.
   const print = () => {
-    while (printed < outputs.length && files[printed]) {
+    while (printed < total && files[printed]) {
       for (const { stream, bytes } of outputs[printed]) {
         process[stream].write(bytes);
       }
@@ -125,13 +138,20 @@ export async function runInWorkers(
       printed++;
     }
   };
-  const ends: Array<Omit<RunEnd, "root"> & { root: FileRun }> = [];
+  const parts: RunPart[] = [];
+  const roots: FileRun[] = [];
   const slots: Slot[] = [];
+  // Files sent to a worker that died before starting them, they go first
+  const requeued: number[] = [];
   let next = 0;
   let crashed = false;
   // Set by the worker that bails, read by every worker before each test. A
   // message would wait until a worker running synchronous tests yields.
   const bailed = new Int32Array(new SharedArrayBuffer(4));
+
+  const nextFile = () =>
+    requeued.length > 0 ? requeued.shift()! : next < total ? next++ : null;
+  const more = () => requeued.length > 0 || next < total;
 
   try {
     await new Promise<void>((resolveRun, rejectRun) => {
@@ -148,44 +168,53 @@ export async function runInWorkers(
       };
 
       const dispatch = (slot: Slot) => {
-        if (next < options.files.length) {
-          slot.running = next;
-          slot.worker.postMessage({
-            type: "file",
-            index: next,
-            file: options.files[next],
-          } satisfies ToWorker);
-          next++;
-        } else {
+        const index = nextFile();
+
+        if (index === null) {
           slot.worker.postMessage({ type: "finish" } satisfies ToWorker);
+          return;
         }
+
+        slot.sent = index;
+        slot.worker.postMessage({
+          type: "file",
+          index,
+          file: options.files[index],
+        } satisfies ToWorker);
       };
 
-      // The file it was running fails, or the last one it ran: an error
-      // thrown from a timer can come after the file's tests
-      const fail = (slot: Slot, error: Error) => {
-        const index = slot.running ?? slot.last;
+      // A failed `[worker]` result on the file it was running, or else on
+      // the one it finished last: an error thrown from a timer can come after
+      // a file's tests
+      const fail = (slot: Slot, index: number, error: Error) => {
+        const running = slot.started === index && !files[index];
+        const name = options.files[index];
+        const before = running && slot.last !== null ? slot.last : null;
+        const message =
+          `${error.message}\n\nThe worker stopped ${running ? "while running" : "after running"} ${name}.` +
+          (before === null
+            ? ""
+            : ` It can come from ${options.files[before]}, which ran before it in the same worker.`);
+        const reported = new Error(message);
 
-        if (index === null) return false;
+        reported.stack = `Error: ${message}\n${frames(error)}`;
 
-        const file = normalizePath(options.files[index]);
         const result: TestResult = {
-          description: `${file} > [worker]`,
+          description: `${normalizePath(name)} > [worker]`,
           status: TaskStatus.Fail,
-          error,
+          error: reported,
           durationMs: 0,
         };
-        const done = slot.running === null ? files[index] : undefined;
+        const done = files[index];
+
+        files[index] = done
+          ? { ...done, results: [...done.results, result] }
+          : { file: normalizePath(name), results: [result], hasOnly: false };
 
         // A failed file, like any other under --bail
         if (options.bail) Atomics.store(bailed, 0, 1);
 
-        files[index] = done
-          ? { ...done, results: [...done.results, result] }
-          : { file, results: [result], hasOnly: false };
         print();
-
-        return true;
       };
 
       const start = () => {
@@ -193,10 +222,10 @@ export async function runInWorkers(
           worker: new Worker(new URL("./worker.js", import.meta.url), {
             workerData: { options, bailed },
           }),
-          running: null,
+          sent: null,
+          started: null,
           last: null,
           ended: false,
-          crashed: false,
         };
 
         slots.push(slot);
@@ -214,19 +243,24 @@ export async function runInWorkers(
             case "ready":
               dispatch(slot);
               break;
+            case "started":
+              slot.started = message.index;
+              break;
             case "file":
               files[message.index] = restoreFileRun(message.run);
-              slot.running = null;
+              parts.push(message.part);
+              slot.sent = null;
+              slot.started = null;
               slot.last = message.index;
               print();
-              dispatch(slot);
+
+              // It already threw, it's stopping
+              if (!slot.error) dispatch(slot);
               break;
             case "end":
               slot.ended = true;
-              ends.push({
-                ...message.end,
-                root: restoreFileRun(message.end.root),
-              });
+              parts.push(message.end);
+              roots.push(restoreFileRun(message.end.root));
               addBundledFiles(message.bundled);
 
               if (--alive === 0) resolve();
@@ -234,40 +268,48 @@ export async function runInWorkers(
           }
         });
 
-        // An error a test threw from a timer, the thread stops after it
+        // An error a test threw from a timer. The thread stops after it, and
+        // its last messages may still be on the way: handled on exit.
         slot.worker.on("error", (error) => {
-          if (slot.crashed || settled) return;
+          slot.error ??= error;
+        });
 
-          slot.crashed = true;
+        // After every message it sent
+        slot.worker.on("exit", (code) => {
+          if (settled) return;
+
+          if (slot.ended) {
+            // Thrown after its last file, while other workers still run
+            if (slot.error && slot.last !== null) {
+              fail(slot, slot.last, slot.error);
+            }
+            return;
+          }
+
+          crashed = true;
+
+          const error =
+            slot.error ??
+            new Error(`Unrift worker stopped with exit code ${code}`);
+
+          // Sent but never started, another worker runs it
+          if (slot.sent !== null && slot.started !== slot.sent) {
+            requeued.unshift(slot.sent);
+          }
+
+          const at = slot.started ?? slot.last;
 
           // Before its first file: the run itself can't start, like a
           // matchers module that throws
-          if (!fail(slot, error)) reject(error);
-        });
-
-        slot.worker.on("exit", (code) => {
-          if (slot.ended || settled) return;
-
-          if (!slot.crashed) {
-            slot.crashed = true;
-
-            const at = slot.running ?? slot.last;
-            const error = new Error(
-              `Unrift worker stopped with exit code ${code}` +
-                (at === null ? "" : ` while running ${options.files[at]}`),
-            );
-
-            if (!fail(slot, error)) {
-              reject(error);
-              return;
-            }
+          if (at === null) {
+            reject(error);
+            return;
           }
 
-          // Its files are done or failed, a new worker takes the rest
-          crashed = true;
+          fail(slot, at, error);
           alive--;
 
-          if (next < options.files.length) start();
+          if (more()) start();
           else if (alive === 0) resolve();
         });
       };
@@ -277,9 +319,7 @@ export async function runInWorkers(
   } finally {
     // A worker that died never sent what it bundled. Watch mode watches
     // more broadly until a run gets through.
-    if (crashed || slots.some((slot) => slot.crashed)) {
-      addBundledFiles({ files: [], failed: true });
-    }
+    if (crashed) addBundledFiles({ files: [], failed: true });
 
     // Whatever the files wrote helps find out why a run failed
     for (const written of outputs.slice(printed)) {
@@ -302,14 +342,14 @@ export async function runInWorkers(
     end: {
       root: {
         file: "root",
-        results: ends.flatMap((end) => end.root.results),
+        results: roots.flatMap((root) => root.results),
         hasOnly: false,
       },
-      snapshots: mergeSnapshots(ends.map((end) => end.snapshots)),
-      inline: ends.flatMap((end) => end.inline),
-      emptied: ends.flatMap((end) => end.emptied),
-      scripts: ends.flatMap((end) => end.scripts),
-      bundles: ends.flatMap((end) => end.bundles),
+      snapshots: mergeSnapshots(parts.map((part) => part.snapshots)),
+      inline: parts.flatMap((part) => part.inline),
+      emptied: parts.flatMap((part) => part.emptied),
+      scripts: parts.flatMap((part) => part.scripts),
+      bundles: parts.flatMap((part) => part.bundles),
     },
   };
 }

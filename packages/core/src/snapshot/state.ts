@@ -380,6 +380,8 @@ export function finishSnapshots(
   files.clear();
 
   summary.failed += inlineFailed;
+  // A worker finishes its files one at a time, each counted once
+  inlineFailed = 0;
 
   return { summary, inline: takeInlineEdits(), emptied };
 }

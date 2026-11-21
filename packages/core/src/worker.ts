@@ -77,11 +77,19 @@ port.on("message", (message: ToWorker) => {
   queue = queue.then(async () => {
     if (message.type === "file") {
       current = message.index;
+      post({ type: "started", index: message.index });
 
       const result = await run.runFile(message.file);
+      // Its snapshots and coverage go with it, a crash later can't lose them
+      const part = await run.take();
 
       // Until the next file starts, output still goes to this one
-      post({ type: "file", index: message.index, run: copyFileRun(result) });
+      post({
+        type: "file",
+        index: message.index,
+        run: copyFileRun(result),
+        part,
+      });
     } else {
       const end = await run.finish();
 

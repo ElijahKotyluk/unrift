@@ -116,9 +116,41 @@ function unpassedTestNames(suite: Suite, names: string[] = []): string[] {
   return names;
 }
 
+type RootHooks = Pick<
+  Suite,
+  "beforeAllHooks" | "afterAllHooks" | "beforeEachHooks" | "afterEachHooks"
+>;
+
+// The top-level hooks each matchers module added when it was first imported.
+// Node caches the module, so a later run in this process (watch mode) gets
+// them from here: clearContext empties the root suite.
+const matcherHooks = new Map<string, RootHooks>();
+
+const HOOK_KINDS = [
+  "beforeAllHooks",
+  "afterAllHooks",
+  "beforeEachHooks",
+  "afterEachHooks",
+] as const;
+
 async function loadMatcherModules(specifiers?: string[]) {
   for (const spec of specifiers ?? []) {
-    await import(spec);
+    let hooks = matcherHooks.get(spec);
+
+    if (!hooks) {
+      const before = HOOK_KINDS.map((kind) => rootSuite[kind].length);
+
+      await import(spec);
+
+      hooks = Object.fromEntries(
+        HOOK_KINDS.map((kind, i) => [kind, rootSuite[kind].slice(before[i])]),
+      ) as RootHooks;
+      matcherHooks.set(spec, hooks);
+
+      continue;
+    }
+
+    for (const kind of HOOK_KINDS) rootSuite[kind].push(...hooks[kind]);
   }
 }
 
@@ -132,9 +164,8 @@ export type FileRun = {
   hasOnly: boolean;
 };
 
-export type RunEnd = {
-  /** Results for the top level's beforeAll and afterAll, if they failed. */
-  root: FileRun;
+/** What a run's finished files leave besides their results. */
+export type RunPart = {
   snapshots: SnapshotSummary;
   /** Inline snapshot edits, not written yet. */
   inline: InlineSource[];
@@ -144,6 +175,11 @@ export type RunEnd = {
   scripts: V8ScriptCoverage[];
   /** URLs of the test bundles, for coverage. */
   bundles: string[];
+};
+
+export type RunEnd = RunPart & {
+  /** Results for the top level's beforeAll and afterAll, if they failed. */
+  root: FileRun;
 };
 
 function snapshotMode(options: EngineOptions): SnapshotUpdateMode {
@@ -206,6 +242,13 @@ export async function startRun(
   const bundles = new Set<string>();
 
   await loadMatcherModules(options.matchers);
+
+  // They'd belong to no file, and a worker would run them once each
+  if (rootSuite.tests.length > 0 || rootSuite.suites.length > 0) {
+    throw new Error(
+      "Unrift: a matchers module defined tests. It can add matchers and hooks, put tests in a test file.",
+    );
+  }
 
   // Hooks a matchers module adds at the top level are the run's own. Its
   // beforeEach and afterEach reach each test through the parent chain, its
@@ -289,18 +332,19 @@ export async function startRun(
    * Writes the run's snapshot files and takes its coverage. Inline snapshots
    * are written by runEngine, once every thread's edits are in.
    */
-  async function finish(): Promise<RunEnd> {
-    if (!rootSuite.beforeAllError) {
-      try {
-        unriftGlobalContext.state = RunState.Run;
+  // How many of rootSuite.suites `take` has handled, and the bundles it sent
+  let taken = 0;
+  const bundlesTaken = new Set<string>();
 
-        for (const hook of rootSuite.afterAllHooks) await hook();
-      } catch (err) {
-        rootSuite.afterAllError = toError(err);
-      } finally {
-        unriftGlobalContext.state = RunState.Idle;
-      }
-    }
+  /**
+   * Writes the snapshot files of the files run since the last take, and
+   * takes their coverage and inline edits. A worker takes after each file,
+   * so a crash later on doesn't lose them.
+   */
+  async function take(): Promise<RunPart> {
+    const suites = rootSuite.suites.slice(taken);
+
+    taken = rootSuite.suites.length;
 
     // A file that failed to import never ran, leave its snapshots alone
     const {
@@ -308,7 +352,7 @@ export async function startRun(
       inline,
       emptied,
     } = finishSnapshots(
-      rootSuite.suites
+      suites
         .filter((suite) => !suite.errors.some((e) => e.label === "import"))
         .map((suite) => ({
           file: suite.description,
@@ -325,6 +369,26 @@ export async function startRun(
               !script.url.includes("/node_modules/")),
         )
       : [];
+    const newBundles = [...bundles].filter((url) => !bundlesTaken.has(url));
+
+    for (const url of newBundles) bundlesTaken.add(url);
+
+    return { snapshots, inline, emptied, scripts, bundles: newBundles };
+  }
+
+  /** Runs the top level's afterAll and takes what's left. */
+  async function finish(): Promise<RunEnd> {
+    if (!rootSuite.beforeAllError) {
+      try {
+        unriftGlobalContext.state = RunState.Run;
+
+        for (const hook of rootSuite.afterAllHooks) await hook();
+      } catch (err) {
+        rootSuite.afterAllError = toError(err);
+      } finally {
+        unriftGlobalContext.state = RunState.Idle;
+      }
+    }
 
     return {
       // The top level's own errors, a failed beforeAll or afterAll
@@ -333,15 +397,11 @@ export async function startRun(
         results: rootSuite.getResults().slice(0, rootErrorCount()),
         hasOnly: false,
       },
-      snapshots,
-      inline,
-      emptied,
-      scripts,
-      bundles: [...bundles],
+      ...(await take()),
     };
   }
 
-  return { runFile, finish };
+  return { runFile, take, finish };
 }
 
 /** How many of the root suite's results are its own, before its files'. */
