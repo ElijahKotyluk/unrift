@@ -43,7 +43,7 @@
     "test:bail": "node bin/unrift.mjs --config ./test/bail/unrift.outer.config.ts",
     "test:fail": "node bin/unrift.mjs --config ./test/fail/unrift.outer.config.ts",
     "test:hooks": "node bin/unrift.mjs --config ./test/hooks/unrift.outer.config.ts",
-    "test:internal": "node bin/unrift.mjs --config ./test/internal/unrift.config.ts",
+    "test:internal": "node bin/unrift.mjs --config ./test/internal/unrift.config.ts --workers 3",
     "test:only": "node bin/unrift.mjs --config ./test/only/unrift.outer.config.ts",
     "test:todo": "node bin/unrift.mjs --config ./test/todo/unrift.outer.config.ts",
     "test:publish": "pnpm clean && pnpm build && pnpm pack --pack-destination ./dist-pack",
