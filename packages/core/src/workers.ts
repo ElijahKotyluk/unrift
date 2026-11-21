@@ -12,6 +12,9 @@ import type { SnapshotSummary } from "./snapshot/state";
 import type { TestResult } from "./suite";
 import { addBundledFiles } from "./utils/transform";
 
+/** A write to stdout or stderr while a file ran. */
+export type Output = { stream: "stdout" | "stderr"; text: string };
+
 type CopiedError = { name: string; message: string; stack?: string };
 
 type CopiedFileRun = Omit<FileRun, "results"> & {
@@ -27,7 +30,7 @@ export type ToWorker =
 /** Worker to main thread. */
 export type FromWorker =
   | { type: "ready" }
-  | { type: "file"; index: number; run: CopiedFileRun }
+  | { type: "file"; index: number; run: CopiedFileRun; output: Output[] }
   | { type: "bail" }
   | {
       type: "end";
@@ -88,6 +91,21 @@ export async function runInWorkers(
   count: number,
 ): Promise<{ files: FileRun[]; end: RunEnd }> {
   const files: FileRun[] = new Array(options.files.length);
+  const outputs: Array<Output[] | undefined> = new Array(options.files.length);
+  let printed = 0;
+
+  // Each file's output once every file before it has printed, so it reads
+  // like a run without workers
+  const print = () => {
+    while (printed < outputs.length && outputs[printed]) {
+      for (const { stream, text } of outputs[printed]!) {
+        process[stream].write(text);
+      }
+
+      outputs[printed] = [];
+      printed++;
+    }
+  };
   const ends: Array<{ end: RunEnd }> = [];
   const workers: Worker[] = [];
   let next = 0;
@@ -128,6 +146,8 @@ export async function runInWorkers(
               break;
             case "file":
               files[message.index] = restoreFileRun(message.run);
+              outputs[message.index] = message.output;
+              print();
               dispatch(worker);
               break;
             case "bail":
@@ -160,6 +180,11 @@ export async function runInWorkers(
       }
     });
   } finally {
+    // After a crash, whatever the files wrote helps find out why
+    for (const written of outputs.slice(printed)) {
+      for (const { stream, text } of written ?? []) process[stream].write(text);
+    }
+
     // A test can leave a timer or socket open, that mustn't keep the run going
     await Promise.all(workers.map((worker) => worker.terminate()));
   }

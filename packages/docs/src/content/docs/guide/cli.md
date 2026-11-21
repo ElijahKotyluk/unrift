@@ -84,6 +84,8 @@ Files imported only by `.js` test files or a `.js` config aren't watched, Node l
 
 `--workers <n>` runs test files in `n` worker threads at once. Each worker takes the next file when it's done with one, and the results are reported in file order like a run without workers.
 
+What a file writes to stdout and stderr is held until the file is done, then printed in file order. Output from two files never mixes, but it shows up once the file finishes, not as it's written.
+
 A worker has its own modules, globals, mocks and copy of `process.env`, files in different workers don't share them. Files in the same worker run one after another, like they do without workers.
 
 Things that work differently in a worker:
@@ -91,7 +93,6 @@ Things that work differently in a worker:
 - `process.chdir()` throws, the working directory is the process's
 - `process.exit()` in a test stops its worker, and the run fails
 - Files on disk are shared, two files writing the same path can collide
-- `console.log` from tests in different workers can interleave
 
 `--bail` stops the other workers too. Tests they already started finish, the rest are skipped.
 

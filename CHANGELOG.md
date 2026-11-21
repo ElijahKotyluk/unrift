@@ -5,6 +5,7 @@ Versions are `@unrift/core` / `unrift`.
 ## Unreleased
 
 - `--workers <n>` and the `workers` option run test files in worker threads. Each worker takes the next file when it's done, results are reported in file order. `--bail` stops the other workers too
+- With workers, each file's stdout and stderr is printed once the file is done, in file order, so output from two files never mixes
 - Breaking: `.only` skips the other tests in its own file, not other files, like Jest and Vitest
 - A file's tests run right after it loads, before the next file is imported
 - Bundles are written to a temp file and renamed, so a run never imports a half-written one

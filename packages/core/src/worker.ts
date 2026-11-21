@@ -8,7 +8,12 @@ import { parentPort, workerData } from "node:worker_threads";
 import { registerModuleLoader } from "./mock/register-loader";
 import { startRun, type EngineOptions } from "./run";
 import { bundledFiles } from "./utils/transform";
-import { copyFileRun, type FromWorker, type ToWorker } from "./workers";
+import {
+  copyFileRun,
+  type FromWorker,
+  type Output,
+  type ToWorker,
+} from "./workers";
 
 // Hooks added in the main thread don't reach this one
 registerModuleLoader();
@@ -33,6 +38,32 @@ const run = await startRun(
   state,
 );
 
+// What a file writes is kept and sent with its results, the main thread
+// prints it in file order. Writes outside a file go out as they happen.
+let output: Output[] | null = null;
+
+for (const stream of ["stdout", "stderr"] as const) {
+  const target = process[stream];
+  const write = target.write.bind(target);
+
+  target.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+    if (!output)
+      return (write as (...args: unknown[]) => boolean)(chunk, ...rest);
+
+    output.push({
+      stream,
+      text: typeof chunk === "string" ? chunk : Buffer.from(chunk).toString(),
+    });
+
+    // The callback, if any, comes last
+    const done = rest.find((arg) => typeof arg === "function");
+
+    if (done) queueMicrotask(done as () => void);
+
+    return true;
+  }) as typeof target.write;
+}
+
 // One file at a time, in the order they came
 let queue = Promise.resolve();
 
@@ -46,9 +77,20 @@ port.on("message", (message: ToWorker) => {
 
   queue = queue.then(async () => {
     if (message.type === "file") {
+      const written: Output[] = [];
+
+      output = written;
+
       const result = await run.runFile(message.file);
 
-      post({ type: "file", index: message.index, run: copyFileRun(result) });
+      output = null;
+
+      post({
+        type: "file",
+        index: message.index,
+        run: copyFileRun(result),
+        output: written,
+      });
     } else {
       post({ type: "end", end: await run.finish(), bundled: bundledFiles() });
     }

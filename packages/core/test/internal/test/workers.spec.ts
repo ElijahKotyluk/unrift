@@ -4,19 +4,22 @@ import { resolve } from "node:path";
 
 type Result = { description: string; status: string };
 
-function run(...args: string[]) {
-  const res = spawnSync(
+function spawnRun(args: string[]) {
+  return spawnSync(
     process.execPath,
     [
       resolve(process.cwd(), "bin/unrift.mjs"),
       "--config",
       resolve(process.cwd(), "test/workers/unrift.config.ts"),
-      "--json",
       ...args,
     ],
     // A worker that exits without the run noticing would hang it
     { encoding: "utf8", timeout: 20_000 },
   );
+}
+
+function run(...args: string[]) {
+  const res = spawnRun(["--json", ...args]);
 
   let results: Result[] = [];
 
@@ -56,6 +59,16 @@ describe("workers", () => {
     expect(run("--workers", "2", "exit|order-c").stderr).toContain(
       "Unrift worker stopped with exit code 3 before it finished",
     );
+  });
+
+  it("prints each file's output together, in file order", () => {
+    const res = spawnRun(["--workers", "2", "log"]);
+    const lines = (text: string) =>
+      text.split("\n").filter((line) => line.startsWith("log:"));
+
+    // b ran while a waited, without buffering it'd be in between
+    expect(lines(res.stdout)).toEqual(["log: a start", "log: a end", "log: b"]);
+    expect(lines(res.stderr)).toEqual(["log: b error"]);
   });
 
   it("applies .only per file", () => {
