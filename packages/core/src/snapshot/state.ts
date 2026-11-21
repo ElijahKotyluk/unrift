@@ -14,7 +14,9 @@ import {
   commitInlineEdits,
   matchInlineSnapshot,
   resetInlineSnapshots,
+  takeInlineEdits,
   writeInlineSnapshots,
+  type InlineSource,
   type InlineEdits,
 } from "./inline";
 import { serialize } from "./serialize";
@@ -272,7 +274,11 @@ export function matchSnapshot(received: unknown, hint?: string): MatchResult {
  */
 export function finishSnapshots(
   testFiles: Array<{ file: string; keep: string[] }>,
-): SnapshotSummary {
+): {
+  summary: SnapshotSummary;
+  /** Written with writeInline once every thread is done. */
+  inline: InlineSource[];
+} {
   const summary: SnapshotSummary = {
     added: 0,
     updated: 0,
@@ -361,16 +367,26 @@ export function finishSnapshots(
 
   files.clear();
 
-  const inline = writeInlineSnapshots();
-
-  summary.added += inline.added;
-  summary.updated += inline.updated;
   summary.failed += inlineFailed;
-  summary.filesWritten.push(...inline.filesWritten);
-  summary.inlineSkipped = inline.skipped;
-  summary.errors.push(...inline.errors);
 
-  return summary;
+  return { summary, inline: takeInlineEdits() };
+}
+
+/** Writes the inline snapshots of every thread and adds them to `summary`. */
+export function writeInline(
+  summary: SnapshotSummary,
+  taken: InlineSource[],
+): SnapshotSummary {
+  const inline = writeInlineSnapshots(taken);
+
+  return {
+    ...summary,
+    added: summary.added + inline.added,
+    updated: summary.updated + inline.updated,
+    filesWritten: [...summary.filesWritten, ...inline.filesWritten],
+    inlineSkipped: inline.skipped,
+    errors: [...summary.errors, ...inline.errors],
+  };
 }
 
 function peekFile(testFile: string): SnapshotFile | undefined {

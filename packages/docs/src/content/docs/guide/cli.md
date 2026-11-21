@@ -84,7 +84,9 @@ Files imported only by `.js` test files or a `.js` config aren't watched, Node l
 
 `--workers <n>` runs test files in `n` worker threads at once. Each worker takes the next file when it's done with one, and the results are reported in file order like a run without workers.
 
-What a file writes to stdout and stderr is held until the file is done, then printed in file order. Output from two files never mixes, but it shows up once the file finishes, not as it's written.
+What a file writes to stdout and stderr is held until the file is done, then printed in file order. Output from two files never mixes, but it shows up once the file finishes, not as it's written. If a worker stops early, what its files wrote is still printed.
+
+Inline snapshots are written once every worker is done, so a helper that files in different workers call gets one write. Different values at the same `toMatchInlineSnapshot()` fail the run.
 
 A worker has its own modules, globals, mocks and copy of `process.env`, files in different workers don't share them. Files in the same worker run one after another, like they do without workers.
 

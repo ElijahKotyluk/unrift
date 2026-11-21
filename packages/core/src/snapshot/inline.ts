@@ -406,8 +406,34 @@ function skipSpace(source: string, i: number): number {
   return i;
 }
 
-/** Write the committed edits into the test files. */
-export function writeInlineSnapshots(): {
+/** A source file's committed edits, as one thread saw them. */
+export type InlineSource = {
+  path: string;
+  source: string;
+  edits: InlineEdit[];
+  missed: boolean;
+};
+
+/** This thread's committed edits. Workers send them to the main thread. */
+export function takeInlineEdits(): InlineSource[] {
+  const taken = [...sources].map(([path, file]) => ({
+    path,
+    source: file.source,
+    edits: [...file.edits.values()],
+    missed: file.missed,
+  }));
+
+  sources.clear();
+
+  return taken;
+}
+
+/**
+ * Write the edits into the source files, each file once. Edits from more than
+ * one thread are merged first: two test files in different workers can run
+ * the same helper.
+ */
+export function writeInlineSnapshots(taken: InlineSource[]): {
   added: number;
   updated: number;
   filesWritten: string[];
@@ -419,8 +445,54 @@ export function writeInlineSnapshots(): {
   const filesWritten: string[] = [];
   const skipped: string[] = [];
   const errors: Array<{ file: string; message: string }> = [];
+  const merged = new Map<
+    string,
+    { source: string; edits: Map<number, InlineEdit>; missed: boolean }
+  >();
 
-  for (const [path, file] of sources) {
+  for (const thread of taken) {
+    let file = merged.get(thread.path);
+
+    if (!file) {
+      file = { source: thread.source, edits: new Map(), missed: false };
+      merged.set(thread.path, file);
+    }
+
+    if (thread.missed) file.missed = true;
+
+    // Bundled from different versions, the offsets don't line up
+    if (thread.source !== file.source) {
+      file.missed = true;
+      file.edits.clear();
+      continue;
+    }
+
+    for (const edit of thread.edits) {
+      const prev = file.edits.get(edit.start);
+
+      if (!prev) {
+        file.edits.set(edit.start, edit);
+      } else if (prev.kind === "conflict" || edit.kind === "conflict") {
+        file.edits.set(edit.start, { ...edit, kind: "conflict" });
+      } else if (prev.value !== edit.value) {
+        file.edits.set(edit.start, { ...edit, kind: "conflict" });
+
+        const line = file.source
+          .slice(0, edit.start)
+          .split(/\r\n|\r|\n/).length;
+
+        errors.push({
+          file: thread.path,
+          message: `${NAME}() at ${thread.path}:${line} ran with different values in different test files`,
+        });
+      } else if (prev.kind === "same") {
+        // A "same" never replaces a write for this spot
+        file.edits.set(edit.start, edit);
+      }
+    }
+  }
+
+  for (const [path, file] of merged) {
     if (file.missed) skipped.push(path);
 
     const edits = [...file.edits.values()]
@@ -471,8 +543,6 @@ export function writeInlineSnapshots(): {
       else updated++;
     }
   }
-
-  sources.clear();
 
   return { added, updated, filesWritten, skipped, errors };
 }

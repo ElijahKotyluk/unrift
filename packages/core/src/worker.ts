@@ -8,12 +8,10 @@ import { parentPort, workerData } from "node:worker_threads";
 import { registerModuleLoader } from "./mock/register-loader";
 import { startRun, type EngineOptions } from "./run";
 import { bundledFiles } from "./utils/transform";
-import {
-  copyFileRun,
-  type FromWorker,
-  type Output,
-  type ToWorker,
-} from "./workers";
+import { copyFileRun, type FromWorker, type ToWorker } from "./workers";
+
+// Before any test can fake it
+const microtask = globalThis.queueMicrotask;
 
 // Hooks added in the main thread don't reach this one
 registerModuleLoader();
@@ -21,44 +19,49 @@ registerModuleLoader();
 const port = parentPort!;
 const post = (message: FromWorker) => port.postMessage(message);
 
-// A bail here tells the main thread, which tells the other workers
-let bailed = false;
+const { options, bailed } = workerData as {
+  options: EngineOptions;
+  bailed: Int32Array;
+};
+
+// Shared by all workers, a bail in any of them stops the rest
 const state = {
   get bailed() {
-    return bailed;
+    return Atomics.load(bailed, 0) === 1;
   },
   set bailed(value: boolean) {
-    if (value && !bailed) post({ type: "bail" });
-    bailed = value;
+    Atomics.store(bailed, 0, value ? 1 : 0);
   },
 };
 
-const run = await startRun(
-  (workerData as { options: EngineOptions }).options,
-  state,
-);
+const run = await startRun(options, state);
 
-// What a file writes is kept and sent with its results, the main thread
-// prints it in file order. Writes outside a file go out as they happen.
-let output: Output[] | null = null;
+// What a file writes goes to the main thread as it's written, which prints
+// it in file order. Sent right away, it isn't lost if the test exits the
+// worker. Writes outside a file go out as they happen.
+let current: number | null = null;
 
 for (const stream of ["stdout", "stderr"] as const) {
   const target = process[stream];
-  const write = target.write.bind(target);
+  const write = target.write.bind(target) as (...args: unknown[]) => boolean;
 
   target.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
-    if (!output)
-      return (write as (...args: unknown[]) => boolean)(chunk, ...rest);
+    if (current === null) return write(chunk, ...rest);
 
-    output.push({
-      stream,
-      text: typeof chunk === "string" ? chunk : Buffer.from(chunk).toString(),
-    });
+    const encoding = typeof rest[0] === "string" ? rest[0] : "utf8";
+
+    // Bytes, a character split across two writes decodes in the main thread
+    const bytes =
+      typeof chunk === "string"
+        ? Buffer.from(chunk, encoding as BufferEncoding)
+        : Buffer.from(chunk);
+
+    post({ type: "output", index: current, stream, bytes });
 
     // The callback, if any, comes last
     const done = rest.find((arg) => typeof arg === "function");
 
-    if (done) queueMicrotask(done as () => void);
+    if (done) microtask(done as () => void);
 
     return true;
   }) as typeof target.write;
@@ -68,29 +71,15 @@ for (const stream of ["stdout", "stderr"] as const) {
 let queue = Promise.resolve();
 
 port.on("message", (message: ToWorker) => {
-  if (message.type === "bail") {
-    // Not through the setter, the main thread already knows
-    bailed = true;
-
-    return;
-  }
-
   queue = queue.then(async () => {
     if (message.type === "file") {
-      const written: Output[] = [];
-
-      output = written;
+      current = message.index;
 
       const result = await run.runFile(message.file);
 
-      output = null;
+      current = null;
 
-      post({
-        type: "file",
-        index: message.index,
-        run: copyFileRun(result),
-        output: written,
-      });
+      post({ type: "file", index: message.index, run: copyFileRun(result) });
     } else {
       post({ type: "end", end: await run.finish(), bundled: bundledFiles() });
     }

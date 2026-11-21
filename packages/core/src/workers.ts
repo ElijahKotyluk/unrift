@@ -13,7 +13,7 @@ import type { TestResult } from "./suite";
 import { addBundledFiles } from "./utils/transform";
 
 /** A write to stdout or stderr while a file ran. */
-export type Output = { stream: "stdout" | "stderr"; text: string };
+type Output = { stream: "stdout" | "stderr"; bytes: Uint8Array };
 
 type CopiedError = { name: string; message: string; stack?: string };
 
@@ -24,14 +24,13 @@ type CopiedFileRun = Omit<FileRun, "results"> & {
 /** Main thread to worker. */
 export type ToWorker =
   | { type: "file"; index: number; file: string }
-  | { type: "bail" }
   | { type: "finish" };
 
 /** Worker to main thread. */
 export type FromWorker =
   | { type: "ready" }
-  | { type: "file"; index: number; run: CopiedFileRun; output: Output[] }
-  | { type: "bail" }
+  | ({ type: "output"; index: number } & Output)
+  | { type: "file"; index: number; run: CopiedFileRun }
   | {
       type: "end";
       end: RunEnd;
@@ -91,15 +90,15 @@ export async function runInWorkers(
   count: number,
 ): Promise<{ files: FileRun[]; end: RunEnd }> {
   const files: FileRun[] = new Array(options.files.length);
-  const outputs: Array<Output[] | undefined> = new Array(options.files.length);
+  const outputs: Output[][] = options.files.map(() => []);
   let printed = 0;
 
-  // Each file's output once every file before it has printed, so it reads
-  // like a run without workers
+  // Each file's output once it and every file before it are done, so it
+  // reads like a run without workers
   const print = () => {
-    while (printed < outputs.length && outputs[printed]) {
-      for (const { stream, text } of outputs[printed]!) {
-        process[stream].write(text);
+    while (printed < outputs.length && files[printed]) {
+      for (const { stream, bytes } of outputs[printed]) {
+        process[stream].write(bytes);
       }
 
       outputs[printed] = [];
@@ -109,6 +108,9 @@ export async function runInWorkers(
   const ends: Array<{ end: RunEnd }> = [];
   const workers: Worker[] = [];
   let next = 0;
+  // Set by the worker that bails, read by every worker before each test. A
+  // message would wait until a worker running synchronous tests yields.
+  const bailed = new Int32Array(new SharedArrayBuffer(4));
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -132,7 +134,7 @@ export async function runInWorkers(
 
       for (let i = 0; i < count; i++) {
         const worker = new Worker(new URL("./worker.js", import.meta.url), {
-          workerData: { options },
+          workerData: { options, bailed },
         });
 
         workers.push(worker);
@@ -141,20 +143,16 @@ export async function runInWorkers(
 
         worker.on("message", (message: FromWorker) => {
           switch (message.type) {
+            case "output":
+              outputs[message.index].push(message);
+              break;
             case "ready":
               dispatch(worker);
               break;
             case "file":
               files[message.index] = restoreFileRun(message.run);
-              outputs[message.index] = message.output;
               print();
               dispatch(worker);
-              break;
-            case "bail":
-              // The rest still load and report their tests as skipped
-              for (const other of workers) {
-                if (other !== worker) send(other, { type: "bail" });
-              }
               break;
             case "end":
               ended = true;
@@ -181,8 +179,9 @@ export async function runInWorkers(
     });
   } finally {
     // After a crash, whatever the files wrote helps find out why
+    // In-flight files too, the one that crashed most of all
     for (const written of outputs.slice(printed)) {
-      for (const { stream, text } of written ?? []) process[stream].write(text);
+      for (const { stream, bytes } of written) process[stream].write(bytes);
     }
 
     // A test can leave a timer or socket open, that mustn't keep the run going
@@ -193,6 +192,7 @@ export async function runInWorkers(
     files,
     end: {
       snapshots: mergeSnapshots(ends.map(({ end }) => end.snapshots)),
+      inline: ends.flatMap(({ end }) => end.inline),
       scripts: ends.flatMap(({ end }) => end.scripts),
       bundles: ends.flatMap(({ end }) => end.bundles),
     },

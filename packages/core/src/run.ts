@@ -18,6 +18,7 @@ import { toImportUrl } from "./utils/transform";
 import { assertValidRetries } from "./utils/helpers";
 import {
   finishSnapshots,
+  writeInline,
   resetSnapshots,
   type SnapshotSummary,
   type SnapshotUpdateMode,
@@ -29,6 +30,7 @@ import {
   type V8ScriptCoverage,
 } from "./coverage/collect";
 import { toFileCoverage, type FileCoverage } from "./coverage/convert";
+import type { InlineSource } from "./snapshot/inline";
 import { summarize, type CoverageSummary } from "./coverage/report";
 import { runInWorkers } from "./workers";
 
@@ -131,6 +133,8 @@ export type FileRun = {
 
 export type RunEnd = {
   snapshots: SnapshotSummary;
+  /** Inline snapshot edits, not written yet. */
+  inline: InlineSource[];
   /** V8 coverage of the run's own code, empty without coverage. */
   scripts: V8ScriptCoverage[];
   /** URLs of the test bundles, for coverage. */
@@ -260,10 +264,13 @@ export async function startRun(
     }
   }
 
-  /** Writes the run's snapshots and takes its coverage. */
+  /**
+   * Writes the run's snapshot files and takes its coverage. Inline snapshots
+   * are written by runEngine, once every thread's edits are in.
+   */
   async function finish(): Promise<RunEnd> {
     // A file that failed to import never ran, leave its snapshots alone
-    const snapshots = finishSnapshots(
+    const { summary: snapshots, inline } = finishSnapshots(
       rootSuite.suites
         .filter((suite) => !suite.errors.some((e) => e.label === "import"))
         .map((suite) => ({
@@ -282,7 +289,7 @@ export async function startRun(
         )
       : [];
 
-    return { snapshots, scripts, bundles: [...bundles] };
+    return { snapshots, inline, scripts, bundles: [...bundles] };
   }
 
   return { runFile, finish };
@@ -296,13 +303,18 @@ export async function runEngine(
   assertValidRetries(options.retries, "runEngine");
   snapshotMode(options);
 
-  const workers = Math.min(workerCount(options.workers), options.files.length);
+  const workers = workerCount(options.workers);
 
   let files: FileRun[];
   let end: RunEnd;
 
-  if (workers > 1) {
-    ({ files, end } = await runInWorkers(options, workers));
+  // Asked for workers, a single matching file still gets one. Running it here
+  // instead would change what isolation and process.exit() do.
+  if (workers > 1 && options.files.length > 0) {
+    ({ files, end } = await runInWorkers(
+      options,
+      Math.min(workers, options.files.length),
+    ));
   } else {
     const run = await startRun(options);
 
@@ -330,7 +342,7 @@ export async function runEngine(
     timeoutMs: options.timeoutMs,
     bail: options.bail ?? false,
     results: files.flatMap((file) => file.results),
-    snapshots: end.snapshots,
+    snapshots: writeInline(end.snapshots, end.inline),
     coverage: coverageResult,
   };
 }
