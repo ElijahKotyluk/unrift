@@ -6,6 +6,7 @@ import {
   mock,
   listMockedSpecs,
 } from "@unrift/core";
+import { createRequire } from "node:module";
 
 // Restore module mocks (and everything else) after every test so they
 // don't leak. afterEach is used over beforeEach so the last test in the
@@ -37,6 +38,13 @@ describe("mock.doMock - basic registration", () => {
 
     expect(path.sep).toBe("<<MOCK_SEP>>");
     expect(url.pathToFileURL()).toBe("file:///mock");
+  });
+
+  it("leaves require() with the real module", async () => {
+    mock.doMock("node:os", () => ({ platform: () => "mocked" }));
+
+    const os = createRequire(import.meta.url)("node:os");
+    expect(os.platform()).toBe(process.platform);
   });
 
   it("supports a default export", async () => {
