@@ -6,25 +6,20 @@
  * utils/moduleMockPlugin.ts. This file keeps its runtime side.
  *
  * `mock.doMock(spec, factory)` mocks a package or built-in for later
- * `await import(spec)` calls, through a Node module hook:
- *   - bin/unrift.mjs registers `module-loader.js` via `module.register()` and
- *     pipes a MessagePort into the loader thread.
- *   - The main-side port is stashed on `globalThis.__unriftLoaderPort` before
- *     the test runner starts.
- *   - `doMock()` invokes the factory once, caches the result on
- *     `globalThis.__unriftMocks`, and posts a `register` message with the
- *     spec + export-key list to the loader.
- *   - The loader (see module-loader.ts) drains pending messages on every
- *     resolve() and short-circuits matched specs to a synthetic module that
+ * `await import(spec)` calls, through Node module hooks:
+ *   - The CLI installs module-loader.ts with `module.registerHooks()`, see
+ *     register-loader.ts.
+ *   - `doMock()` runs the factory once, keeps the result on
+ *     `globalThis.__unriftMocks` and the spec's export names in
+ *     `registrations`.
+ *   - The resolve hook points a registered spec at a generated module that
  *     reads back from `globalThis.__unriftMocks`.
  */
 
 import { activeRestorers, spy } from "./spy";
 
-// The mock registry and loader port below live on globalThis, which is
-// process-global. This is correct under unrift's sequential single-process
-// execution; parallel per-file execution (see ISSUES.md) would need the
-// registry keyed/isolated per worker.
+// The registries below are per thread, a worker thread installs its own hooks
+// and has its own mocks.
 
 /**
  * Sentinel field name on globalThis. Loader-generated synthetic source
@@ -32,36 +27,30 @@ import { activeRestorers, spy } from "./spy";
  */
 export const MOCKS_GLOBAL_KEY = "__unriftMocks";
 
-/** Sentinel field name for the IPC port set by bin/unrift.mjs. */
-export const LOADER_PORT_GLOBAL_KEY = "__unriftLoaderPort";
-
 /** URL prefix the loader uses for mocked modules. Public so tests can assert. */
 export const MOCK_URL_PREFIX = "unrift-mock:";
 
 /**
- * Message contract between main thread and loader thread.
- *
- * `registrationId` is a monotonically increasing number embedded in the
- * synthetic mock URL. It defeats Node's URL-keyed module cache so that
- * re-mocking the same spec in a later test yields a fresh module (rather
- * than returning the previous test's cached mock).
+ * The specs the resolve hook mocks. `registrationId` goes in the generated
+ * module's URL, so a later doMock of the same spec gets a new module instead
+ * of Node's cached one.
  */
-export type LoaderMessage =
-  | {
-      type: "register";
-      spec: string;
-      registrationId: number;
-      exportKeys: readonly string[];
-    }
-  | { type: "unregister"; spec: string };
+export const registrations = new Map<
+  string,
+  { registrationId: number; exportKeys: readonly string[] }
+>();
+
+let hooksInstalled = false;
+
+/** Called by register-loader.ts once the hooks are in. */
+export function setHooksInstalled(): void {
+  hooksInstalled = true;
+}
 
 type ModuleFactory = () => Record<string, unknown>;
 
 interface GlobalSlots {
   [MOCKS_GLOBAL_KEY]?: Map<string, Record<string, unknown>>;
-  [LOADER_PORT_GLOBAL_KEY]?: {
-    postMessage(msg: LoaderMessage): void;
-  };
 }
 
 function globals(): GlobalSlots {
@@ -76,12 +65,6 @@ function ensureMocksMap(): Map<string, Record<string, unknown>> {
     slots[MOCKS_GLOBAL_KEY] = map;
   }
   return map;
-}
-
-function getLoaderPort():
-  | { postMessage(msg: LoaderMessage): void }
-  | undefined {
-  return globals()[LOADER_PORT_GLOBAL_KEY];
 }
 
 /**
@@ -170,8 +153,7 @@ export function doMock(spec: string, factory: ModuleFactory): void {
     );
   }
 
-  const port = getLoaderPort();
-  if (!port) {
+  if (!hooksInstalled) {
     throw new Error(
       "mock.doMock() requires the Unrift CLI loader to be installed. " +
         "Run tests via the `unrift` binary (or `node bin/unrift.mjs`), not raw `node`.",
@@ -191,9 +173,7 @@ export function doMock(spec: string, factory: ModuleFactory): void {
   mockedSpecs.add(spec);
   activeRestorers.add(restoreAllMockedSpecs);
 
-  port.postMessage({
-    type: "register",
-    spec,
+  registrations.set(spec, {
     registrationId: ++nextRegistrationId,
     exportKeys: validKeys,
   });
@@ -227,11 +207,7 @@ export function unmock(spec: string): Promise<void> {
 }
 
 function unmockExternal(spec: string): void {
-  const port = getLoaderPort();
-  if (port) {
-    port.postMessage({ type: "unregister", spec });
-  }
-
+  registrations.delete(spec);
   ensureMocksMap().delete(spec);
   mockedSpecs.delete(spec);
 }

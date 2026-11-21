@@ -71,7 +71,6 @@ export type {
   MockFetchResponse,
   UseFakeTimersOptions,
   FakeableApi,
-  LoaderMessage,
   FakeFsHandle,
   FakeFsState,
 } from "./mock/index";

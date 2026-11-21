@@ -105,6 +105,8 @@ describe("mock.module errors", () => {
     expect(
       results.find((r) => r.description.includes("path alias"))?.status,
     ).toBe("pass");
+    // Node 26 deprecates module.register()
+    expect(res.stderr).not.toContain("DeprecationWarning");
   });
 });
 

@@ -84,7 +84,6 @@ export type {
   MockFetchResponse,
 } from "./fetch";
 export type { UseFakeTimersOptions, FakeableApi } from "./timers";
-export type { LoaderMessage } from "./module";
 export type { FakeFsHandle, FakeFsState } from "./fs";
 
 /**

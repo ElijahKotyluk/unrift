@@ -1,75 +1,19 @@
 /**
- * Node module customization hook for `mock.doMock`.
+ * Node module hooks for `mock.doMock`, installed with `module.registerHooks()`
+ * (see register-loader.ts).
  *
- * Registered by `bin/unrift.mjs` via `module.register()`. Runs in a
- * worker thread (Node 20.6+ / 18.19+ behavior). Communicates with the
- * main thread via a `MessagePort` to learn which specs have been mocked.
- *
- * Why we use `receiveMessageOnPort()` instead of `port.on("message")`:
- * the resolve hook runs synchronously from the perspective of the
- * import pipeline, but Worker `MessagePort` listeners are async.
- * `receiveMessageOnPort()` (Node 18.7+) drains pending messages
- * synchronously so registrations posted from the main thread are
- * visible by the time the corresponding `await import(spec)` reaches
- * us.
- *
- * The generated synthetic module source runs back in the MAIN thread
- * (Node's loader output is evaluated in the importing thread, not the
- * loader thread). That source reads exports from `globalThis.__unriftMocks`,
- * which the main thread populates in `mock.doMock()`.
- *
- * Source compiled by tsc and shipped at `dist/esm/mock/module-loader.js`.
+ * The hooks run in the thread that imports, so they read the registry in
+ * module.ts directly. A worker thread installs its own and keeps its own
+ * mocks.
  */
 
-import { receiveMessageOnPort, type MessagePort } from "node:worker_threads";
+import type { LoadHookSync, ResolveHookSync } from "node:module";
 
-import {
-  type LoaderMessage,
-  MOCKS_GLOBAL_KEY,
-  MOCK_URL_PREFIX,
-} from "./module";
-
-interface InitializeData {
-  port: MessagePort;
-}
-
-interface Registration {
-  registrationId: number;
-  exportKeys: readonly string[];
-}
-
-// Loader-thread state. Populated by `initialize()` and updated by
-// drainMessages() on every resolve() call.
-let loaderPort: MessagePort | undefined;
-const registered = new Map<string, Registration>();
+import { MOCKS_GLOBAL_KEY, MOCK_URL_PREFIX, registrations } from "./module";
 
 /**
- * Pull every pending message off the port synchronously. Called at the
- * top of every resolve() and load() hook so the loader's view of the
- * registry is always current.
- */
-function drainMessages(): void {
-  if (!loaderPort) return;
-
-  let received = receiveMessageOnPort(loaderPort);
-  while (received !== undefined) {
-    const message = received.message as LoaderMessage;
-    if (message.type === "register") {
-      registered.set(message.spec, {
-        registrationId: message.registrationId,
-        exportKeys: message.exportKeys,
-      });
-    } else if (message.type === "unregister") {
-      registered.delete(message.spec);
-    }
-    received = receiveMessageOnPort(loaderPort);
-  }
-}
-
-/**
- * Generate ESM source for a mocked spec. The source executes in the
- * MAIN thread (not the loader thread) - that's where the actual mock
- * object lives, keyed in `globalThis.__unriftMocks`.
+ * ESM source for a mocked spec. It reads the factory's exports from
+ * `globalThis.__unriftMocks`, which `mock.doMock()` fills.
  */
 export function generateMockSource(
   spec: string,
@@ -99,41 +43,15 @@ export function generateMockSource(
   return lines.join("\n");
 }
 
-/** Node hook: called once when the loader is registered. */
-export function initialize(data: InitializeData): void {
-  loaderPort = data.port;
-}
+/** Points a mocked spec at a `unrift-mock:` URL. */
+export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
+  const entry = registrations.get(specifier);
 
-interface ResolveContext {
-  conditions: readonly string[];
-  importAttributes?: Record<string, string>;
-  parentURL?: string;
-}
-
-interface ResolveResult {
-  url: string;
-  format?: string;
-  shortCircuit?: boolean;
-  importAttributes?: Record<string, string>;
-}
-
-type DefaultResolve = (
-  specifier: string,
-  context: ResolveContext,
-) => ResolveResult | Promise<ResolveResult>;
-
-/** Node hook: short-circuit mocked specs to a `unrift-mock:` URL. */
-export async function resolve(
-  specifier: string,
-  context: ResolveContext,
-  nextResolve: DefaultResolve,
-): Promise<ResolveResult> {
-  drainMessages();
-
-  const entry = registered.get(specifier);
-  if (entry) {
-    // Embed the registration ID in the URL so Node's URL-keyed module
-    // cache treats each re-mock of the same spec as a fresh module.
+  // Only imports, like module.register() hooks were. A require() inside a
+  // package keeps the real module.
+  if (entry && !context.conditions.includes("require")) {
+    // The registration ID in the URL makes each doMock of the same spec a
+    // new module, Node caches modules by URL
     return {
       url: `${MOCK_URL_PREFIX}${specifier}?v=${entry.registrationId}`,
       format: "module",
@@ -142,54 +60,20 @@ export async function resolve(
   }
 
   return nextResolve(specifier, context);
-}
+};
 
-interface LoadContext {
-  format?: string;
-  importAttributes?: Record<string, string>;
-  conditions?: readonly string[];
-}
+/** Generates the source for a `unrift-mock:` URL. */
+export const load: LoadHookSync = (url, context, nextLoad) => {
+  if (!url.startsWith(MOCK_URL_PREFIX)) return nextLoad(url, context);
 
-interface LoadResult {
-  format: string;
-  source?: string | ArrayBuffer | Uint8Array;
-  shortCircuit?: boolean;
-}
+  // `unrift-mock:<spec>?v=<registrationId>`
+  const rest = url.slice(MOCK_URL_PREFIX.length);
+  const query = rest.indexOf("?");
+  const spec = query === -1 ? rest : rest.slice(0, query);
 
-type DefaultLoad = (
-  url: string,
-  context: LoadContext,
-) => LoadResult | Promise<LoadResult>;
-
-/** Node hook: emit synthetic ESM source for mocked specs. */
-export async function load(
-  url: string,
-  context: LoadContext,
-  nextLoad: DefaultLoad,
-): Promise<LoadResult> {
-  if (url.startsWith(MOCK_URL_PREFIX)) {
-    drainMessages();
-
-    // URL shape: `unrift-mock:<spec>?v=<registrationId>`
-    const withoutPrefix = url.slice(MOCK_URL_PREFIX.length);
-    const queryIdx = withoutPrefix.indexOf("?");
-    const spec =
-      queryIdx === -1 ? withoutPrefix : withoutPrefix.slice(0, queryIdx);
-
-    const entry = registered.get(spec);
-
-    if (!entry) {
-      // The user called mock.unmock() between resolve() and load().
-      // Fall through to the real module so the import still works.
-      return nextLoad(spec, context);
-    }
-
-    return {
-      format: "module",
-      source: generateMockSource(spec, entry.exportKeys),
-      shortCircuit: true,
-    };
-  }
-
-  return nextLoad(url, context);
-}
+  return {
+    format: "module",
+    source: generateMockSource(spec, registrations.get(spec)?.exportKeys ?? []),
+    shortCircuit: true,
+  };
+};

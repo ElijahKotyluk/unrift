@@ -4,6 +4,10 @@ Versions are `@unrift/core` / `unrift`.
 
 ## Unreleased
 
+- Breaking: Unrift needs Node 22.23.5+, 24.22.3+ or 26.13.1+, the November 2026 security releases. Older patches have known high-severity CVEs
+- `mock.doMock` uses `module.registerHooks()`, Node 26 no longer warns that `module.register()` is deprecated
+- Removed the `LoaderMessage` type export
+
 ## 0.9.0 / 0.10.0 - 2026-11-18
 
 - `mock.module(spec, factory)` replaces a module for the test file, static imports and relative paths too. Calls at the top of the file run before its imports, the factory gets `importActual`
