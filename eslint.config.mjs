@@ -29,6 +29,7 @@ export default defineConfig(
       "packages/core/test/snapshots/.work",
       "packages/core/test/coverage/.work",
       "packages/core/test/watch/.work",
+      "packages/core/test/workers/.work",
     ],
   },
   {

@@ -61,14 +61,101 @@ describe("workers", () => {
     ).toEqual(["fails: fail", "slow: pass", "after the bail: skipped"]);
   });
 
-  it("fails the run when a worker exits early, with what it printed", () => {
-    // One matching file still runs in a worker
-    const res = spawnRun(["--workers", "2", "exit"]);
+  it("fails the file a worker died in, and the rest still run", () => {
+    const errors = (args: string[]) => {
+      const res = spawnRun(["--json", ...args]);
+      const report = JSON.parse(res.stdout.slice(res.stdout.indexOf("{")));
 
-    expect(res.stderr).toContain(
-      "Unrift worker stopped with exit code 3 before it finished",
+      return {
+        out: res.stdout,
+        results: report.results.map(
+          (r: {
+            description: string;
+            status: string;
+            error?: { message: string };
+          }) =>
+            `${r.description.split("/").pop()}: ${r.status}${r.error ? ` (${r.error.message})` : ""}`,
+        ),
+      };
+    };
+
+    // process.exit() while a test runs. One matching file still gets a worker.
+    const exit = errors(["--workers", "2", "exit"]);
+
+    expect(exit.results.join("\n")).toContain(
+      "exit.spec.ts > [worker]: fail (Unrift worker stopped with exit code 3 while running",
     );
-    expect(res.stdout).toContain("log: before exit");
+    expect(exit.out).toContain("log: before exit");
+
+    // An error thrown from a timer after the test passed
+    expect(errors(["--workers", "2", "crash|order-b"]).results).toEqual([
+      "crash.spec.ts › leaks: pass",
+      "crash.spec.ts > [worker]: fail (leaked boom)",
+      "order-b.spec.ts › b: pass",
+    ]);
+  });
+
+  it("keeps output written after a file's tests with that file", () => {
+    const out = spawnRun(["--workers", "2", "late"]).stdout;
+
+    // late-1 logged first, but it comes after late-0 like its tests do
+    expect(out.split("\n").filter((line) => line.startsWith("log:"))).toEqual([
+      "log: first",
+      "log: late",
+    ]);
+  });
+
+  it("runs the top level's beforeAll and afterAll in each worker", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/root-hooks");
+
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "test"), { recursive: true });
+    writeFileSync(
+      join(dir, "setup.mjs"),
+      `import { beforeAll, afterAll } from "@unrift/core";\nbeforeAll(() => { globalThis.__setup = true; });\nafterAll(() => { throw new Error("after all"); });\n`,
+    );
+    writeFileSync(
+      join(dir, "unrift.config.ts"),
+      `export default { testDir: "test", matchers: [${JSON.stringify(join(dir, "setup.mjs"))}] };\n`,
+    );
+
+    for (const name of ["a", "b"]) {
+      writeFileSync(
+        join(dir, `test/${name}.spec.ts`),
+        `import { it, expect } from "@unrift/core";\nit("${name}", () => expect((globalThis as Record<string, unknown>).__setup).toBe(true));\n`,
+      );
+    }
+
+    const statuses = (...args: string[]) =>
+      JSON.parse(
+        spawnSync(
+          process.execPath,
+          [
+            resolve(process.cwd(), "bin/unrift.mjs"),
+            "--config",
+            join(dir, "unrift.config.ts"),
+            "--json",
+            ...args,
+          ],
+          { encoding: "utf8", timeout: 20_000 },
+        ).stdout,
+      ).results.map(
+        (r: { description: string; status: string }) =>
+          `${r.description.split("/").pop()}: ${r.status}`,
+      );
+
+    // Once per worker, and once without workers
+    expect(statuses("--workers", "2")).toEqual([
+      "root > [afterAll]: fail",
+      "root > [afterAll]: fail",
+      "a.spec.ts › a: pass",
+      "b.spec.ts › b: pass",
+    ]);
+    expect(statuses()).toEqual([
+      "root > [afterAll]: fail",
+      "a.spec.ts › a: pass",
+      "b.spec.ts › b: pass",
+    ]);
   });
 
   it("prints each file's output together, in file order", () => {
@@ -167,6 +254,18 @@ describe("workers", () => {
       statuses: ["a: fail", "a: skipped", "b: fail", "c: fail"],
     });
     expect(readFileSync(helper, "utf8")).toContain("toMatchInlineSnapshot()");
+
+    // A test that found another test's equal value already written fails
+    // with them
+    expect(
+      runWith([
+        [
+          ["a1", "one"],
+          ["a2", "one"],
+        ],
+        [["b", "two"]],
+      ]).statuses,
+    ).toEqual(["a1: fail", "a2: fail", "b: fail"]);
 
     // A worker that conflicts on its own fails the other worker's test too,
     // whichever finishes first

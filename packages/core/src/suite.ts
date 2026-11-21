@@ -1,5 +1,7 @@
 import { unriftGlobalContext } from "./context";
 import { resetMatchers } from "./matchers";
+import { threadId } from "node:worker_threads";
+
 import { createSnapshotTest } from "./snapshot/state";
 import { Test } from "./test";
 
@@ -468,9 +470,9 @@ export class Suite {
     return names.join(" ");
   }
 
-  /** A file runs in one worker, so its path makes the id unique across them. */
+  /** Unique across workers too, the same file can run in two of them. */
   testId(test: Test): string {
-    return `${this.getFilePath() ?? ""}#${test.id}`;
+    return `${threadId}:${this.getFilePath() ?? ""}#${test.id}`;
   }
 
   getFullDescription(): string {

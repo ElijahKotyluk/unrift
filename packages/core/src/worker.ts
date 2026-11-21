@@ -38,7 +38,8 @@ const run = await startRun(options, state);
 
 // What a file writes goes to the main thread as it's written, which prints
 // it in file order. Sent right away, it isn't lost if the test exits the
-// worker. Writes outside a file go out as they happen.
+// worker. A write after a file's tests, from a timer it left, belongs to it
+// too. Writes before the first file go out as they happen.
 let current: number | null = null;
 
 for (const stream of ["stdout", "stderr"] as const) {
@@ -48,6 +49,8 @@ for (const stream of ["stdout", "stderr"] as const) {
   target.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
     if (current === null) return write(chunk, ...rest);
 
+    const index = current;
+
     const encoding = typeof rest[0] === "string" ? rest[0] : "utf8";
 
     // Bytes, a character split across two writes decodes in the main thread
@@ -56,7 +59,7 @@ for (const stream of ["stdout", "stderr"] as const) {
         ? Buffer.from(chunk, encoding as BufferEncoding)
         : Buffer.from(chunk);
 
-    post({ type: "output", index: current, stream, bytes });
+    post({ type: "output", index, stream, bytes });
 
     // The callback, if any, comes last
     const done = rest.find((arg) => typeof arg === "function");
@@ -77,11 +80,16 @@ port.on("message", (message: ToWorker) => {
 
       const result = await run.runFile(message.file);
 
-      current = null;
-
+      // Until the next file starts, output still goes to this one
       post({ type: "file", index: message.index, run: copyFileRun(result) });
     } else {
-      post({ type: "end", end: await run.finish(), bundled: bundledFiles() });
+      const end = await run.finish();
+
+      post({
+        type: "end",
+        end: { ...end, root: copyFileRun(end.root) },
+        bundled: bundledFiles(),
+      });
     }
   });
 });

@@ -203,6 +203,10 @@ function queueEdit(
   // A "same" never replaces a pending write for this spot
   if (!existing || existing.kind === "same") {
     edits.set(args.start, { ...args, value, kind });
+  } else if (!edits.has(args.start)) {
+    // Another test's write with the same value: nothing to write, but this
+    // test ran the spot too and fails with it on a conflict between workers
+    edits.set(args.start, { ...args, value, kind: "same" });
   }
 }
 

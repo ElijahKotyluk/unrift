@@ -84,7 +84,7 @@ Files imported only by `.js` test files or a `.js` config aren't watched, Node l
 
 `--workers <n>` runs test files in `n` worker threads at once. Each worker takes the next file when it's done with one, and the results are reported in file order like a run without workers.
 
-What a file writes to stdout and stderr is held until the file is done, then printed in file order. Output from two files never mixes, but it shows up once the file finishes, not as it's written. If a worker stops early, what its files wrote is still printed.
+What a file writes to stdout and stderr is held until the file is done, then printed in file order. Output from two files never mixes, but it shows up once the file finishes, not as it's written. A timer that writes after the file's tests is still that file's output, until the run ends: once every file is done the workers stop, and later output is lost. If a worker stops early, what its files wrote is still printed.
 
 Inline snapshots are written once every worker is done, so a helper that files in different workers call gets one write. Different values at the same `toMatchInlineSnapshot()` from files in different workers fail every test that ran it, and count as failed snapshots. Without workers only the later one fails, with workers there's no telling which ran first.
 
@@ -93,7 +93,10 @@ A worker has its own modules, globals, mocks and copy of `process.env`, files in
 Things that work differently in a worker:
 
 - `process.chdir()` throws, the working directory is the process's
-- `process.exit()` in a test stops its worker, and the run fails
+- `process.exit()` in a test, or an error thrown from a timer, stops its worker. The file it was running fails, or the last one it ran, and a new worker takes the rest
+- `process.exitCode` set by a test doesn't reach the run's exit code
+- stdout and stderr aren't a terminal, so libraries that check for one print without colors
+- `beforeAll` and `afterAll` that a `matchers` module adds at the top level run once in each worker
 - Files on disk are shared, two files writing the same path can collide
 - Only `process.stdout` and `process.stderr` are held per file. A child process started with `stdio: "inherit"`, or a write straight to file descriptor 1 or 2, goes out right away and can mix with another file's output
 

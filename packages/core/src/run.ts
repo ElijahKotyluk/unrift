@@ -133,6 +133,8 @@ export type FileRun = {
 };
 
 export type RunEnd = {
+  /** Results for the top level's beforeAll and afterAll, if they failed. */
+  root: FileRun;
   snapshots: SnapshotSummary;
   /** Inline snapshot edits, not written yet. */
   inline: InlineSource[];
@@ -205,6 +207,19 @@ export async function startRun(
 
   await loadMatcherModules(options.matchers);
 
+  // Hooks a matchers module adds at the top level are the run's own. Its
+  // beforeEach and afterEach reach each test through the parent chain, its
+  // beforeAll and afterAll run here, once per thread.
+  try {
+    unriftGlobalContext.state = RunState.Run;
+
+    for (const hook of rootSuite.beforeAllHooks) await hook();
+  } catch (err) {
+    rootSuite.beforeAllError = toError(err);
+  } finally {
+    unriftGlobalContext.state = RunState.Idle;
+  }
+
   /** Imports the file, which registers its tests, and runs them. */
   async function runFile(file: string): Promise<FileRun> {
     const fileSuite = new Suite(
@@ -245,17 +260,20 @@ export async function startRun(
 
       unriftGlobalContext.state = RunState.Run;
 
-      await fileSuite.run(
-        {
-          timeoutMs: options.timeoutMs,
-          bail: options.bail ?? false,
-          grep: options.grep,
-          retries: options.retries,
-        },
-        state,
-        hasOnly,
-        false,
-      );
+      // Like a suite whose beforeAll failed, nothing under it runs
+      if (rootSuite.beforeAllError) fileSuite.markSubtreeSkipped();
+      else
+        await fileSuite.run(
+          {
+            timeoutMs: options.timeoutMs,
+            bail: options.bail ?? false,
+            grep: options.grep,
+            retries: options.retries,
+          },
+          state,
+          hasOnly,
+          false,
+        );
 
       return {
         file: fileSuite.description,
@@ -272,6 +290,18 @@ export async function startRun(
    * are written by runEngine, once every thread's edits are in.
    */
   async function finish(): Promise<RunEnd> {
+    if (!rootSuite.beforeAllError) {
+      try {
+        unriftGlobalContext.state = RunState.Run;
+
+        for (const hook of rootSuite.afterAllHooks) await hook();
+      } catch (err) {
+        rootSuite.afterAllError = toError(err);
+      } finally {
+        unriftGlobalContext.state = RunState.Idle;
+      }
+    }
+
     // A file that failed to import never ran, leave its snapshots alone
     const {
       summary: snapshots,
@@ -296,10 +326,31 @@ export async function startRun(
         )
       : [];
 
-    return { snapshots, inline, emptied, scripts, bundles: [...bundles] };
+    return {
+      // The top level's own errors, a failed beforeAll or afterAll
+      root: {
+        file: rootSuite.description,
+        results: rootSuite.getResults().slice(0, rootErrorCount()),
+        hasOnly: false,
+      },
+      snapshots,
+      inline,
+      emptied,
+      scripts,
+      bundles: [...bundles],
+    };
   }
 
   return { runFile, finish };
+}
+
+/** How many of the root suite's results are its own, before its files'. */
+function rootErrorCount(): number {
+  return (
+    rootSuite.errors.length +
+    (rootSuite.beforeAllError ? 1 : 0) +
+    (rootSuite.afterAllError ? 1 : 0)
+  );
 }
 
 export async function runEngine(
@@ -381,7 +432,7 @@ export async function runEngine(
     isOnly: files.some((file) => file.hasOnly),
     timeoutMs: options.timeoutMs,
     bail: options.bail ?? false,
-    results: files.flatMap((file) => file.results),
+    results: [end.root, ...files].flatMap((file) => file.results),
     snapshots,
     coverage: coverageResult,
   };
