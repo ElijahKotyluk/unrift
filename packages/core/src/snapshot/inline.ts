@@ -447,21 +447,35 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
   const errors: Array<{ file: string; message: string }> = [];
   const merged = new Map<
     string,
-    { source: string; edits: Map<number, InlineEdit>; missed: boolean }
+    {
+      source: string;
+      edits: Map<number, InlineEdit>;
+      missed: boolean;
+      // Seen in two versions, nothing more is written to it
+      mismatched: boolean;
+    }
   >();
 
   for (const thread of taken) {
     let file = merged.get(thread.path);
 
     if (!file) {
-      file = { source: thread.source, edits: new Map(), missed: false };
+      file = {
+        source: thread.source,
+        edits: new Map(),
+        missed: false,
+        mismatched: false,
+      };
       merged.set(thread.path, file);
     }
 
     if (thread.missed) file.missed = true;
 
-    // Bundled from different versions, the offsets don't line up
-    if (thread.source !== file.source) {
+    // Bundled from different versions, the offsets don't line up. Later
+    // threads that match the first one don't make it right again.
+    if (thread.source !== file.source) file.mismatched = true;
+
+    if (file.mismatched) {
       file.missed = true;
       file.edits.clear();
       continue;

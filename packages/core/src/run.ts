@@ -18,6 +18,7 @@ import { toImportUrl } from "./utils/transform";
 import { assertValidRetries } from "./utils/helpers";
 import {
   finishSnapshots,
+  removeEmptyDirs,
   writeInline,
   resetSnapshots,
   type SnapshotSummary,
@@ -135,6 +136,8 @@ export type RunEnd = {
   snapshots: SnapshotSummary;
   /** Inline snapshot edits, not written yet. */
   inline: InlineSource[];
+  /** Snapshot dirs to remove if they're empty, once every thread is done. */
+  emptied: string[];
   /** V8 coverage of the run's own code, empty without coverage. */
   scripts: V8ScriptCoverage[];
   /** URLs of the test bundles, for coverage. */
@@ -270,7 +273,11 @@ export async function startRun(
    */
   async function finish(): Promise<RunEnd> {
     // A file that failed to import never ran, leave its snapshots alone
-    const { summary: snapshots, inline } = finishSnapshots(
+    const {
+      summary: snapshots,
+      inline,
+      emptied,
+    } = finishSnapshots(
       rootSuite.suites
         .filter((suite) => !suite.errors.some((e) => e.label === "import"))
         .map((suite) => ({
@@ -289,7 +296,7 @@ export async function startRun(
         )
       : [];
 
-    return { snapshots, inline, scripts, bundles: [...bundles] };
+    return { snapshots, inline, emptied, scripts, bundles: [...bundles] };
   }
 
   return { runFile, finish };
@@ -311,6 +318,10 @@ export async function runEngine(
   // Asked for workers, a single matching file still gets one. Running it here
   // instead would change what isolation and process.exit() do.
   if (workers > 1 && options.files.length > 0) {
+    // The workers collect their own, a session left on here from an
+    // earlier run would only slow this thread down
+    await stopCoverage();
+
     ({ files, end } = await runInWorkers(
       options,
       Math.min(workers, options.files.length),
@@ -322,6 +333,10 @@ export async function runEngine(
     for (const file of options.files) files.push(await run.runFile(file));
     end = await run.finish();
   }
+
+  const snapshots = writeInline(end.snapshots, end.inline);
+
+  removeEmptyDirs(end.emptied);
 
   const coverage = coverageOptions(options);
   let coverageResult: RunEngineCoverage | undefined;
@@ -342,7 +357,7 @@ export async function runEngine(
     timeoutMs: options.timeoutMs,
     bail: options.bail ?? false,
     results: files.flatMap((file) => file.results),
-    snapshots: writeInline(end.snapshots, end.inline),
+    snapshots,
     coverage: coverageResult,
   };
 }

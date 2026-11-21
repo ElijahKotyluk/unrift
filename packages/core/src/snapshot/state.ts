@@ -278,7 +278,14 @@ export function finishSnapshots(
   summary: SnapshotSummary;
   /** Written with writeInline once every thread is done. */
   inline: InlineSource[];
+  /**
+   * Snapshot dirs a removed file may have left empty. Removed with
+   * removeEmptyDirs once every thread is done, another worker may be about
+   * to write in one.
+   */
+  emptied: string[];
 } {
+  const emptied: string[] = [];
   const summary: SnapshotSummary = {
     added: 0,
     updated: 0,
@@ -340,7 +347,7 @@ export function finishSnapshots(
     try {
       if (file.data.size === 0) {
         rmSync(file.path, { force: true });
-        removeDirIfEmpty(dirname(file.path));
+        emptied.push(dirname(file.path));
       } else {
         mkdirSync(dirname(file.path), { recursive: true });
         writeFileSync(file.path, formatSnapshotFile(file.data));
@@ -369,7 +376,7 @@ export function finishSnapshots(
 
   summary.failed += inlineFailed;
 
-  return { summary, inline: takeInlineEdits() };
+  return { summary, inline: takeInlineEdits(), emptied };
 }
 
 /** Writes the inline snapshots of every thread and adds them to `summary`. */
@@ -410,6 +417,10 @@ function ownsKey(name: string, key: string): boolean {
   if (key.startsWith(`${name}: `)) return true;
 
   return key.startsWith(`${name} `) && /^\d+$/.test(key.slice(name.length + 1));
+}
+
+export function removeEmptyDirs(dirs: string[]) {
+  for (const dir of new Set(dirs)) removeDirIfEmpty(dir);
 }
 
 function removeDirIfEmpty(dir: string) {

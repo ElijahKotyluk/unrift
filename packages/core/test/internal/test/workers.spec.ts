@@ -1,11 +1,13 @@
 import { describe, it, expect } from "@unrift/core";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+
+import { writeInlineSnapshots } from "../../../src/snapshot/inline.js";
 
 type Result = { description: string; status: string };
 
-function spawnRun(args: string[]) {
+function spawnRun(args: string[], env: Record<string, string> = {}) {
   return spawnSync(
     process.execPath,
     [
@@ -15,12 +17,12 @@ function spawnRun(args: string[]) {
       ...args,
     ],
     // A worker that exits without the run noticing would hang it
-    { encoding: "utf8", timeout: 20_000 },
+    { encoding: "utf8", timeout: 20_000, env: { ...process.env, ...env } },
   );
 }
 
-function run(...args: string[]) {
-  const res = spawnRun(["--json", ...args]);
+function run(args: string[], env?: Record<string, string>) {
+  const res = spawnRun(["--json", ...args], env);
 
   let results: Result[] = [];
 
@@ -40,7 +42,7 @@ function run(...args: string[]) {
 
 describe("workers", () => {
   it("runs files in worker threads and reports them in file order", () => {
-    expect(run("--workers", "2", "order").statuses).toEqual([
+    expect(run(["--workers", "2", "order"]).statuses).toEqual([
       "a runs in a worker: pass",
       "b: pass",
       "c: pass",
@@ -48,11 +50,15 @@ describe("workers", () => {
   });
 
   it("stops the other workers on bail", () => {
-    expect(run("--workers", "2", "--bail", "bail").statuses).toEqual([
-      "fails: fail",
-      "slow: pass",
-      "after the bail: skipped",
-    ]);
+    const started = resolve(process.cwd(), "test/workers/.work/bail-started");
+
+    mkdirSync(dirname(started), { recursive: true });
+    rmSync(started, { force: true });
+
+    expect(
+      run(["--workers", "2", "--bail", "bail"], { BAIL_STARTED: started })
+        .statuses,
+    ).toEqual(["fails: fail", "slow: pass", "after the bail: skipped"]);
   });
 
   it("fails the run when a worker exits early, with what it printed", () => {
@@ -136,6 +142,35 @@ describe("workers", () => {
     expect(readFileSync(helper, "utf8")).toContain("toMatchInlineSnapshot()");
   });
 
+  it("writes nothing to a file workers bundled in two versions", () => {
+    const file = resolve(process.cwd(), "test/workers/.work/versions.ts");
+    const original = "check(toMatchInlineSnapshot());\n";
+    const edit = {
+      // Between the parens
+      start: 28,
+      end: 28,
+      value: '"x"',
+      indent: "",
+      kind: "new" as const,
+    };
+
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, original);
+
+    // The third matches the first again, that mustn't undo the mismatch
+    const result = writeInlineSnapshots(
+      [original, `// changed\n${original}`, original].map((source) => ({
+        path: file,
+        source,
+        edits: [edit],
+        missed: false,
+      })),
+    );
+
+    expect(result.skipped).toEqual([file]);
+    expect(readFileSync(file, "utf8")).toBe(original);
+  });
+
   it("applies .only per file", () => {
     const expected = [
       "only: pass",
@@ -143,7 +178,7 @@ describe("workers", () => {
       "runs in a file without only: pass",
     ];
 
-    expect(run("only").statuses).toEqual(expected);
-    expect(run("--workers", "2", "only").statuses).toEqual(expected);
+    expect(run(["only"]).statuses).toEqual(expected);
+    expect(run(["--workers", "2", "only"]).statuses).toEqual(expected);
   });
 });

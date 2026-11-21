@@ -177,6 +177,12 @@ export async function runInWorkers(
         });
       }
     });
+  } catch (err) {
+    // A worker that died never sent what it bundled. Watch mode watches
+    // more broadly until a run gets through.
+    addBundledFiles({ files: [], failed: true });
+
+    throw err;
   } finally {
     // After a crash, whatever the files wrote helps find out why
     // In-flight files too, the one that crashed most of all
@@ -193,6 +199,7 @@ export async function runInWorkers(
     end: {
       snapshots: mergeSnapshots(ends.map(({ end }) => end.snapshots)),
       inline: ends.flatMap(({ end }) => end.inline),
+      emptied: ends.flatMap(({ end }) => end.emptied),
       scripts: ends.flatMap(({ end }) => end.scripts),
       bundles: ends.flatMap(({ end }) => end.bundles),
     },
