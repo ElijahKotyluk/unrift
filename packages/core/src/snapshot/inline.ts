@@ -24,10 +24,12 @@ export interface InlineEdit {
    */
   kind: "new" | "update" | "same" | "conflict";
   /**
-   * Ids of every test that hit this spot, equal values included. A conflict
-   * between workers fails all of them.
+   * Ids of the tests whose call here passed, equal values included. A
+   * conflict between workers fails each of them, once per spot.
    */
   tests?: string[];
+  /** Tests whose call here already failed in their own worker, and counted. */
+  failed?: string[];
 }
 
 /** Edits by file, then by where the argument starts. */
@@ -211,12 +213,23 @@ export function commitInlineEdits(pending: InlineEdits, testId?: string) {
 
     for (const [start, edit] of edits) {
       const prev = file.edits.get(start);
-      const tests = [...(prev?.tests ?? []), ...(testId ? [testId] : [])];
+      const id = testId ? [testId] : [];
+      // A conflict in a test's own edits means its call here threw
+      const tests = [
+        ...(prev?.tests ?? []),
+        ...(edit.kind === "conflict" ? [] : id),
+      ];
+      const failed = [
+        ...(prev?.failed ?? []),
+        ...(edit.kind === "conflict" ? id : []),
+      ];
 
       // A "same" never replaces a pending write, it still counts the test
       file.edits.set(
         start,
-        edit.kind !== "same" || !prev ? { ...edit, tests } : { ...prev, tests },
+        edit.kind !== "same" || !prev
+          ? { ...edit, tests, failed }
+          : { ...prev, tests, failed },
       );
     }
   }
@@ -528,11 +541,18 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
         .slice(0, seen[0].start)
         .split(/\r\n|\r|\n/).length;
       const message = `${NAME}() at ${path}:${line} ran with different values in different test files`;
-      const tests = new Set(seen.flatMap((e) => e.tests ?? []));
+      // Each test that passed here fails once for this spot. One whose call
+      // here already failed in its worker was counted there.
+      const failed = new Set(seen.flatMap((e) => e.failed ?? []));
+      const tests = new Set(
+        seen.flatMap((e) => e.tests ?? []).filter((t) => !failed.has(t)),
+      );
 
       for (const test of tests) conflicts.push({ test, message });
 
-      if (tests.size === 0) errors.push({ file: path, message });
+      if (tests.size === 0 && failed.size === 0) {
+        errors.push({ file: path, message });
+      }
     }
 
     resolved.set(path, edits);

@@ -90,7 +90,8 @@ describe("workers", () => {
   it("merges inline snapshots from a helper workers share", () => {
     const dir = resolve(process.cwd(), "test/workers/.work/inline");
     const helper = join(dir, "helper.ts");
-    // Each file is a list of tests: [name, value], or [name, value, "skip"]
+    // Each file is a list of tests: [name, value, mode]. Mode "skip" skips
+    // it, "throw" fails it after the check, "twice" checks at two spots.
     const runWith = (files: string[][][]) => {
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(join(dir, "test"), { recursive: true });
@@ -100,20 +101,20 @@ describe("workers", () => {
       );
       writeFileSync(
         helper,
-        `import { expect } from "@unrift/core";\nexport const check = (value: string) => expect(value).toMatchInlineSnapshot();\n`,
+        `import { expect } from "@unrift/core";\nexport const check = (value: string) => expect(value).toMatchInlineSnapshot();\nexport const twice = (value: string) => { expect(value).toMatchInlineSnapshot(); expect(value).toMatchInlineSnapshot(); };\n`,
       );
 
       files.forEach((tests, i) => {
         const body = tests
           .map(
-            ([name, value, skip]) =>
-              `it${skip ? ".skip" : ""}("${name}", () => check("${value}"));`,
+            ([name, value, mode]) =>
+              `it${mode === "skip" ? ".skip" : ""}("${name}", () => { ${mode?.includes("twice") ? "twice" : "check"}("${value}");${mode?.includes("throw") ? ' throw new Error("own");' : ""} });`,
           )
           .join("\n");
 
         writeFileSync(
           join(dir, `test/${i}.spec.ts`),
-          `import { it } from "@unrift/core";\nimport { check } from "../helper";\n${body}\n`,
+          `import { it } from "@unrift/core";\nimport { check, twice } from "../helper";\n${body}\n`,
         );
       });
 
@@ -134,8 +135,12 @@ describe("workers", () => {
       return {
         failed: report.snapshots.failed,
         statuses: report.results.map(
-          (r: { description: string; status: string }) =>
-            `${r.description.split(" › ").pop()}: ${r.status}`,
+          (r: {
+            description: string;
+            status: string;
+            error?: { message: string };
+          }) =>
+            `${r.description.split(" › ").pop()}: ${r.status}${r.error?.message === "own" ? " (own)" : ""}`,
         ),
       };
     };
@@ -176,6 +181,19 @@ describe("workers", () => {
     ).toEqual({
       failed: 3,
       statuses: ["a: fail", "b: fail", "c: fail"],
+    });
+
+    // Counted per test and spot, and a test that failed on its own keeps
+    // its error but is still counted
+    expect(
+      runWith([
+        [["a", "one", "twice"]],
+        [["b", "two", "twice"]],
+        [["c", "two", "twice throw"]],
+      ]),
+    ).toEqual({
+      failed: 6,
+      statuses: ["a: fail", "b: fail", "c: fail (own)"],
     });
   });
 

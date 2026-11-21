@@ -361,14 +361,18 @@ export async function runEngine(
     files.flatMap((file) => file.results).map((result) => [result.id, result]),
   );
 
+  // One per test and spot, like a matcher call that fails in a worker
   for (const { test, message } of conflicts) {
+    snapshots.failed++;
+
     const result = byId.get(test);
 
-    if (!result || result.status === TaskStatus.Fail) continue;
+    if (!result) continue;
+
+    // A test that already failed keeps its own error
+    if (result.status !== TaskStatus.Fail) result.error = new Error(message);
 
     result.status = TaskStatus.Fail;
-    result.error = new Error(message);
-    snapshots.failed++;
   }
 
   removeEmptyDirs(end.emptied);
