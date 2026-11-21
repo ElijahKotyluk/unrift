@@ -86,7 +86,7 @@ Files imported only by `.js` test files or a `.js` config aren't watched, Node l
 
 What a file writes to stdout and stderr is held until the file is done, then printed in file order. Output from two files never mixes, but it shows up once the file finishes, not as it's written. If a worker stops early, what its files wrote is still printed.
 
-Inline snapshots are written once every worker is done, so a helper that files in different workers call gets one write. Different values at the same `toMatchInlineSnapshot()` fail the run.
+Inline snapshots are written once every worker is done, so a helper that files in different workers call gets one write. Different values at the same `toMatchInlineSnapshot()` from files in different workers fail the tests on both sides. Without workers only the later one fails, with workers there's no telling which ran first.
 
 A worker has its own modules, globals, mocks and copy of `process.env`, files in different workers don't share them. Files in the same worker run one after another, like they do without workers.
 

@@ -125,20 +125,29 @@ describe("workers", () => {
         { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
       );
 
-      return JSON.parse(res.stdout).snapshots;
+      return JSON.parse(res.stdout);
     };
 
     // Written once, not skipped as changed by the other worker
-    expect(runWith("same", "same")).toMatchObject({ added: 1, errors: [] });
+    expect(runWith("same", "same").snapshots).toMatchObject({
+      added: 1,
+      errors: [],
+    });
     expect(readFileSync(helper, "utf8")).toContain(
       'toMatchInlineSnapshot(`"same"`)',
     );
 
+    // Both tests fail, like the second one would without workers
     const conflict = runWith("one", "two");
-
-    expect(conflict.errors[0].message).toContain(
-      "ran with different values in different test files",
+    const failed = conflict.results.map(
+      (r: { status: string; error?: { message: string } }) =>
+        `${r.status}: ${r.error?.message.split(" ran ")[1]}`,
     );
+
+    expect(failed).toEqual([
+      "fail: with different values in different test files",
+      "fail: with different values in different test files",
+    ]);
     expect(readFileSync(helper, "utf8")).toContain("toMatchInlineSnapshot()");
   });
 

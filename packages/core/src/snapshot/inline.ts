@@ -23,6 +23,11 @@ export interface InlineEdit {
    * different value is caught. "conflict" blocks the spot from being written.
    */
   kind: "new" | "update" | "same" | "conflict";
+  /**
+   * The test that made it, by its name in the results. A conflict found once
+   * every worker is done fails the tests on both sides.
+   */
+  test?: string;
 }
 
 /** Edits by file, then by where the argument starts. */
@@ -200,13 +205,13 @@ function queueEdit(
 }
 
 /** Called when a test is done, with its last attempt's edits. */
-export function commitInlineEdits(pending: InlineEdits) {
+export function commitInlineEdits(pending: InlineEdits, test?: string) {
   for (const [path, edits] of pending) {
     const file = getSource(path);
 
     for (const [start, edit] of edits) {
       if (edit.kind !== "same" || !file.edits.has(start)) {
-        file.edits.set(start, edit);
+        file.edits.set(start, { ...edit, test });
       }
     }
   }
@@ -439,7 +444,10 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
   filesWritten: string[];
   skipped: string[];
   errors: Array<{ file: string; message: string }>;
+  /** Tests whose values conflict with a test's in another worker. */
+  conflicts: Array<{ test: string; message: string }>;
 } {
+  const conflicts: Array<{ test: string; message: string }> = [];
   let added = 0;
   let updated = 0;
   const filesWritten: string[] = [];
@@ -486,19 +494,25 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
 
       if (!prev) {
         file.edits.set(edit.start, edit);
-      } else if (prev.kind === "conflict" || edit.kind === "conflict") {
-        file.edits.set(edit.start, { ...edit, kind: "conflict" });
-      } else if (prev.value !== edit.value) {
-        file.edits.set(edit.start, { ...edit, kind: "conflict" });
-
+      } else if (edit.kind === "conflict") {
+        // Its own worker already failed the test
+        file.edits.set(edit.start, edit);
+      } else if (prev.kind === "conflict" || prev.value !== edit.value) {
+        // The spot ran with different values in different workers. Like a
+        // run without workers, where the test that hit it fails.
         const line = file.source
           .slice(0, edit.start)
           .split(/\r\n|\r|\n/).length;
+        const message = `${NAME}() at ${thread.path}:${line} ran with different values in different test files`;
+        const tests = (prev.kind === "conflict" ? [edit] : [prev, edit])
+          .map((e) => e.test)
+          .filter((test) => test !== undefined);
 
-        errors.push({
-          file: thread.path,
-          message: `${NAME}() at ${thread.path}:${line} ran with different values in different test files`,
-        });
+        for (const test of tests) conflicts.push({ test, message });
+
+        if (tests.length === 0) errors.push({ file: thread.path, message });
+
+        file.edits.set(edit.start, { ...edit, kind: "conflict" });
       } else if (prev.kind === "same") {
         // A "same" never replaces a write for this spot
         file.edits.set(edit.start, edit);
@@ -558,7 +572,7 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
     }
   }
 
-  return { added, updated, filesWritten, skipped, errors };
+  return { added, updated, filesWritten, skipped, errors, conflicts };
 }
 
 function errorMessage(err: unknown): string {

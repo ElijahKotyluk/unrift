@@ -350,7 +350,21 @@ export async function runEngine(
 
   // After coverage: it reads plain JS files from disk, and an inline
   // snapshot written first would move the code it ran
-  const snapshots = writeInline(end.snapshots, end.inline);
+  const { summary: snapshots, conflicts } = writeInline(
+    end.snapshots,
+    end.inline,
+  );
+
+  for (const { test, message } of conflicts) {
+    for (const file of files) {
+      for (const result of file.results) {
+        if (result.description !== test) continue;
+
+        result.status = TaskStatus.Fail;
+        result.error ??= new Error(message);
+      }
+    }
+  }
 
   removeEmptyDirs(end.emptied);
 

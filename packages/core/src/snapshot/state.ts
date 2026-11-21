@@ -121,7 +121,12 @@ function getFile(testFile: string): SnapshotFile {
  * One per test. Each attempt runs in a fresh scope so a retry starts counting
  * from the same place. Only the last attempt is committed, when the test is done.
  */
-export function createSnapshotTest(testFile: string, testName: string) {
+/** `result` is the test's name in the results, see commitInlineEdits. */
+export function createSnapshotTest(
+  testFile: string,
+  testName: string,
+  result: string,
+) {
   let last: Scope | undefined;
 
   return {
@@ -154,7 +159,7 @@ export function createSnapshotTest(testFile: string, testName: string) {
     finish() {
       if (!last) return;
 
-      commitInlineEdits(last.inline);
+      commitInlineEdits(last.inline, result);
       inlineFailed += last.inlineFailed;
 
       if (last.counters.size === 0) return;
@@ -379,20 +384,29 @@ export function finishSnapshots(
   return { summary, inline: takeInlineEdits(), emptied };
 }
 
-/** Writes the inline snapshots of every thread and adds them to `summary`. */
+/**
+ * Writes the inline snapshots of every thread and adds them to `summary`.
+ * `conflicts` are tests to fail, their value conflicts with another worker's.
+ */
 export function writeInline(
   summary: SnapshotSummary,
   taken: InlineSource[],
-): SnapshotSummary {
+): {
+  summary: SnapshotSummary;
+  conflicts: Array<{ test: string; message: string }>;
+} {
   const inline = writeInlineSnapshots(taken);
 
   return {
-    ...summary,
-    added: summary.added + inline.added,
-    updated: summary.updated + inline.updated,
-    filesWritten: [...summary.filesWritten, ...inline.filesWritten],
-    inlineSkipped: inline.skipped,
-    errors: [...summary.errors, ...inline.errors],
+    conflicts: inline.conflicts,
+    summary: {
+      ...summary,
+      added: summary.added + inline.added,
+      updated: summary.updated + inline.updated,
+      filesWritten: [...summary.filesWritten, ...inline.filesWritten],
+      inlineSkipped: inline.skipped,
+      errors: [...summary.errors, ...inline.errors],
+    },
   };
 }
 

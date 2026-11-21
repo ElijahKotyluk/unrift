@@ -281,7 +281,11 @@ export class Suite {
         let totalMs = 0;
         const filePath = this.getFilePath();
         const snapshots = filePath
-          ? createSnapshotTest(filePath, this.getSnapshotName(test))
+          ? createSnapshotTest(
+              filePath,
+              this.getSnapshotName(test),
+              `${this.getFullDescription()} › ${test.description}`,
+            )
           : undefined;
 
         const runAttempt = async () => {

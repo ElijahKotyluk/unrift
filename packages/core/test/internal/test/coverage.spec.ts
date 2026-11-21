@@ -175,11 +175,14 @@ it("neg", () => {
 `,
     });
 
-    const math = fileIn(ws.run("--coverage").report, "src/math.ts")!;
+    // In two workers too, the main thread adds up what each one ran
+    for (const args of [[], ["--workers", "2"]]) {
+      const math = fileIn(ws.run("--coverage", ...args).report, "src/math.ts")!;
 
-    expect(math.uncoveredLines).toEqual([16, 17, 18, 19]);
-    expect(math.functions).toMatchObject({ covered: 2, total: 3 });
-    expect(math.branches).toMatchObject({ covered: 2, total: 2 });
+      expect(math.uncoveredLines).toEqual([16, 17, 18, 19]);
+      expect(math.functions).toMatchObject({ covered: 2, total: 3 });
+      expect(math.branches).toMatchObject({ covered: 2, total: 2 });
+    }
   });
 
   it("filters files, writes lcov and json, and fails under a threshold", () => {
