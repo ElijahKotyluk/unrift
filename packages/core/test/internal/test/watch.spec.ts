@@ -29,7 +29,7 @@ function workspace(name: string, files: Record<string, string>) {
   return { dir, write };
 }
 
-function watch(dir: string) {
+function watch(dir: string, ...args: string[]) {
   const child = spawn(
     process.execPath,
     [
@@ -37,6 +37,7 @@ function watch(dir: string) {
       "--config",
       join(dir, "unrift.config.ts"),
       "--watch",
+      ...args,
     ],
     { env: { ...process.env, CI: "" } },
   );
@@ -79,7 +80,8 @@ it("b", () => void b);
 `,
     });
     const value = join(ws.dir, "src/value.ts");
-    const w = watch(ws.dir);
+    // The workers bundle the tests, they tell the main thread what to watch
+    const w = watch(ws.dir, "--workers", "2");
 
     try {
       expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(

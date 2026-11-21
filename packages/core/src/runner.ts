@@ -49,6 +49,7 @@ interface RunnerOptions {
   pattern?: RegExp;
   grep?: RegExp;
   timeoutMs?: number;
+  workers?: number;
   bail?: boolean;
   debug?: boolean;
   list?: boolean;
@@ -443,6 +444,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     grep: options.grep,
     retries: config?.retries,
     matchers: config?.matchers,
+    workers: options.workers ?? config?.workers,
     updateSnapshots: options.updateSnapshots ? "all" : undefined,
     coverage: coverageOn
       ? {

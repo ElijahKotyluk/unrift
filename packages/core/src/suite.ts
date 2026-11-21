@@ -237,7 +237,16 @@ export class Suite {
       for (let i = 0; i < this.tests.length; i++) {
         const test = this.tests[i];
 
-        if (state.bailed) break;
+        // Another worker bailed while this suite was running
+        if (state.bailed) {
+          for (let j = i; j < this.tests.length; j++) {
+            const t = this.tests[j];
+            if (t.status === TaskStatus.Pending) t.status = TaskStatus.Skipped;
+            t.durationMs = 0;
+          }
+
+          break;
+        }
 
         // Checked before skip/todo so a non-matching todo reports as skipped
         if (options?.grep && !this.testMatchesGrep(test, options.grep)) {
@@ -538,9 +547,7 @@ export function computeOnlyFlags(suite: Suite): boolean {
   return subtreeHasOnly;
 }
 
-// KNOWN LIMITATION: rootSuite is a global singleton. This means parallel test
-// execution in the same process is not supported. A future DI/context-container
-// pattern would be needed to support worker-based parallelism.
+// One per thread, a worker thread has its own (see workers.ts)
 export const rootSuite = new Suite("root");
 rootSuite.root = true;
 

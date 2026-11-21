@@ -62,6 +62,7 @@ The main difference is explicit imports. Unrift doesn't inject globals:
 | `jest -t "adds"` | `unrift --grep "adds"` | Different flag name, also matches the file path |
 | `jest --config path` | `unrift --config path` | Same concept |
 | `jest --testTimeout 5000` | `unrift --timeout 5000` | Different flag name |
+| `jest --maxWorkers 4` | `unrift --workers 4` | Worker threads, not processes. Off by default, Jest runs in parallel by default |
 | `jest.retryTimes(3)` | `retries: 3` | Set in the config or per test with `it(name, fn, { retries: 3 })` |
 | `jest --coverage` | `unrift --coverage` | V8 coverage, like Jest's `coverageProvider: "v8"` |
 | `collectCoverageFrom` | `coverage.include` | Unrift only reports files the tests loaded |
@@ -147,6 +148,5 @@ The test file has to be TypeScript, and the factory can't use the file's variabl
 
 These Jest features are planned but not yet available:
 
-- **Parallel execution** - tests run sequentially
 - **Custom reporters** - only built-in pretty and JSON output
 - **Browser/DOM environment** - Node.js only

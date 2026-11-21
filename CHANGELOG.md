@@ -4,6 +4,11 @@ Versions are `@unrift/core` / `unrift`.
 
 ## Unreleased
 
+- `--workers <n>` and the `workers` option run test files in worker threads. Each worker takes the next file when it's done, results are reported in file order. `--bail` stops the other workers too
+- Breaking: `.only` skips the other tests in its own file, not other files, like Jest and Vitest
+- A file's tests run right after it loads, before the next file is imported
+- Bundles are written to a temp file and renamed, so a run never imports a half-written one
+
 ## 0.10.0 / 0.11.0 - 2026-11-21
 
 - Breaking: Unrift needs Node 22.23.5+, 24.22.3+ or 26.13.1+, the November 2026 security releases. Older patches have known high-severity CVEs

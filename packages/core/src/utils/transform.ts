@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { threadId } from "node:worker_threads";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -9,6 +10,7 @@ import {
   realpathSync,
   rmSync,
   writeFileSync,
+  renameSync,
 } from "node:fs";
 import os from "node:os";
 import { join, basename, extname, resolve, dirname, sep } from "node:path";
@@ -180,9 +182,22 @@ const failedInputs = new Map<CacheKey, string[]>();
 let generation = 0;
 const usedIn = new Map<CacheKey, number>();
 
+// What worker threads bundled this run, they keep their own cache
+let fromWorkers = { files: new Set<string>(), failed: false };
+
 /** Starts a new run for `bundledFiles`. */
 export function startBundleRun(): void {
   generation++;
+  fromWorkers = { files: new Set(), failed: false };
+}
+
+/** Adds a worker's `bundledFiles()` to this thread's. */
+export function addBundledFiles(worker: {
+  files: string[];
+  failed: boolean;
+}): void {
+  for (const file of worker.files) fromWorkers.files.add(file);
+  if (worker.failed) fromWorkers.failed = true;
 }
 
 function hashFile(path: string): string | null {
@@ -202,8 +217,8 @@ function inputsUnchanged(entry: CacheEntry): boolean {
  * they import. `failed` is true when a build failed, its imports are unknown.
  */
 export function bundledFiles(): { files: string[]; failed: boolean } {
-  const files = new Set<string>();
-  let failed = false;
+  const files = new Set(fromWorkers.files);
+  let failed = fromWorkers.failed;
 
   for (const [key, run] of usedIn) {
     if (run !== generation) continue;
@@ -265,7 +280,12 @@ function ensureSelfLink(cacheRoot: string, projectRoot: string) {
   const type =
     process.platform === "win32" ? ("junction" as const) : ("dir" as const);
 
-  symlinkSync(projectRoot, linkPath, type);
+  try {
+    symlinkSync(projectRoot, linkPath, type);
+  } catch (err) {
+    // Another worker made it first
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  }
 }
 
 function pickCacheRoot(projectRoot: string, selfHost: boolean): string {
@@ -402,7 +422,12 @@ export async function toImportUrl(
       hashString(inputs.map((i) => `${i.path}\0${i.hash}`).join("\n")),
       coverage,
     );
-    writeFileSync(outFile, result.outputFiles[0].contents);
+    // Another worker may be writing or importing the same bundle, a rename
+    // never leaves a half-written file
+    const tmp = `${outFile}.${process.pid}.${threadId}.tmp`;
+
+    writeFileSync(tmp, result.outputFiles[0].contents);
+    renameSync(tmp, outFile);
   } catch (err) {
     const errors = (err as { errors?: Array<{ location?: { file: string } }> })
       .errors;

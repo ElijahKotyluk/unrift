@@ -22,9 +22,15 @@ import {
   type SnapshotSummary,
   type SnapshotUpdateMode,
 } from "./snapshot/state";
-import { startCoverage, stopCoverage, takeCoverage } from "./coverage/collect";
+import {
+  startCoverage,
+  stopCoverage,
+  takeCoverage,
+  type V8ScriptCoverage,
+} from "./coverage/collect";
 import { toFileCoverage, type FileCoverage } from "./coverage/convert";
 import { summarize, type CoverageSummary } from "./coverage/report";
+import { runInWorkers } from "./workers";
 
 export type RunEngineCoverageOptions = {
   /** Files outside it aren't reported. Defaults to the working directory. */
@@ -39,7 +45,7 @@ export type RunEngineCoverage = {
   summary: CoverageSummary;
 };
 
-type RunEngineOptions = {
+export type RunEngineOptions = {
   files: string[];
   timeoutMs?: number;
   bail?: boolean;
@@ -50,6 +56,8 @@ type RunEngineOptions = {
   updateSnapshots?: SnapshotUpdateMode;
   /** Collect coverage of the files the tests ran. */
   coverage?: boolean | RunEngineCoverageOptions;
+  /** Run the files in this many worker threads. Defaults to 1, no workers. */
+  workers?: number;
 };
 
 export type RunEngineResult = {
@@ -111,15 +119,25 @@ async function loadMatcherModules(specifiers?: string[]) {
   }
 }
 
-export async function runEngine(
-  options: RunEngineOptions,
-): Promise<RunEngineResult> {
-  const { files } = options;
+/** The options a worker gets, all of them can be copied to another thread. */
+export type EngineOptions = Omit<RunEngineOptions, "workers">;
 
-  // Validate before touching global state. A bad value (e.g. "3" from a JSON
-  // config) would otherwise turn into "31" attempts or zero.
-  assertValidRetries(options.retries, "runEngine");
+export type FileRun = {
+  file: string;
+  results: TestResult[];
+  /** The file has `.only`, so its other tests were skipped. */
+  hasOnly: boolean;
+};
 
+export type RunEnd = {
+  snapshots: SnapshotSummary;
+  /** V8 coverage of the run's own code, empty without coverage. */
+  scripts: V8ScriptCoverage[];
+  /** URLs of the test bundles, for coverage. */
+  bundles: string[];
+};
+
+function snapshotMode(options: EngineOptions): SnapshotUpdateMode {
   const updateMode = options.updateSnapshots ?? (isCI() ? "none" : "new");
 
   if (!["all", "new", "none"].includes(updateMode)) {
@@ -128,15 +146,49 @@ export async function runEngine(
     );
   }
 
+  return updateMode;
+}
+
+function workerCount(workers: unknown): number {
+  if (workers === undefined) return 1;
+
+  if (
+    typeof workers !== "number" ||
+    !Number.isInteger(workers) ||
+    workers < 1
+  ) {
+    throw new Error(
+      `workers must be a whole number of 1 or more, got ${JSON.stringify(workers)}`,
+    );
+  }
+
+  return workers;
+}
+
+function coverageOptions(
+  options: EngineOptions,
+): RunEngineCoverageOptions | undefined {
+  return options.coverage === true ? {} : options.coverage || undefined;
+}
+
+/**
+ * A run in this thread: `runFile` for each test file, then `finish` once.
+ * A worker thread starts one and runs the files the main thread sends it.
+ *
+ * `state.bailed` stops the run, a worker sets it when another one bails.
+ */
+export async function startRun(
+  options: EngineOptions,
+  state: { bailed: boolean } = { bailed: false },
+) {
   clearContext();
   runCount++;
 
-  resetSnapshots(updateMode);
+  resetSnapshots(snapshotMode(options));
 
   ensureInternalMatchers();
 
-  const coverage =
-    options.coverage === true ? {} : options.coverage || undefined;
+  const coverage = coverageOptions(options);
 
   // Before any user code loads, code compiled earlier isn't counted
   if (coverage) await startCoverage();
@@ -146,22 +198,19 @@ export async function runEngine(
 
   await loadMatcherModules(options.matchers);
 
-  const timeoutMs = options.timeoutMs;
-  const bail = options.bail ?? false;
+  /** Imports the file, which registers its tests, and runs them. */
+  async function runFile(file: string): Promise<FileRun> {
+    const fileSuite = new Suite(
+      normalizePath(file),
+      rootSuite,
+      TaskMode.Default,
+    );
 
-  unriftGlobalContext.state = RunState.Register;
+    rootSuite.addSuite(fileSuite);
+    unriftGlobalContext.currentSuite = fileSuite;
+    unriftGlobalContext.state = RunState.Register;
 
-  try {
-    for (const file of files) {
-      const fileSuite = new Suite(
-        normalizePath(file),
-        rootSuite,
-        TaskMode.Default,
-      );
-
-      rootSuite.addSuite(fileSuite);
-      unriftGlobalContext.currentSuite = fileSuite;
-
+    try {
       try {
         forgetCommonJs(file);
 
@@ -174,12 +223,7 @@ export async function runEngine(
 
         await import(url);
       } catch (err) {
-        const error = toError(err);
-
-        fileSuite.errors.push({
-          label: "import",
-          error,
-        });
+        fileSuite.errors.push({ label: "import", error: toError(err) });
 
         // Tests registered before the error mustn't run. The run loop goes by
         // mode, so marking statuses alone wasn't enough.
@@ -188,34 +232,36 @@ export async function runEngine(
       } finally {
         unriftGlobalContext.currentSuite = rootSuite;
       }
+
+      // Per file, like Jest and Vitest: `.only` skips the file's other tests
+      const hasOnly = computeOnlyFlags(fileSuite);
+
+      unriftGlobalContext.state = RunState.Run;
+
+      await fileSuite.run(
+        {
+          timeoutMs: options.timeoutMs,
+          bail: options.bail ?? false,
+          grep: options.grep,
+          retries: options.retries,
+        },
+        state,
+        hasOnly,
+        false,
+      );
+
+      return {
+        file: fileSuite.description,
+        results: fileSuite.getResults(),
+        hasOnly,
+      };
+    } finally {
+      unriftGlobalContext.state = RunState.Idle;
     }
+  }
 
-    const isOnly = computeOnlyFlags(rootSuite);
-
-    unriftGlobalContext.state = RunState.Run;
-
-    await rootSuite.run(
-      { timeoutMs, bail, grep: options.grep, retries: options.retries },
-      { bailed: false },
-      isOnly,
-      false,
-    );
-
-    const results = rootSuite.getResults();
-
-    let coverageResult: RunEngineCoverage | undefined;
-
-    if (coverage) {
-      const covered = toFileCoverage(await takeCoverage(), bundles, {
-        root: coverage.root ?? process.cwd(),
-        include: coverage.include,
-        exclude: coverage.exclude,
-        testFiles: files,
-      });
-
-      coverageResult = { files: covered, summary: summarize(covered) };
-    }
-
+  /** Writes the run's snapshots and takes its coverage. */
+  async function finish(): Promise<RunEnd> {
     // A file that failed to import never ran, leave its snapshots alone
     const snapshots = finishSnapshots(
       rootSuite.suites
@@ -226,16 +272,65 @@ export async function runEngine(
         })),
     );
 
-    return {
-      isOnly,
-      timeoutMs,
-      bail,
-      results,
-      snapshots,
-      coverage: coverageResult,
-    };
-  } finally {
-    unriftGlobalContext.state = RunState.Idle;
-    unriftGlobalContext.currentSuite = rootSuite;
+    // Packages are never reported, leave them out
+    const scripts = coverage
+      ? (await takeCoverage()).filter(
+          (script) =>
+            bundles.has(script.url) ||
+            (script.url.startsWith("file:") &&
+              !script.url.includes("/node_modules/")),
+        )
+      : [];
+
+    return { snapshots, scripts, bundles: [...bundles] };
   }
+
+  return { runFile, finish };
+}
+
+export async function runEngine(
+  options: RunEngineOptions,
+): Promise<RunEngineResult> {
+  // Before touching global state. A bad value (e.g. "3" from a JSON config)
+  // would otherwise turn into "31" attempts or zero.
+  assertValidRetries(options.retries, "runEngine");
+  snapshotMode(options);
+
+  const workers = Math.min(workerCount(options.workers), options.files.length);
+
+  let files: FileRun[];
+  let end: RunEnd;
+
+  if (workers > 1) {
+    ({ files, end } = await runInWorkers(options, workers));
+  } else {
+    const run = await startRun(options);
+
+    files = [];
+    for (const file of options.files) files.push(await run.runFile(file));
+    end = await run.finish();
+  }
+
+  const coverage = coverageOptions(options);
+  let coverageResult: RunEngineCoverage | undefined;
+
+  if (coverage) {
+    const covered = toFileCoverage(end.scripts, new Set(end.bundles), {
+      root: coverage.root ?? process.cwd(),
+      include: coverage.include,
+      exclude: coverage.exclude,
+      testFiles: options.files,
+    });
+
+    coverageResult = { files: covered, summary: summarize(covered) };
+  }
+
+  return {
+    isOnly: files.some((file) => file.hasOnly),
+    timeoutMs: options.timeoutMs,
+    bail: options.bail ?? false,
+    results: files.flatMap((file) => file.results),
+    snapshots: end.snapshots,
+    coverage: coverageResult,
+  };
 }

@@ -34,6 +34,7 @@ console.log(`Failed: ${result.results.filter(r => r.status === "fail").length}`)
 | `matchers` | `string[]` | - | Module specifiers for custom matchers to load |
 | `updateSnapshots` | `"all" \| "new" \| "none"` | `"none"` on CI, otherwise `"new"` | `"all"` is `-u`, `"new"` writes new snapshots only, `"none"` writes nothing |
 | `coverage` | `boolean \| { root?, include?, exclude? }` | - | Collect coverage. Files outside `root` (default: the working directory) aren't reported |
+| `workers` | `number` | `1` | Run the files in this many worker threads |
 
 ## Return value
 

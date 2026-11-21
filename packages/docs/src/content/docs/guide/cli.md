@@ -19,6 +19,7 @@ The first positional argument is a regex pattern to filter test files by path. U
 | `-g, --grep <pattern>` | Only run tests whose full name matches the regex |
 | `-b, --bail` | Stop on first test failure |
 | `-t, --timeout <ms>` | Default test timeout in milliseconds |
+| `--workers <n>` | Run test files in `n` worker threads, see [Workers](#workers) |
 | `-w, --watch` | Re-run tests automatically when files change |
 | `-u, --update-snapshots` | Rewrite snapshots that don't match and remove obsolete ones |
 | `--coverage` | Report code coverage, see [Coverage](/guide/coverage/) |
@@ -44,6 +45,9 @@ unrift --grep "adds numbers"
 
 # Stop on first failure with a 10s timeout
 unrift --bail --timeout 10000
+
+# Run files in 4 worker threads
+unrift --workers 4
 
 # Watch mode - re-run on file changes
 unrift --watch
@@ -75,6 +79,21 @@ Tests that don't match show up as skipped so the totals stay the same, and a mat
 `--watch` reruns when anything in the test dir changes, or a file a TypeScript test or config imports, like your source files. A new import is watched from the run that first loads it.
 
 Files imported only by `.js` test files or a `.js` config aren't watched, Node loads those without bundling.
+
+## Workers
+
+`--workers <n>` runs test files in `n` worker threads at once. Each worker takes the next file when it's done with one, and the results are reported in file order like a run without workers.
+
+A worker has its own modules, globals, mocks and copy of `process.env`, files in different workers don't share them. Files in the same worker run one after another, like they do without workers.
+
+Things that work differently in a worker:
+
+- `process.chdir()` throws, the working directory is the process's
+- `process.exit()` in a test stops its worker, and the run fails
+- Files on disk are shared, two files writing the same path can collide
+- `console.log` from tests in different workers can interleave
+
+`--bail` stops the other workers too. Tests they already started finish, the rest are skipped.
 
 ## JSON output
 
