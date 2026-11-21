@@ -46,6 +46,7 @@ type RunEngineResult = {
   timeoutMs?: number;    // timeout used
   bail: boolean;         // bail mode
   results: Array<{
+    id?: string;         // unique in the run, names can repeat. Not set for hook errors
     description: string; // full test name (suite > test)
     status: TaskStatus;  // "pass" | "fail" | "skipped" | "todo"
     error?: Error;       // error details if failed

@@ -87,10 +87,11 @@ describe("workers", () => {
     expect(lines(res.stderr)).toEqual(["log: b error"]);
   });
 
-  it("merges inline snapshots from a helper two workers run", () => {
+  it("merges inline snapshots from a helper workers share", () => {
     const dir = resolve(process.cwd(), "test/workers/.work/inline");
     const helper = join(dir, "helper.ts");
-    const runWith = (a: string, b: string) => {
+    // Each file is a list of tests: [name, value], or [name, value, "skip"]
+    const runWith = (files: string[][][]) => {
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(join(dir, "test"), { recursive: true });
       writeFileSync(
@@ -102,15 +103,19 @@ describe("workers", () => {
         `import { expect } from "@unrift/core";\nexport const check = (value: string) => expect(value).toMatchInlineSnapshot();\n`,
       );
 
-      for (const [name, value] of [
-        ["a", a],
-        ["b", b],
-      ]) {
+      files.forEach((tests, i) => {
+        const body = tests
+          .map(
+            ([name, value, skip]) =>
+              `it${skip ? ".skip" : ""}("${name}", () => check("${value}"));`,
+          )
+          .join("\n");
+
         writeFileSync(
-          join(dir, `test/${name}.spec.ts`),
-          `import { it } from "@unrift/core";\nimport { check } from "../helper";\nit("${name}", () => check("${value}"));\n`,
+          join(dir, `test/${i}.spec.ts`),
+          `import { it } from "@unrift/core";\nimport { check } from "../helper";\n${body}\n`,
         );
-      }
+      });
 
       const res = spawnSync(
         process.execPath,
@@ -120,35 +125,58 @@ describe("workers", () => {
           join(dir, "unrift.config.ts"),
           "--json",
           "--workers",
-          "2",
+          String(files.length),
         ],
         { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
       );
+      const report = JSON.parse(res.stdout);
 
-      return JSON.parse(res.stdout);
+      return {
+        failed: report.snapshots.failed,
+        statuses: report.results.map(
+          (r: { description: string; status: string }) =>
+            `${r.description.split(" › ").pop()}: ${r.status}`,
+        ),
+      };
     };
 
     // Written once, not skipped as changed by the other worker
-    expect(runWith("same", "same").snapshots).toMatchObject({
-      added: 1,
-      errors: [],
-    });
+    expect(runWith([[["a", "same"]], [["b", "same"]]]).failed).toBe(0);
     expect(readFileSync(helper, "utf8")).toContain(
       'toMatchInlineSnapshot(`"same"`)',
     );
 
-    // Both tests fail, like the second one would without workers
-    const conflict = runWith("one", "two");
-    const failed = conflict.results.map(
-      (r: { status: string; error?: { message: string } }) =>
-        `${r.status}: ${r.error?.message.split(" ran ")[1]}`,
-    );
-
-    expect(failed).toEqual([
-      "fail: with different values in different test files",
-      "fail: with different values in different test files",
-    ]);
+    // Every test at the spot fails, the two with equal values too, but not
+    // a skipped test that has the same name
+    expect(
+      runWith([
+        [
+          ["a", "one"],
+          ["a", "one", "skip"],
+        ],
+        [["b", "one"]],
+        [["c", "two"]],
+      ]),
+    ).toEqual({
+      failed: 3,
+      statuses: ["a: fail", "a: skipped", "b: fail", "c: fail"],
+    });
     expect(readFileSync(helper, "utf8")).toContain("toMatchInlineSnapshot()");
+
+    // A worker that conflicts on its own fails the other worker's test too,
+    // whichever finishes first
+    expect(
+      runWith([
+        [["a", "one"]],
+        [
+          ["b", "one"],
+          ["c", "two"],
+        ],
+      ]),
+    ).toEqual({
+      failed: 3,
+      statuses: ["a: fail", "b: fail", "c: fail"],
+    });
   });
 
   it("writes nothing to a file workers bundled in two versions", () => {

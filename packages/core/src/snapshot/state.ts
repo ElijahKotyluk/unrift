@@ -121,11 +121,11 @@ function getFile(testFile: string): SnapshotFile {
  * One per test. Each attempt runs in a fresh scope so a retry starts counting
  * from the same place. Only the last attempt is committed, when the test is done.
  */
-/** `result` is the test's name in the results, see commitInlineEdits. */
+/** `testId` is the test's id in the results, see commitInlineEdits. */
 export function createSnapshotTest(
   testFile: string,
   testName: string,
-  result: string,
+  testId: string,
 ) {
   let last: Scope | undefined;
 
@@ -159,7 +159,7 @@ export function createSnapshotTest(
     finish() {
       if (!last) return;
 
-      commitInlineEdits(last.inline, result);
+      commitInlineEdits(last.inline, testId);
       inlineFailed += last.inlineFailed;
 
       if (last.counters.size === 0) return;

@@ -39,6 +39,8 @@ function appendHookFailure(
 }
 
 export interface TestResult {
+  /** Unique in the run, unlike the description. Not set for hook errors. */
+  id?: string;
   description: string;
   status: TaskStatus;
   error?: Error;
@@ -284,7 +286,7 @@ export class Suite {
           ? createSnapshotTest(
               filePath,
               this.getSnapshotName(test),
-              `${this.getFullDescription()} › ${test.description}`,
+              this.testId(test),
             )
           : undefined;
 
@@ -466,6 +468,11 @@ export class Suite {
     return names.join(" ");
   }
 
+  /** A file runs in one worker, so its path makes the id unique across them. */
+  testId(test: Test): string {
+    return `${this.getFilePath() ?? ""}#${test.id}`;
+  }
+
   getFullDescription(): string {
     if (!this.parent || this.parent.root) return this.description;
     return `${this.parent.getFullDescription()} › ${this.description}`;
@@ -516,6 +523,7 @@ export class Suite {
 
     for (const test of this.tests) {
       results.push({
+        id: this.testId(test),
         description: `${this.getFullDescription()} › ${test.description}`,
         status: test.status,
         error: test.error,

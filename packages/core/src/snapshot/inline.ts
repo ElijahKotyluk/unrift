@@ -24,10 +24,10 @@ export interface InlineEdit {
    */
   kind: "new" | "update" | "same" | "conflict";
   /**
-   * The test that made it, by its name in the results. A conflict found once
-   * every worker is done fails the tests on both sides.
+   * Ids of every test that hit this spot, equal values included. A conflict
+   * between workers fails all of them.
    */
-  test?: string;
+  tests?: string[];
 }
 
 /** Edits by file, then by where the argument starts. */
@@ -205,14 +205,19 @@ function queueEdit(
 }
 
 /** Called when a test is done, with its last attempt's edits. */
-export function commitInlineEdits(pending: InlineEdits, test?: string) {
+export function commitInlineEdits(pending: InlineEdits, testId?: string) {
   for (const [path, edits] of pending) {
     const file = getSource(path);
 
     for (const [start, edit] of edits) {
-      if (edit.kind !== "same" || !file.edits.has(start)) {
-        file.edits.set(start, { ...edit, test });
-      }
+      const prev = file.edits.get(start);
+      const tests = [...(prev?.tests ?? []), ...(testId ? [testId] : [])];
+
+      // A "same" never replaces a pending write, it still counts the test
+      file.edits.set(
+        start,
+        edit.kind !== "same" || !prev ? { ...edit, tests } : { ...prev, tests },
+      );
     }
   }
 }
@@ -457,9 +462,10 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
     string,
     {
       source: string;
-      edits: Map<number, InlineEdit>;
+      // What each thread saw at each spot
+      spots: Map<number, InlineEdit[]>;
       missed: boolean;
-      // Seen in two versions, nothing more is written to it
+      // Seen in two versions, nothing is written to it
       mismatched: boolean;
     }
   >();
@@ -470,7 +476,7 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
     if (!file) {
       file = {
         source: thread.source,
-        edits: new Map(),
+        spots: new Map(),
         missed: false,
         mismatched: false,
       };
@@ -479,51 +485,63 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
 
     if (thread.missed) file.missed = true;
 
-    // Bundled from different versions, the offsets don't line up. Later
-    // threads that match the first one don't make it right again.
+    // Bundled from different versions, the offsets don't line up
     if (thread.source !== file.source) file.mismatched = true;
 
+    for (const edit of thread.edits) {
+      file.spots.set(edit.start, [...(file.spots.get(edit.start) ?? []), edit]);
+    }
+  }
+
+  // Decided per spot once every thread is in, so the order they finished in
+  // doesn't matter
+  const resolved = new Map<string, InlineEdit[]>();
+
+  for (const [path, file] of merged) {
     if (file.mismatched) {
       file.missed = true;
-      file.edits.clear();
       continue;
     }
 
-    for (const edit of thread.edits) {
-      const prev = file.edits.get(edit.start);
+    const edits: InlineEdit[] = [];
 
-      if (!prev) {
-        file.edits.set(edit.start, edit);
-      } else if (edit.kind === "conflict") {
-        // Its own worker already failed the test
-        file.edits.set(edit.start, edit);
-      } else if (prev.kind === "conflict" || prev.value !== edit.value) {
-        // The spot ran with different values in different workers. Like a
-        // run without workers, where the test that hit it fails.
-        const line = file.source
-          .slice(0, edit.start)
-          .split(/\r\n|\r|\n/).length;
-        const message = `${NAME}() at ${thread.path}:${line} ran with different values in different test files`;
-        const tests = (prev.kind === "conflict" ? [edit] : [prev, edit])
-          .map((e) => e.test)
-          .filter((test) => test !== undefined);
+    for (const seen of file.spots.values()) {
+      const values = new Set(
+        seen.filter((e) => e.kind !== "conflict").map((e) => e.value),
+      );
 
-        for (const test of tests) conflicts.push({ test, message });
-
-        if (tests.length === 0) errors.push({ file: thread.path, message });
-
-        file.edits.set(edit.start, { ...edit, kind: "conflict" });
-      } else if (prev.kind === "same") {
-        // A "same" never replaces a write for this spot
-        file.edits.set(edit.start, edit);
+      // One thread: its own check already ran
+      if (
+        seen.length === 1 ||
+        (values.size === 1 && seen.every((e) => e.kind !== "conflict"))
+      ) {
+        edits.push(
+          seen.find((e) => e.kind === "new" || e.kind === "update") ?? seen[0],
+        );
+        continue;
       }
+
+      // Different values in different workers. Like a run without workers,
+      // where the test that hit it fails, but every one of them: there's no
+      // telling which ran first.
+      const line = file.source
+        .slice(0, seen[0].start)
+        .split(/\r\n|\r|\n/).length;
+      const message = `${NAME}() at ${path}:${line} ran with different values in different test files`;
+      const tests = new Set(seen.flatMap((e) => e.tests ?? []));
+
+      for (const test of tests) conflicts.push({ test, message });
+
+      if (tests.size === 0) errors.push({ file: path, message });
     }
+
+    resolved.set(path, edits);
   }
 
   for (const [path, file] of merged) {
     if (file.missed) skipped.push(path);
 
-    const edits = [...file.edits.values()]
+    const edits = (resolved.get(path) ?? [])
       .filter((edit) => edit.kind === "new" || edit.kind === "update")
       .sort((a, b) => b.start - a.start);
 

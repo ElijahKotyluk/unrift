@@ -7,7 +7,11 @@ import { toError } from "./utils/toError";
  */
 const realPerformanceNow = performance.now.bind(performance);
 
+// Names repeat, this doesn't. See Suite.testId.
+let nextId = 0;
+
 export class Test {
+  readonly id = nextId++;
   description: string;
   durationMs: number = 0;
   error?: Error;
