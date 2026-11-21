@@ -334,10 +334,6 @@ export async function runEngine(
     end = await run.finish();
   }
 
-  const snapshots = writeInline(end.snapshots, end.inline);
-
-  removeEmptyDirs(end.emptied);
-
   const coverage = coverageOptions(options);
   let coverageResult: RunEngineCoverage | undefined;
 
@@ -351,6 +347,12 @@ export async function runEngine(
 
     coverageResult = { files: covered, summary: summarize(covered) };
   }
+
+  // After coverage: it reads plain JS files from disk, and an inline
+  // snapshot written first would move the code it ran
+  const snapshots = writeInline(end.snapshots, end.inline);
+
+  removeEmptyDirs(end.emptied);
 
   return {
     isOnly: files.some((file) => file.hasOnly),

@@ -95,6 +95,7 @@ Things that work differently in a worker:
 - `process.chdir()` throws, the working directory is the process's
 - `process.exit()` in a test stops its worker, and the run fails
 - Files on disk are shared, two files writing the same path can collide
+- Only `process.stdout` and `process.stderr` are held per file. A child process started with `stdio: "inherit"`, or a write straight to file descriptor 1 or 2, goes out right away and can mix with another file's output
 
 `--bail` stops the other workers too. Tests they already started finish, the rest are skipped.
 
