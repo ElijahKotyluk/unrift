@@ -30,6 +30,14 @@ function workspace(name: string, files: Record<string, string>) {
 }
 
 function watch(dir: string, ...args: string[]) {
+  return watchWith({}, dir, ...args);
+}
+
+function watchWith(
+  env: Record<string, string>,
+  dir: string,
+  ...args: string[]
+) {
   const child = spawn(
     process.execPath,
     [
@@ -39,7 +47,7 @@ function watch(dir: string, ...args: string[]) {
       "--watch",
       ...args,
     ],
-    { env: { ...process.env, CI: "" } },
+    { env: { ...process.env, CI: "", ...env } },
   );
   const out = { text: "" };
 
@@ -222,6 +230,28 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       w.kill();
     }
   }, 15000);
+
+  it("says it's watching once the watchers are set up", async () => {
+    const ws = workspace("ready", {
+      "unrift.config.ts": `export default { testDir: "test" };\n`,
+      "test/a.spec.ts": `import { it } from "@unrift/core";\nit("a", () => {});\n`,
+    });
+    const w = watchWith({ UNRIFT_DEBUG: "1" }, ws.dir);
+
+    try {
+      expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
+        true,
+      );
+
+      const text = w.out.text;
+
+      expect(
+        text.indexOf(`[unrift] watching ${join(ws.dir, "test")}`),
+      ).toBeLessThan(text.indexOf("for changes"));
+    } finally {
+      w.kill();
+    }
+  });
 
   it("reloads an edited config Node runs without bundling", () => {
     // Watch mode loads the config again on every run

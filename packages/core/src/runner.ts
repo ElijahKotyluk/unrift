@@ -1110,8 +1110,6 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
   let { testDir, configDir, configPath } = await resolveDirs(options);
 
-  logWatching(testDir);
-
   let running = false;
   let runStart = 0;
   // A change saved during a run, run again for it after
@@ -1211,6 +1209,10 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
   let stop = watchRecursive(testDir, rerun);
 
   watchImports();
+
+  // Once it is: a pipe to stdout is written synchronously on Linux, a test
+  // or script reading it could save a file before the watchers are set up
+  logWatching(testDir);
 
   // Keep process alive and clean up on exit
   process.on("SIGINT", () => {
