@@ -393,6 +393,9 @@ describe("workers", () => {
       hook: `import { beforeAll, it } from "@unrift/core";\nbeforeAll(() => new Promise(() => {}));\nit("x", () => {});\n`,
       test: `import { it } from "@unrift/core";\nit("before", () => {});\nit("stuck", () => new Promise(() => {}));\nit("after", () => {});\n`,
       top: `await new Promise(() => {});\n`,
+      // Real timers again in the next file, its fetch body reads
+      fake: `import { it, mock } from "@unrift/core";\nit("left on", () => { mock.useFakeTimers({ toFake: ["setTimeout", "queueMicrotask", "process.nextTick"] }); });\n`,
+      fetch: `import { it, expect } from "@unrift/core";\nit("reads", async () => { await new Promise((r) => setTimeout(r, 5)); expect(await new Response("ok").text()).toBe("ok"); });\n`,
       // Only the results decide the exit code
       code: `import { it } from "@unrift/core";\nit("sets it", () => { process.exitCode = 1; });\n`,
     };
@@ -433,6 +436,8 @@ describe("workers", () => {
       status: 1,
       results: [
         "code.spec.ts › sets it: pass",
+        "fake.spec.ts › left on: pass",
+        "fetch.spec.ts › reads: pass",
         "hook.spec.ts > [stalled]: fail",
         "hook.spec.ts › x: skipped",
         "test.spec.ts › before: pass",

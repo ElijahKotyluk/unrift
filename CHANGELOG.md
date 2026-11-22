@@ -12,6 +12,7 @@ Versions are `@unrift/core` / `unrift`.
 - A test, hook or file waiting on a promise that nothing is left to settle fails, and the run goes on. Before, the run could exit 0 with nothing printed, or hang with workers
 - Only the results decide the exit code, a test that sets `process.exitCode` doesn't
 - Watch mode reruns for a file deleted or renamed during a run
+- Breaking: `useFakeTimers()` leaves `queueMicrotask` and `process.nextTick` real unless they're in `toFake`, like Vitest. Faked, reading a stream like a `fetch` body never finished. Fake timers a test leaves on end with its file
 - Breaking: a suite's `beforeAll` and `afterAll` don't run when none of its tests do, like Jest and Vitest
 - A file's tests run right after it loads, before the next file is imported
 - Bundles are written to a temp file and renamed, so a run never imports a half-written one

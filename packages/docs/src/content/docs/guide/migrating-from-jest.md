@@ -105,7 +105,7 @@ Unrift ships a built-in mocking suite. Drop the `jest.` prefix:
 | `jest.fn()` | `mock.fn()` (or `spy()`) |
 | `jest.fn(impl)` | `mock.fn(impl)` |
 | `jest.spyOn(obj, "method")` | `mock.spyOn(obj, "method")` (or `spyOn`) |
-| `jest.useFakeTimers()` | `mock.useFakeTimers()` |
+| `jest.useFakeTimers()` | `mock.useFakeTimers()`, `queueMicrotask` and `process.nextTick` stay real unless in `toFake` |
 | `jest.useFakeTimers({ doNotFake: [...] })` | `mock.useFakeTimers({ doNotFake: [...] })` |
 | `jest.useFakeTimers({ toFake: [...] })` | `mock.useFakeTimers({ toFake: [...] })` |
 | `jest.advanceTimersByTime(ms)` | `mock.advanceTimersByTime(ms)` |

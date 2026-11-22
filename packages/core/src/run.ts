@@ -38,6 +38,7 @@ import { summarize, type CoverageSummary } from "./coverage/report";
 import { runInWorkers } from "./workers";
 import { registerModuleLoader } from "./mock/register-loader";
 import { setRunGeneration, setSharedFiles } from "./mock/module-loader";
+import { useRealTimers } from "./mock/timers";
 
 export type RunEngineCoverageOptions = {
   /** Files outside it aren't reported. Defaults to the working directory. */
@@ -426,6 +427,9 @@ export async function startRun(
       };
     } finally {
       unriftGlobalContext.state = RunState.Idle;
+      // Fake timers a test left on are this file's, the next one gets real
+      // ones like in Jest and Vitest
+      useRealTimers();
     }
   }
 

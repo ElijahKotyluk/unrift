@@ -130,8 +130,20 @@ describe("mock - setInterval", () => {
 });
 
 describe("mock - queueMicrotask and process.nextTick", () => {
-  it("microtasks fire before macrotasks scheduled at the same time", () => {
+  it("leaves them real by default, so a stream still reads", async () => {
+    const realQueueMicrotask = queueMicrotask;
+    const realNextTick = process.nextTick;
+
     mock.useFakeTimers();
+    expect([queueMicrotask, process.nextTick]).toEqual([
+      realQueueMicrotask,
+      realNextTick,
+    ]);
+    expect(await new Response("ok").text()).toBe("ok");
+  });
+
+  it("microtasks fire before macrotasks scheduled at the same time", () => {
+    mock.useFakeTimers({ toFake: ["setTimeout", "queueMicrotask"] });
     const order: string[] = [];
 
     setTimeout(() => order.push("timeout"), 0);
@@ -142,7 +154,7 @@ describe("mock - queueMicrotask and process.nextTick", () => {
   });
 
   it("process.nextTick fires before timers", () => {
-    mock.useFakeTimers();
+    mock.useFakeTimers({ toFake: ["setTimeout", "process.nextTick"] });
     const order: string[] = [];
 
     setTimeout(() => order.push("timeout"), 0);
