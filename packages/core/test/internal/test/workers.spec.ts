@@ -346,6 +346,54 @@ describe("workers", () => {
     ]);
   });
 
+  it("keeps output from what the top level's beforeAll starts out of its first file", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/setup-timer");
+    const specs = {
+      a: `it("a", () => {});`,
+      b: `it("b", async () => { await wait(1500); console.log("log: b"); });`,
+      c: `it("c", async () => { await wait(900); console.log("log: c"); });`,
+    };
+
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "test"), { recursive: true });
+    writeFileSync(
+      join(dir, "setup.mjs"),
+      `import { beforeAll } from "@unrift/core";\nbeforeAll(() => { setTimeout(() => console.log("log: setup timer"), 600); });\n`,
+    );
+    writeFileSync(
+      join(dir, "unrift.config.ts"),
+      `export default { testDir: "test", matchers: [${JSON.stringify(join(dir, "setup.mjs"))}] };\n`,
+    );
+
+    for (const [name, body] of Object.entries(specs)) {
+      writeFileSync(
+        join(dir, `test/${name}.spec.ts`),
+        `import { it } from "@unrift/core";\nconst wait = (ms: number) => new Promise((r) => setTimeout(r, ms));\nvoid wait;\n${body}\n`,
+      );
+    }
+
+    const out = spawnSync(
+      process.execPath,
+      [
+        resolve(process.cwd(), "bin/unrift.mjs"),
+        "--config",
+        join(dir, "unrift.config.ts"),
+        "--workers",
+        "2",
+      ],
+      { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
+    ).stdout;
+
+    // Each worker's timer goes with the file it's running, a's worker is on
+    // c by then. As a's, it'd go out first, a was printed already.
+    expect(out.split("\n").filter((line) => line.startsWith("log:"))).toEqual([
+      "log: setup timer",
+      "log: b",
+      "log: setup timer",
+      "log: c",
+    ]);
+  });
+
   it("runs the top level's beforeAll and afterAll in each worker", () => {
     const dir = resolve(process.cwd(), "test/workers/.work/root-hooks");
 
@@ -445,6 +493,15 @@ for (let i = 0; i < 2; i++) {
       "a.spec.ts › a: pass",
       "b.spec.ts › b: pass",
     ]);
+    expect(ran()).toBe(5);
+
+    // Nothing to run, nothing to set up: no beforeAll, no afterAll
+    expect(
+      statuses("--workers", "2", "--grep", "nothing matches"),
+    ).not.toContain("root > [afterAll]: fail");
+    expect(statuses("--grep", "nothing matches")).not.toContain(
+      "root > [afterAll]: fail",
+    );
     expect(ran()).toBe(5);
   });
 
@@ -753,6 +810,31 @@ console.log(results.map((r) => r.status).join(","));`;
     expect(JSON.parse(cli.stdout).results.map((r: Result) => r.status)).toEqual(
       ["pass", "pass"],
     );
+  });
+
+  it("keeps a spot every test hits cheap", () => {
+    const file = resolve(process.cwd(), "test/workers/.work/hot.ts");
+    const edit = {
+      start: 28,
+      end: 28,
+      value: '"x"',
+      indent: "",
+      kind: "same" as const,
+    };
+
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "check(toMatchInlineSnapshot());\n");
+    resetInlineSnapshots();
+
+    // Copying the test ids on every commit took seconds here
+    const start = performance.now();
+
+    for (let i = 0; i < 50_000; i++) {
+      commitInlineEdits(new Map([[file, new Map([[28, edit]])]]), `t${i}`);
+      if (i % 100 === 0) takeInlineEdits();
+    }
+
+    expect(performance.now() - start).toBeLessThan(500);
   });
 
   it("applies .only per file", () => {

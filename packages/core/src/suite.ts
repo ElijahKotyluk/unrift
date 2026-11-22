@@ -171,6 +171,27 @@ export class Suite {
     return afterEachHooks;
   }
 
+  /** False when run() would skip this suite, its hooks included. */
+  willRun(
+    options: RunOptions | undefined,
+    state: SuiteRunState,
+    isOnly: boolean,
+    ancestorOnly = false,
+  ): boolean {
+    if (state.bailed) return false;
+    if (this.mode === TaskMode.Skip || this.mode === TaskMode.Todo)
+      return false;
+
+    const inOnlyContext = ancestorOnly || this.mode === TaskMode.Only;
+
+    if (isOnly && !this.subtreeHasOnly && !inOnlyContext) return false;
+
+    return (
+      !options?.grep ||
+      this.hasRunnableMatch(options.grep, isOnly, inOnlyContext)
+    );
+  }
+
   async run(
     options?: RunOptions,
     state: SuiteRunState = { bailed: false },

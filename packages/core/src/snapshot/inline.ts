@@ -50,17 +50,18 @@ interface SourceFile {
 
 const sources = new Map<string, SourceFile>();
 const sourceMaps = new Map<string, SourceMap | null>();
-// What takeInlineEdits sent of each source, the next take sends what changed
-const sent = new Map<
-  string,
-  { edits: Map<number, InlineEdit>; missed: boolean }
->();
+// What changed since the last takeInlineEdits: the spots of each source, a
+// source with none is new or missed a write. A take looks only at these.
+const changed = new Map<string, Set<number>>();
+// How many of each spot's test ids a take sent, by source and spot
+const sent = new Map<string, Map<number, { tests: number; failed: number }>>();
 
 let runStartedAt = 0;
 
 export function resetInlineSnapshots() {
   sources.clear();
   sent.clear();
+  changed.clear();
   sourceMaps.clear();
   runStartedAt = Date.now();
 }
@@ -172,7 +173,10 @@ function queueEdit(
   const file = getSource(site.file, site.content);
 
   if (file.stale) {
-    if (!optional) file.missed = true;
+    if (!optional && !file.missed) {
+      file.missed = true;
+      markChanged(site.file);
+    }
     return;
   }
 
@@ -224,24 +228,19 @@ export function commitInlineEdits(pending: InlineEdits, testId?: string) {
 
     for (const [start, edit] of edits) {
       const prev = file.edits.get(start);
-      const id = testId ? [testId] : [];
+      // Added to in place, a spot every test hits would be copied each time
+      const tests = prev?.tests ?? [];
+      const failed = prev?.failed ?? [];
+
       // A conflict in a test's own edits means its call here threw
-      const tests = [
-        ...(prev?.tests ?? []),
-        ...(edit.kind === "conflict" ? [] : id),
-      ];
-      const failed = [
-        ...(prev?.failed ?? []),
-        ...(edit.kind === "conflict" ? id : []),
-      ];
+      if (testId) (edit.kind === "conflict" ? failed : tests).push(testId);
 
       // A "same" never replaces a pending write, it still counts the test
-      file.edits.set(
-        start,
-        edit.kind !== "same" || !prev
-          ? { ...edit, tests, failed }
-          : { ...prev, tests, failed },
-      );
+      if (edit.kind !== "same" || !prev) {
+        file.edits.set(start, { ...edit, tests, failed });
+      }
+
+      markChanged(path, start);
     }
   }
 }
@@ -275,6 +274,8 @@ function getSource(path: string, bundled?: string): SourceFile {
       missed: false,
     };
     sources.set(path, file);
+    // Sent once even with no edits, other threads' copies are checked against it
+    markChanged(path);
   }
 
   return file;
@@ -463,41 +464,53 @@ export type InlineSource = {
 export function takeInlineEdits(): InlineSource[] {
   const taken: InlineSource[] = [];
 
-  for (const [path, file] of sources) {
-    const last = sent.get(path);
-    const record = last ?? { edits: new Map(), missed: false };
+  for (const [path, spots] of changed) {
+    const file = sources.get(path)!;
+    const first = !sent.has(path);
+    const counts = sent.get(path) ?? new Map();
     const edits: InlineEdit[] = [];
 
-    // Edits are replaced, never changed in place, and their test lists
-    // only grow (commitInlineEdits): only the ids added since are sent
-    for (const edit of file.edits.values()) {
-      const prev = record.edits.get(edit.start);
-
-      if (prev === edit) continue;
+    // A spot's test lists only grow (commitInlineEdits): only the ids added
+    // since are sent
+    for (const start of spots) {
+      const edit = file.edits.get(start)!;
+      const count = counts.get(start) ?? { tests: 0, failed: 0 };
 
       edits.push({
         ...edit,
-        tests: edit.tests?.slice(prev?.tests?.length ?? 0),
-        failed: edit.failed?.slice(prev?.failed?.length ?? 0),
+        tests: edit.tests?.slice(count.tests),
+        failed: edit.failed?.slice(count.failed),
       });
-      record.edits.set(edit.start, edit);
+      counts.set(start, {
+        tests: edit.tests?.length ?? 0,
+        failed: edit.failed?.length ?? 0,
+      });
     }
-
-    if (last && edits.length === 0 && last.missed === file.missed) continue;
 
     taken.push({
       thread: threadId,
       path,
-      source: last ? undefined : file.source,
+      source: first ? file.source : undefined,
       edits,
       missed: file.missed,
     });
-
-    record.missed = file.missed;
-    sent.set(path, record);
+    sent.set(path, counts);
   }
 
+  changed.clear();
+
   return taken;
+}
+
+function markChanged(path: string, start?: number) {
+  let spots = changed.get(path);
+
+  if (!spots) {
+    spots = new Set();
+    changed.set(path, spots);
+  }
+
+  if (start !== undefined) spots.add(start);
 }
 
 /**
@@ -558,17 +571,13 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
 
     for (const edit of take.edits) {
       const prev = seen.edits.get(edit.start);
+      // Own lists, added to in place: a spot every file hits comes in each take
+      const tests = prev?.tests ?? [];
+      const failed = prev?.failed ?? [];
 
-      seen.edits.set(
-        edit.start,
-        prev
-          ? {
-              ...edit,
-              tests: [...(prev.tests ?? []), ...(edit.tests ?? [])],
-              failed: [...(prev.failed ?? []), ...(edit.failed ?? [])],
-            }
-          : edit,
-      );
+      tests.push(...(edit.tests ?? []));
+      failed.push(...(edit.failed ?? []));
+      seen.edits.set(edit.start, { ...edit, tests, failed });
     }
   }
 

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -253,20 +254,33 @@ export async function startRun(
   else await stopCoverage();
 
   const bundles = new Set<string>();
+  // Bundled since the last take
+  let newBundles: string[] = [];
 
   await loadMatcherModules(options.matchers);
 
   // Hooks a matchers module adds at the top level are the run's own. Its
   // beforeEach and afterEach reach each test through the parent chain, its
-  // beforeAll and afterAll run here, once per thread.
-  try {
-    unriftGlobalContext.state = RunState.Run;
+  // beforeAll and afterAll run here, once per thread. Like a suite's, only
+  // if a test runs: not for a --grep that matches nothing, or a worker that
+  // got no file to run.
+  let setUp = false;
+  // Outside any file: in a worker, what the hooks start (a timer, a server)
+  // isn't a file's, its output goes where the running file's does
+  const outside = AsyncLocalStorage.snapshot();
 
-    for (const hook of rootSuite.beforeAllHooks) await hook();
-  } catch (err) {
-    rootSuite.beforeAllError = toError(err);
-  } finally {
-    unriftGlobalContext.state = RunState.Idle;
+  async function setUpRoot() {
+    setUp = true;
+
+    try {
+      unriftGlobalContext.state = RunState.Run;
+
+      for (const hook of rootSuite.beforeAllHooks) await hook();
+    } catch (err) {
+      rootSuite.beforeAllError = toError(err);
+    } finally {
+      unriftGlobalContext.state = RunState.Idle;
+    }
   }
 
   /** Imports the file, which registers its tests, and runs them. */
@@ -290,7 +304,10 @@ export async function startRun(
         });
         const url = freshImportUrl(built);
 
-        if (built !== pathToFileURL(file).href) bundles.add(url);
+        if (built !== pathToFileURL(file).href) {
+          bundles.add(url);
+          newBundles.push(url);
+        }
 
         await import(url);
       } catch (err) {
@@ -306,23 +323,22 @@ export async function startRun(
 
       // Per file, like Jest and Vitest: `.only` skips the file's other tests
       const hasOnly = computeOnlyFlags(fileSuite);
+      const runOptions = {
+        timeoutMs: options.timeoutMs,
+        bail: options.bail ?? false,
+        grep: options.grep,
+        retries: options.retries,
+      };
+
+      if (!setUp && fileSuite.willRun(runOptions, state, hasOnly)) {
+        await outside(setUpRoot);
+      }
 
       unriftGlobalContext.state = RunState.Run;
 
       // Like a suite whose beforeAll failed, nothing under it runs
       if (rootSuite.beforeAllError) fileSuite.markSubtreeSkipped();
-      else
-        await fileSuite.run(
-          {
-            timeoutMs: options.timeoutMs,
-            bail: options.bail ?? false,
-            grep: options.grep,
-            retries: options.retries,
-          },
-          state,
-          hasOnly,
-          false,
-        );
+      else await fileSuite.run(runOptions, state, hasOnly, false);
 
       return {
         file: fileSuite.description,
@@ -338,9 +354,8 @@ export async function startRun(
    * Writes the run's snapshot files and takes its coverage. Inline snapshots
    * are written by runEngine, once every thread's edits are in.
    */
-  // How many of rootSuite.suites `take` has handled, and the bundles it sent
+  // How many of rootSuite.suites `take` has handled
   let taken = 0;
-  const bundlesTaken = new Set<string>();
 
   /**
    * Writes the snapshot files of the files run since the last take, and
@@ -365,18 +380,18 @@ export async function startRun(
           keep: unpassedTestNames(suite),
         })),
     );
-    const newBundles = [...bundles].filter((url) => !bundlesTaken.has(url));
+    const fresh = newBundles;
 
-    for (const url of newBundles) bundlesTaken.add(url);
+    newBundles = [];
 
     // Synchronous: nothing a test left, like a timer, can run between
     // writing the snapshot files and the worker sending what it wrote
-    return { snapshots, inline, emptied, scripts: [], bundles: newBundles };
+    return { snapshots, inline, emptied, scripts: [], bundles: fresh };
   }
 
   /** Runs the top level's afterAll and takes what's left. */
   async function finish(): Promise<RunEnd> {
-    if (!rootSuite.beforeAllError) {
+    if (setUp && !rootSuite.beforeAllError) {
       try {
         unriftGlobalContext.state = RunState.Run;
 
