@@ -50,11 +50,17 @@ interface SourceFile {
 
 const sources = new Map<string, SourceFile>();
 const sourceMaps = new Map<string, SourceMap | null>();
+// What takeInlineEdits sent of each source, the next take sends what changed
+const sent = new Map<
+  string,
+  { edits: Map<number, InlineEdit>; missed: boolean }
+>();
 
 let runStartedAt = 0;
 
 export function resetInlineSnapshots() {
   sources.clear();
+  sent.clear();
   sourceMaps.clear();
   runStartedAt = Date.now();
 }
@@ -434,29 +440,64 @@ function skipSpace(source: string, i: number): number {
   return i;
 }
 
-/** A source file's committed edits, as one thread saw them. */
+/** What changed in a source file's committed edits since the thread's last take. */
 export type InlineSource = {
-  /** The thread that saw them. A later take from it has all of an earlier one's. */
+  /** The thread that saw them. Its takes of a file add up, in order. */
   thread: number;
   path: string;
-  source: string;
+  /** Only in the thread's first take of the file. */
+  source?: string;
+  /**
+   * The spots that changed since its last take. Their `tests` and `failed`
+   * are the ids added since, a later take's add to an earlier one's.
+   */
   edits: InlineEdit[];
   missed: boolean;
 };
 
 /**
- * This thread's committed edits so far. Workers send them to the main thread
- * after each file. They're kept, so the next file's tests still check against
- * them, the way they do without workers.
+ * This thread's committed edits since its last take. Workers send them to
+ * the main thread after each file. They're kept here, so the next file's
+ * tests still check against them, the way they do without workers.
  */
 export function takeInlineEdits(): InlineSource[] {
-  return [...sources].map(([path, file]) => ({
-    thread: threadId,
-    path,
-    source: file.source,
-    edits: [...file.edits.values()],
-    missed: file.missed,
-  }));
+  const taken: InlineSource[] = [];
+
+  for (const [path, file] of sources) {
+    const last = sent.get(path);
+    const record = last ?? { edits: new Map(), missed: false };
+    const edits: InlineEdit[] = [];
+
+    // Edits are replaced, never changed in place, and their test lists
+    // only grow (commitInlineEdits): only the ids added since are sent
+    for (const edit of file.edits.values()) {
+      const prev = record.edits.get(edit.start);
+
+      if (prev === edit) continue;
+
+      edits.push({
+        ...edit,
+        tests: edit.tests?.slice(prev?.tests?.length ?? 0),
+        failed: edit.failed?.slice(prev?.failed?.length ?? 0),
+      });
+      record.edits.set(edit.start, edit);
+    }
+
+    if (last && edits.length === 0 && last.missed === file.missed) continue;
+
+    taken.push({
+      thread: threadId,
+      path,
+      source: last ? undefined : file.source,
+      edits,
+      missed: file.missed,
+    });
+
+    record.missed = file.missed;
+    sent.set(path, record);
+  }
+
+  return taken;
 }
 
 /**
@@ -491,13 +532,57 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
     }
   >();
 
-  // Only each thread's latest take of a file, it includes the earlier ones
-  const latest = new Map<string, InlineSource>();
+  // Each thread's takes of a file added up: the first has the source, the
+  // later ones what changed
+  const byThread = new Map<
+    string,
+    {
+      path: string;
+      source?: string;
+      edits: Map<number, InlineEdit>;
+      missed: boolean;
+    }
+  >();
 
-  for (const thread of taken)
-    latest.set(`${thread.thread}\0${thread.path}`, thread);
+  for (const take of taken) {
+    const key = `${take.thread}\0${take.path}`;
+    let seen = byThread.get(key);
 
-  for (const thread of latest.values()) {
+    if (!seen) {
+      seen = { path: take.path, edits: new Map(), missed: false };
+      byThread.set(key, seen);
+    }
+
+    if (take.source !== undefined) seen.source = take.source;
+    if (take.missed) seen.missed = true;
+
+    for (const edit of take.edits) {
+      const prev = seen.edits.get(edit.start);
+
+      seen.edits.set(
+        edit.start,
+        prev
+          ? {
+              ...edit,
+              tests: [...(prev.tests ?? []), ...(edit.tests ?? [])],
+              failed: [...(prev.failed ?? []), ...(edit.failed ?? [])],
+            }
+          : edit,
+      );
+    }
+  }
+
+  for (const thread of byThread.values()) {
+    // Its first take never came in, without the source the offsets mean nothing
+    if (thread.source === undefined) {
+      errors.push({
+        file: thread.path,
+        message:
+          "Inline snapshots from a worker came in without the source they were taken from",
+      });
+      continue;
+    }
+
     let file = merged.get(thread.path);
 
     if (!file) {
@@ -515,7 +600,7 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
     // Bundled from different versions, the offsets don't line up
     if (thread.source !== file.source) file.mismatched = true;
 
-    for (const edit of thread.edits) {
+    for (const edit of thread.edits.values()) {
       file.spots.set(edit.start, [...(file.spots.get(edit.start) ?? []), edit]);
     }
   }

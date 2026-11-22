@@ -380,9 +380,14 @@ export async function startRun(
       try {
         unriftGlobalContext.state = RunState.Run;
 
-        for (const hook of rootSuite.afterAllHooks) await hook();
-      } catch (err) {
-        rootSuite.afterAllError = toError(err);
+        // Like a suite's: each one runs, the first error is kept
+        for (const hook of rootSuite.afterAllHooks) {
+          try {
+            await hook();
+          } catch (err) {
+            rootSuite.afterAllError ??= toError(err);
+          }
+        }
       } finally {
         unriftGlobalContext.state = RunState.Idle;
       }

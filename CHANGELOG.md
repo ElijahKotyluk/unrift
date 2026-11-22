@@ -5,7 +5,7 @@ Versions are `@unrift/core` / `unrift`.
 ## Unreleased
 
 - `--workers <n>` and the `workers` option run test files in worker threads. Each worker takes the next file when it's done, results are reported in file order. `--bail` stops the other workers too
-- With workers, each file's stdout and stderr is printed once the file is done, in file order, so output from two files never mixes
+- With workers, each file's stdout and stderr is printed once the file is done, in file order, so output from two files doesn't mix. Output a file writes after it was printed, from a timer, goes out as it's written
 - Breaking: `.only` skips the other tests in its own file, not other files, like Jest and Vitest
 - `beforeAll` and `afterAll` that a `matchers` module adds at the top level run again, in watch reruns too. A `matchers` module that defines tests is an error
 - A file's tests run right after it loads, before the next file is imported

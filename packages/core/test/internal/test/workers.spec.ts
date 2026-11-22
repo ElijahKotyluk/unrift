@@ -3,7 +3,12 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import { writeInlineSnapshots } from "../../../src/snapshot/inline.js";
+import {
+  commitInlineEdits,
+  resetInlineSnapshots,
+  takeInlineEdits,
+  writeInlineSnapshots,
+} from "../../../src/snapshot/inline.js";
 
 type Result = { description: string; status: string };
 
@@ -194,7 +199,7 @@ describe("workers", () => {
     mkdirSync(join(dir, "test"), { recursive: true });
     writeFileSync(
       join(dir, "setup.mjs"),
-      `import { beforeAll, afterAll, beforeEach, afterEach } from "@unrift/core";\nbeforeAll(() => { globalThis.__setup = true; });\nafterAll(() => { throw new Error("after all"); });\nbeforeEach(() => { globalThis.__each = (globalThis.__each ?? 0) + 1; });\nafterEach(() => { globalThis.__each = 0; });\n`,
+      `import { appendFileSync } from "node:fs";\nimport { beforeAll, afterAll, beforeEach, afterEach } from "@unrift/core";\nbeforeAll(() => { globalThis.__setup = true; });\nafterAll(() => { throw new Error("after all"); });\nafterAll(() => appendFileSync(${JSON.stringify(join(dir, "after.log"))}, "ran\\n"));\nbeforeEach(() => { globalThis.__each = (globalThis.__each ?? 0) + 1; });\nafterEach(() => { globalThis.__each = 0; });\n`,
     );
     writeFileSync(
       join(dir, "unrift.config.ts"),
@@ -268,18 +273,25 @@ for (let i = 0; i < 2; i++) {
 
     expect(tests.stdout.trim().split("\n")).toEqual(["threw", "threw"]);
 
-    // Once per worker, and once without workers
+    // Once per worker, and once without workers. The afterAll after the
+    // one that threw still runs.
+    const ran = () =>
+      readFileSync(join(dir, "after.log"), "utf8").split("\n").length - 1;
+
+    expect(ran()).toBe(2);
     expect(statuses("--workers", "2")).toEqual([
       "root > [afterAll]: fail",
       "root > [afterAll]: fail",
       "a.spec.ts › a: pass",
       "b.spec.ts › b: pass",
     ]);
+    expect(ran()).toBe(4);
     expect(statuses()).toEqual([
       "root > [afterAll]: fail",
       "a.spec.ts › a: pass",
       "b.spec.ts › b: pass",
     ]);
+    expect(ran()).toBe(5);
   });
 
   it("prints each file's output together, in file order", () => {
@@ -459,6 +471,90 @@ for (let i = 0; i < 2; i++) {
 
     expect(result.skipped).toEqual([file]);
     expect(readFileSync(file, "utf8")).toBe(original);
+  });
+
+  it("sends only what changed since a worker's last take", () => {
+    const file = resolve(process.cwd(), "test/workers/.work/takes.ts");
+    const line = "check(toMatchInlineSnapshot());\n";
+    // Between the parens, on each line
+    const spots = [28, line.length + 28];
+    const commit = (spot: number, test: string) =>
+      commitInlineEdits(
+        new Map([
+          [
+            file,
+            new Map([
+              [
+                spot,
+                {
+                  start: spot,
+                  end: spot,
+                  value: '"x"',
+                  indent: "",
+                  kind: "new",
+                },
+              ],
+            ]),
+          ],
+        ]),
+        test,
+      );
+
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, line + line);
+    resetInlineSnapshots();
+
+    commit(spots[0], "t1");
+    const first = takeInlineEdits();
+
+    commit(spots[1], "t2");
+    const second = takeInlineEdits();
+
+    commit(spots[0], "t3");
+    const third = takeInlineEdits();
+
+    // The source once, then the spot that changed with the tests added since
+    const sent = (take: typeof first) =>
+      take.map((t) => [
+        t.source !== undefined,
+        t.edits.map((e) => [e.start, e.tests]),
+      ]);
+
+    expect([first, second, third, takeInlineEdits()].map(sent)).toEqual([
+      [[true, [[spots[0], ["t1"]]]]],
+      [[false, [[spots[1], ["t2"]]]]],
+      [[false, [[spots[0], ["t3"]]]]],
+      [],
+    ]);
+
+    // Added up: another thread's value at the first spot fails every test
+    // that ran it, the second spot is written
+    const other = {
+      thread: -1,
+      path: file,
+      source: line + line,
+      edits: [
+        {
+          start: spots[0],
+          end: spots[0],
+          value: '"y"',
+          indent: "",
+          kind: "new" as const,
+          tests: ["o"],
+        },
+      ],
+      missed: false,
+    };
+    const result = writeInlineSnapshots([...first, ...second, ...third, other]);
+
+    expect(result.conflicts.map((c) => c.test).sort()).toEqual([
+      "o",
+      "t1",
+      "t3",
+    ]);
+    expect(readFileSync(file, "utf8")).toBe(
+      line + 'check(toMatchInlineSnapshot(`"x"`));\n',
+    );
   });
 
   it("applies .only per file", () => {
