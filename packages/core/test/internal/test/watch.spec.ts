@@ -212,6 +212,7 @@ it("value", () => expect(value).toBe(1));
 it("slow", () => new Promise((r) => setTimeout(r, 1000)));
 `,
       "test/gone.spec.ts": `import { it } from "@unrift/core";\nit("gone", () => {});\n`,
+      "test/data.txt": "1\n",
     });
     const spec = join(ws.dir, "test/slow.spec.ts");
 
@@ -243,6 +244,10 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       expect(await w.waitFor(() => w.reruns() === 4)).toBe(true);
       await sleep(1500);
       expect(w.reruns()).toBe(4);
+
+      // A file that was there, read by a test say, deleted while it waits
+      rmSync(join(ws.dir, "test/data.txt"));
+      expect(await w.waitFor(() => w.reruns() === 5)).toBe(true);
     } finally {
       w.kill();
     }

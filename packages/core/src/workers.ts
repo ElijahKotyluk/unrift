@@ -39,6 +39,8 @@ export type FromWorker =
   | { type: "file"; index: number; run: CopiedFileRun; part: RunPart }
   /** Sending failed, it stops after this. */
   | { type: "crash"; error: CopiedError }
+  /** A test called process.exit(), it stops after this. */
+  | { type: "exit"; code: string }
   | {
       type: "end";
       end: Omit<RunEnd, "root"> & { root: CopiedFileRun };
@@ -136,6 +138,8 @@ type Slot = {
   finishing: boolean;
   ended: boolean;
   exited: boolean;
+  /** The code a test called process.exit() with. */
+  exitCalled?: string;
   /** An error it threw, handled once it has exited and sent everything. */
   error?: Error;
 };
@@ -400,6 +404,9 @@ export async function runInWorkers(
             case "crash":
               slot.error ??= restoreError(message.error);
               break;
+            case "exit":
+              slot.exitCalled = message.code;
+              break;
           }
         });
 
@@ -417,12 +424,16 @@ export async function runInWorkers(
 
           const error =
             slot.error ??
-            new Error(`Unrift worker stopped with exit code ${code}`);
+            new Error(
+              slot.exitCalled === undefined
+                ? `Unrift worker stopped with exit code ${code}`
+                : `process.exit(${slot.exitCalled}) stopped the worker`,
+            );
 
           if (slot.ended) {
             // After its last file, while other workers still run: an error a
             // timer threw, or process.exit(). Without workers it'd fail the run.
-            if (slot.error || code !== 0) {
+            if (slot.error || code !== 0 || slot.exitCalled !== undefined) {
               if (slot.last !== null) fail(slot, slot.last, error);
               else failRoot(error, "The worker stopped after the run.");
             }

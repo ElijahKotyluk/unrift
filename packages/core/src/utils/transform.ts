@@ -329,6 +329,10 @@ export type TransformOptions = {
 // keep, it stays in the bundle.
 const CODE = /\.(m|c)?(j|t)s$/;
 
+export function isSharedCode(path: string): boolean {
+  return CODE.test(path);
+}
+
 /**
  * The project files Node loads when it imports this module: itself and what
  * it imports, statically, packages and unrift left out. An `import()` may

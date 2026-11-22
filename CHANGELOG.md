@@ -11,7 +11,8 @@ Versions are `@unrift/core` / `unrift`.
 - A relative `matchers` path, or a package name, is resolved from the config's folder
 - A test, hook or file left waiting with nothing keeping Node going fails after `timeoutMs`, or 5s, and the run goes on. Before, the run could exit 0 with nothing printed, or hang with workers
 - Only the results decide the exit code, a test that sets `process.exitCode` doesn't
-- Watch mode reruns for a file deleted or renamed during a run
+- Watch mode reruns for a file deleted or renamed during a run, not for one a test makes and removes
+- `--bail` stops on a failing `beforeAll`, `afterAll` or import too
 - A file's own failures, like `[import]`, print under its name, and the failures list says which file each one is in
 - Breaking: `useFakeTimers()` leaves `queueMicrotask` and `process.nextTick` real unless they're in `toFake`, like Vitest. Faked, reading a stream like a `fetch` body never finished. Fake timers a test leaves on end with its file
 - Breaking: a suite's `beforeAll` and `afterAll` don't run when none of its tests do, like Jest and Vitest

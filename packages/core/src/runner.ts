@@ -5,6 +5,7 @@ import {
   statSync,
   type FSWatcher,
 } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   basename,
   dirname,
@@ -475,9 +476,11 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
         config.matchers.map(async (spec) =>
           typeof spec !== "string" || isAbsolute(spec)
             ? spec
-            : spec.startsWith(".")
-              ? resolve(configDir, spec)
-              : await resolveMatcherPackage(spec, configDir),
+            : spec.startsWith("file:")
+              ? fileURLToPath(spec)
+              : spec.startsWith(".")
+                ? resolve(configDir, spec)
+                : await resolveMatcherPackage(spec, configDir),
         ),
       )),
     workers: options.workers ?? config?.workers,
@@ -826,21 +829,34 @@ function modifiedSince(path: string, time: number): boolean {
 
 function watchRecursive(
   dir: string,
-  onChange: (filename: string, path: string) => void,
+  onChange: (filename: string, path: string, fresh: boolean) => void,
   debounceMs = 150,
 ): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  // Every path changed within the debounce, one may be a run's own write
-  let changed = new Map<string, string>();
+  // Every path changed within the debounce, one may be a run's own write.
+  // Whether it's new: one that's gone by then was made and removed.
+  let changed = new Map<string, { filename: string; fresh: boolean }>();
+  // What each watched folder has, to tell a new file from one that was there
+  const listing = new Map<string, Set<string>>();
 
-  function trigger(filename: string, path: string) {
-    changed.set(path, filename);
+  const list = (d: string) => {
+    try {
+      listing.set(d, new Set(readdirSync(d)));
+    } catch {
+      listing.delete(d);
+    }
+  };
+
+  function trigger(filename: string, path: string, fresh = false) {
+    changed.set(path, { filename, fresh: changed.get(path)?.fresh ?? fresh });
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       const paths = changed;
 
       changed = new Map();
-      for (const [path, filename] of paths) onChange(filename, path);
+      for (const [path, { filename, fresh }] of paths) {
+        onChange(filename, path, fresh);
+      }
     }, debounceMs);
   }
 
@@ -899,6 +915,12 @@ function watchRecursive(
 
     try {
       const watcher = fsWatch(d, (_event, filename) => {
+        // Not there before this event: made since, by a test say
+        const fresh =
+          !!filename && listing.has(d) && !listing.get(d)!.has(filename);
+
+        list(d);
+
         if (filename) watchIfNewDir(join(d, filename));
 
         // Our own snapshot writes shouldn't trigger another run, edits by
@@ -918,12 +940,13 @@ function watchRecursive(
             ? d
             : join(d, filename);
 
-        trigger(filename ?? d, path);
+        trigger(filename ?? d, path, fresh && path !== d);
       });
 
       // Deleting a watched folder can emit an error on some platforms
       watcher.on("error", () => {});
       watched.set(d, { watcher, ino });
+      list(d);
 
       if (process.env.UNRIFT_DEBUG === "1")
         console.log(`[unrift] watching ${d}`);
@@ -1007,9 +1030,12 @@ function waitForDir(dir: string, onCreated: () => void): () => void {
  * is watched, not the file: an editor that saves by renaming a new file over
  * the old one would leave a watcher on the file looking at nothing.
  */
-function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
+function watchFiles(
+  onChange: (filename: string, path: string, fresh: boolean) => void,
+  debounceMs = 150,
+) {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let changed = new Set<string>();
+  let changed = new Map<string, boolean>();
   let files = new Set<string>();
   const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
   // Folders that are gone, watched for when they're made again
@@ -1020,13 +1046,14 @@ function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
   const renamed = new Set<string>();
 
   function trigger(path: string) {
-    changed.add(path);
+    // A file a run used, it was there
+    changed.set(path, false);
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       const paths = changed;
 
-      changed = new Set();
-      for (const path of paths) onChange(path);
+      changed = new Map();
+      for (const [path, fresh] of paths) onChange(path, path, fresh);
     }, debounceMs);
   }
 
@@ -1187,11 +1214,13 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
   let runStart = 0;
   // Paths changed during a run. A worker writes its snapshots mid-run, which
   // ones the run wrote itself is only known once it's done.
-  const changedDuring = new Map<string, string>();
+  const changedDuring = new Map<string, { filename: string; fresh: boolean }>();
 
   // Source files and the config live outside the test dir. Watch the ones
   // the last run bundled, the test dir is already watched as a whole.
-  const imports = watchFiles((filename) => rerun(filename));
+  const imports = watchFiles((filename, path, fresh) =>
+    rerun(filename, path, fresh),
+  );
   // A build that failed doesn't say what it imports, so until it builds
   // anything under the config's folder reruns
   let stopFallback: (() => void) | null = null;
@@ -1217,12 +1246,12 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     }
   };
 
-  // What the last run used. One of them gone, or a folder with one in it,
-  // is a change, a file a test made and removed isn't. Snapshots deleted by
-  // hand are too.
+  // What the last run used, and the config. One of them gone, or a folder
+  // with one in it, is always a change. Snapshots deleted by hand are too.
   const usedFiles = () => [
     ...lastTestFiles,
     ...bundledFiles().files.map((f) => resolve(f)),
+    ...(configPath ? [resolve(configPath)] : []),
   ];
   const wasUsed = (path: string, used: string[]) => {
     const full = resolve(path);
@@ -1233,18 +1262,23 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
       used.some((f) => f === full || f.startsWith(full + sep))
     );
   };
-  const gone = (path: string) =>
-    !existsSync(path) && !wasUsed(path, usedFiles());
+  // New at its first change and gone now: made and removed, like a test's
+  // temp file. One that was there before is a delete.
+  const madeAndRemoved = (path: string, fresh: boolean, used: string[]) =>
+    !existsSync(path) && fresh && !wasUsed(path, used);
 
-  const rerun = async (filename: string, path = filename) => {
+  const rerun = async (filename: string, path = filename, fresh = false) => {
     if (running) {
-      changedDuring.set(path, filename);
+      changedDuring.set(path, {
+        filename,
+        fresh: changedDuring.get(path)?.fresh ?? fresh,
+      });
       return;
     }
 
     // Seen during the last run, written by it, or a file a test made and
     // removed
-    if (isOwnWrite(path) || gone(path)) return;
+    if (isOwnWrite(path) || madeAndRemoved(path, fresh, usedFiles())) return;
 
     running = true;
     runStart = Date.now();
@@ -1295,18 +1329,18 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
     // One save can be reported again after the debounce. Only a file
     // written since the run started, and not by it, is a new change. One
-    // the last run used that's gone was deleted or renamed, which keeps its
-    // time.
+    // that's gone was deleted or renamed, which keeps its time, unless it
+    // was made during the run too.
     const next = [...changedDuring].find(
-      ([path]) =>
+      ([path, { fresh }]) =>
         !isOwnWrite(path) &&
         (modifiedSince(path, runStart) ||
-          (!existsSync(path) && wasUsed(path, used))),
+          (!existsSync(path) && !madeAndRemoved(path, fresh, used))),
     );
 
     changedDuring.clear();
 
-    if (next) void rerun(next[1], next[0]);
+    if (next) void rerun(next[1].filename, next[0]);
     else if (moved) logWatching(testDir);
     else {
       console.log(

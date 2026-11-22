@@ -1,6 +1,12 @@
 import { describe, it, expect } from "@unrift/core";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import {
@@ -66,6 +72,86 @@ describe("workers", () => {
     ).toEqual(["fails: fail", "slow: pass", "after the bail: skipped"]);
   });
 
+  it("stops the other workers when a hook fails under --bail", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/bail-hook");
+
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "test"), { recursive: true });
+    writeFileSync(
+      join(dir, "unrift.config.ts"),
+      `export default { testDir: "test" };\n`,
+    );
+
+    const specs = {
+      a: `beforeAll(() => { throw new Error("setup"); });\nit("a", () => {});`,
+      // Keeps the other worker busy until a's hook failed
+      b: `it("b", () => new Promise((r) => setTimeout(r, 500)));`,
+      c: `it("c", () => {});`,
+      d: `it("d", () => {});`,
+    };
+
+    for (const [name, body] of Object.entries(specs)) {
+      writeFileSync(
+        join(dir, `test/${name}.spec.ts`),
+        `import { beforeAll, it } from "@unrift/core";\n${body}\n`,
+      );
+    }
+
+    const res = spawnSync(
+      process.execPath,
+      [
+        resolve(process.cwd(), "bin/unrift.mjs"),
+        "--config",
+        join(dir, "unrift.config.ts"),
+        "--json",
+        "--bail",
+        "--workers",
+        "2",
+      ],
+      { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
+    );
+
+    expect(
+      JSON.parse(res.stdout).results.map(
+        (r: Result) => `${r.description.split("/").pop()}: ${r.status}`,
+      ),
+    ).toEqual([
+      "a.spec.ts > [beforeAll]: fail",
+      "a.spec.ts › a: skipped",
+      "b.spec.ts › b: pass",
+      "c.spec.ts › c: skipped",
+      "d.spec.ts › d: skipped",
+    ]);
+  });
+
+  it("runs a test file once on a later run, one a helper imports back too", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/circular");
+
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "a.spec.mjs"),
+      `import { it } from "@unrift/core";\nimport "./helper.mjs";\nit("a", () => {});\n`,
+    );
+    writeFileSync(join(dir, "helper.mjs"), `import "./a.spec.mjs";\n`);
+
+    const twice = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { runEngine } from ${JSON.stringify(resolve(process.cwd(), "dist/esm/index.js"))};
+for (let i = 0; i < 2; i++) {
+  const { results } = await runEngine({ files: [${JSON.stringify(join(dir, "a.spec.mjs"))}] });
+  console.log(results.length);
+}`,
+      ],
+      { encoding: "utf8", timeout: 20_000 },
+    );
+
+    expect(twice.stdout.trim().split("\n")).toEqual(["1", "1"]);
+  });
+
   it("fails the file a worker died in, and the rest still run", () => {
     const errors = (args: string[]) => {
       const res = spawnRun(["--json", ...args]);
@@ -88,7 +174,7 @@ describe("workers", () => {
     const exit = errors(["--workers", "2", "exit"]);
 
     expect(exit.results).toEqual([
-      "exit.spec.ts > [worker]: fail (Unrift worker stopped with exit code 3\n\nThe worker stopped while running exit.spec.ts.)",
+      "exit.spec.ts > [worker]: fail (process.exit(3) stopped the worker\n\nThe worker stopped while running exit.spec.ts.)",
     ]);
     expect(exit.out).toContain("log: before exit");
 
@@ -171,12 +257,13 @@ describe("workers", () => {
     expect(
       runWith({
         // a waits so the other worker is ready and takes b
-        a: `it("a", async () => { await wait(500); setTimeout(() => process.exit(4), 300); });`,
+        // Exit code 0 looks like it finished, it still fails
+        a: `it("a", async () => { await wait(500); setTimeout(() => process.exit(0), 300); });`,
         b: `it("b", () => wait(1500));`,
       }),
     ).toEqual([
       "a.spec.ts › a: pass",
-      "a.spec.ts > [worker]: fail (Unrift worker stopped with exit code 4\n\nThe worker stopped after running a.spec.ts.)",
+      "a.spec.ts > [worker]: fail (process.exit(0) stopped the worker\n\nThe worker stopped after running a.spec.ts.)",
       "b.spec.ts › b: pass",
     ]);
 
@@ -249,7 +336,7 @@ describe("workers", () => {
     }).results;
 
     expect([replaced[0], replaced[2]]).toEqual([
-      "a.spec.ts > [worker]: fail (Unrift worker stopped with exit code 2\n\nThe worker stopped while running a.spec.ts.)",
+      "a.spec.ts > [worker]: fail (process.exit(2) stopped the worker\n\nThe worker stopped while running a.spec.ts.)",
       "c.spec.ts › c: pass",
     ]);
     expect(replaced[1]).toMatch(/^b\.spec\.ts › b: fail/);
@@ -398,7 +485,13 @@ describe("workers", () => {
       // Given up on before its timer fires: nothing more of it runs, not in
       // the next file's time either
       zombie: `import { beforeAll, it } from "@unrift/core";\nbeforeAll(() => new Promise((r) => setTimeout(r, 600).unref()));\nit("never runs", () => { globalThis.zombie = true; });\n`,
-      zz: `import { it, expect } from "@unrift/core";\nit("after", async () => { await new Promise((r) => setTimeout(r, 800)); expect(globalThis.zombie).toBeUndefined(); });\n`,
+      // Its import resumes, what it registers then goes nowhere
+      zimport: `import { it } from "@unrift/core";\nawait new Promise((r) => setTimeout(r, 600).unref());\nit("late", () => { globalThis.zombie = true; });\n`,
+      // Resumes too, its snapshot isn't written
+      zsnap: `import { it, expect } from "@unrift/core";\nit("snap", async () => { await new Promise((r) => setTimeout(r, 600).unref()); expect(1).toMatchSnapshot(); });\n`,
+      zz: `import { it, expect } from "@unrift/core";\nit("after", async () => { await new Promise((r) => setTimeout(r, 1200)); expect(globalThis.zombie).toBeUndefined(); });\n`,
+      // Real work an unref'd timer starts while it waits isn't a stall
+      io: `import { it } from "@unrift/core";\nit("works", async () => { await new Promise((r) => setTimeout(r, 100).unref()); await new Promise((r) => setTimeout(r, 300)); });\n`,
       // Real timers again in the next file, its fetch body reads
       fake: `import { it, mock } from "@unrift/core";\nit("left on", () => { mock.useFakeTimers({ toFake: ["setTimeout", "queueMicrotask", "process.nextTick"] }); });\n`,
       fetch: `import { it, expect } from "@unrift/core";\nit("reads", async () => { await new Promise((r) => setTimeout(r, 5)); expect(await new Response("ok").text()).toBe("ok"); });\n`,
@@ -450,19 +543,24 @@ describe("workers", () => {
         "fetch.spec.ts › reads: pass",
         "hook.spec.ts > [stalled]: fail",
         "hook.spec.ts › x: skipped",
+        "io.spec.ts › works: pass",
         "test.spec.ts › before: pass",
         "test.spec.ts › stuck: fail",
         "test.spec.ts › after: skipped",
         "top.spec.ts > [import]: fail",
         "unref.spec.ts › waits: pass",
+        "zimport.spec.ts > [import]: fail",
         "zombie.spec.ts > [stalled]: fail",
         "zombie.spec.ts › never runs: skipped",
+        "zsnap.spec.ts › snap: fail",
         "zz.spec.ts › after: pass",
       ],
     };
 
     expect(run()).toEqual(expected);
+    expect(existsSync(join(dir, "test/__snapshots__"))).toBe(false);
     expect(run("--workers", "2")).toEqual(expected);
+    expect(existsSync(join(dir, "test/__snapshots__"))).toBe(false);
 
     // Printed under its file, and named with it in the failures
     const printed = spawnSync(
@@ -502,12 +600,17 @@ describe("workers", () => {
     // in its URL doesn't load again.
     writeFileSync(
       join(dir, "setup.mjs"),
-      `import { beforeEach } from "@unrift/core";\nimport { store } from "./store.ts";\nimport data from "./data.json" with { type: "json" };\nvoid data;\nexport const lazy = () => import("./enums.ts");\nstore.setup = true;\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
+      `import { beforeEach } from "@unrift/core";\nimport { store } from "./store.ts";\nimport data from "./data.json" with { type: "json" };\nvoid data;\nexport const lazy = () => import("./enums.ts");\nstore.setup = true;\nconst { dyn } = await import("./dyn.ts");\ndyn.set = true;\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
     );
     // What it imports is shared with the test too
     writeFileSync(
       join(dir, "store.ts"),
       `export const store: { setup?: boolean } = {};\n`,
+    );
+    // So is what it loads with an import() it waits for
+    writeFileSync(
+      join(dir, "dyn.ts"),
+      `export const dyn: { set?: boolean } = {};\n`,
     );
     writeFileSync(
       join(dir, "each.cjs"),
@@ -539,7 +642,7 @@ describe("workers", () => {
     writeFileSync(join(dir, "enums.ts"), `export enum Color { Red = "red" }\n`);
 
     const body = (setup: string, more = "") =>
-      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nit("store", () => expect([store.setup, globalThis.pkg]).toEqual([true, true]));\n${more}`;
+      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nimport { dyn } from "../dyn.ts";\nit("store", () => expect([store.setup, dyn.set, globalThis.pkg]).toEqual([true, true, true]));\n${more}`;
 
     // Bundled, and loaded by Node
     writeFileSync(join(dir, "test/a.spec.ts"), body("../setup.mjs"));

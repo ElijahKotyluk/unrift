@@ -27,6 +27,14 @@ registerModuleLoader();
 const port = parentPort!;
 const post = (message: FromWorker) => port.postMessage(message);
 
+// A test stopping the worker says so: exit code 0 after its last file would
+// look like it finished. Sent before it stops, it arrives before the exit.
+process.exit = ((code?: number | string | null) => {
+  post({ type: "exit", code: String(code ?? process.exitCode ?? 0) });
+
+  return exit(code);
+}) as typeof process.exit;
+
 const { options, bailed } = workerData as {
   options: EngineOptions;
   bailed: Int32Array;

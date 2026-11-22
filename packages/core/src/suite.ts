@@ -1,4 +1,4 @@
-import { unriftGlobalContext } from "./context";
+import { inAbandonedFile, unriftGlobalContext } from "./context";
 import { resetMatchers } from "./matchers";
 import { threadId } from "node:worker_threads";
 
@@ -234,10 +234,12 @@ export class Suite {
         for (const hook of this.beforeAllHooks) {
           if (state.abandoned) return;
           await hook();
-          progress++;
+          if (!state.abandoned) progress++;
         }
       } catch (error) {
         this.beforeAllError = toError(error);
+        // A failure under --bail, other files and workers stop too
+        if (options?.bail) state.bailed = true;
 
         // Prevent "pending" tests from showing up if beforeAll fails
         this.markSubtreeSkipped();
@@ -316,7 +318,7 @@ export class Suite {
 
               try {
                 await hook();
-                progress++;
+                if (!state.abandoned) progress++;
               } catch (error) {
                 throw appendHookFailure(
                   undefined,
@@ -328,7 +330,7 @@ export class Suite {
 
             if (state.abandoned) return;
             await test.run(options?.timeoutMs);
-            progress++;
+            if (!state.abandoned) progress++;
           } catch (error) {
             test.status = TaskStatus.Fail;
             test.error = toError(error);
@@ -338,7 +340,7 @@ export class Suite {
 
               try {
                 await hook();
-                progress++;
+                if (!state.abandoned) progress++;
               } catch (error) {
                 test.status = TaskStatus.Fail;
                 test.error = appendHookFailure(
@@ -377,6 +379,9 @@ export class Suite {
             break;
           }
         }
+
+        // What it did after it was given up on doesn't count, nor is written
+        if (state.abandoned) return;
 
         test.durationMs = totalMs;
         snapshots?.finish();
@@ -422,12 +427,14 @@ export class Suite {
 
           try {
             await afterAllHook();
-            progress++;
+            if (!state.abandoned) progress++;
           } catch (error) {
             // Record once; keep running remaining afterAll hooks
             if (!this.afterAllError) {
               this.afterAllError = toError(error);
             }
+
+            if (options?.bail) state.bailed = true;
           }
         }
       }
@@ -591,6 +598,9 @@ export const rootSuite = new Suite("root");
 rootSuite.root = true;
 
 export function getCurrentSuite() {
+  // Not part of the run
+  if (inAbandonedFile()) return new Suite("abandoned");
+
   return unriftGlobalContext.currentSuite || rootSuite;
 }
 

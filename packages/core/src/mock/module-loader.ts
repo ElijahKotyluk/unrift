@@ -72,6 +72,18 @@ export function setMatcherCopy(urls: Set<string>, query: string | null): void {
   copy = query;
 }
 
+// Project files Node loads while a matchers module is imported
+let loading: Set<string> | null = null;
+
+/** Starts noting the project files Node loads, or stops and hands them back. */
+export function noteLoads(on: boolean): string[] {
+  const noted = loading ? [...loading] : [];
+
+  loading = on ? new Set() : null;
+
+  return noted;
+}
+
 /** Points a mocked spec at a `unrift-mock:` URL. */
 export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
   // Only imports, like module.register() hooks were. A require() inside a
@@ -97,6 +109,14 @@ export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
   if (!resolved.url.startsWith("file:")) return resolved;
 
   const bare = resolved.url.replace(/[?#].*$/, "");
+
+  if (
+    loading &&
+    !resolved.url.includes("/node_modules/") &&
+    !resolved.url.startsWith(OWN)
+  ) {
+    loading.add(bare);
+  }
 
   if (copy && matchers.has(bare)) {
     return { ...resolved, url: `${bare}?${copy}`, shortCircuit: true };

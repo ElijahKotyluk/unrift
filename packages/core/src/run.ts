@@ -12,11 +12,16 @@ import {
   type TestResult,
 } from "./suite";
 import { ensureInternalMatchers } from "./matchers";
-import { RunState, unriftGlobalContext } from "./context";
+import { fileScope, RunState, unriftGlobalContext } from "./context";
 import { normalizePath } from "./utils/normalizePath";
 import { TaskMode, TaskStatus } from "./types";
 import { toError } from "./utils/toError";
-import { addBundledFiles, importGraph, toImportUrl } from "./utils/transform";
+import {
+  addBundledFiles,
+  importGraph,
+  isSharedCode,
+  toImportUrl,
+} from "./utils/transform";
 import { takeWrites } from "./utils/ownWrites";
 import { assertValidRetries } from "./utils/helpers";
 import {
@@ -38,7 +43,11 @@ import type { InlineSource } from "./snapshot/inline";
 import { summarize, type CoverageSummary } from "./coverage/report";
 import { runInWorkers } from "./workers";
 import { registerModuleLoader } from "./mock/register-loader";
-import { setMatcherCopy, setRunGeneration } from "./mock/module-loader";
+import {
+  noteLoads,
+  setMatcherCopy,
+  setRunGeneration,
+} from "./mock/module-loader";
 import { useRealTimers } from "./mock/timers";
 
 export type RunEngineCoverageOptions = {
@@ -81,11 +90,13 @@ export type RunEngineResult = {
 
 // Node caches a module by URL, so a file that didn't change would come back
 // from the cache and register no tests on a second run (watch mode). Every
-// run after the first gets its own URL so the file runs again.
+// run after the first gets its own URL so the file runs again. The same one
+// the module hooks give the project files it imports: a helper that
+// imports the test back gets this module, not a second copy.
 let runCount = 0;
 
 function freshImportUrl(url: string): string {
-  return runCount > 1 ? `${url}?run=${runCount}` : url;
+  return runCount > 1 ? `${url}?unrift-run=${runCount}` : url;
 }
 
 // The query string only reloads ESM. A CommonJS file (.cjs, or .js in a
@@ -165,22 +176,28 @@ class Stalled extends Error {
  */
 function settles<T>(work: Promise<T>, ms = STALL_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // The wait ran out with nothing moved. Only if Node is still idle then
+  // (beforeExit again) is it stuck: the timer may have started real work.
+  let elapsed = false;
+  let from = 0;
   let onExit: () => void = () => {};
   const stalled = new Promise<never>((_, reject) => {
-    const wait = (from: number) => {
+    onExit = () => {
+      if (timer) return;
+
+      if (elapsed && runProgress() === from) {
+        reject(new Stalled(ms));
+        return;
+      }
+
+      elapsed = false;
+      from = runProgress();
       timer = realSetTimeout(() => {
         timer = null;
-
-        // Something moved, it's not stuck. If it drains again, beforeExit
+        // Something moved, it's not stuck. If Node drains again, beforeExit
         // starts another wait.
-        if (runProgress() !== from) return;
-
-        reject(new Stalled(ms));
+        elapsed = runProgress() === from;
       }, ms);
-    };
-
-    onExit = () => {
-      if (!timer) wait(runProgress());
     };
     process.on("beforeExit", onExit);
   });
@@ -338,25 +355,27 @@ export async function startRun(
   // The matchers modules and the project files Node loads with them. Test
   // bundles leave them out, so a bundled test shares them like one Node
   // loads does, like in Jest and Vitest.
-  const sharedFiles = [
-    ...new Set([
-      ...matcherFiles,
-      ...(
-        await Promise.all(
-          matchers.flatMap((m) =>
-            m.file && !m.file.includes(`${sep}node_modules${sep}`)
-              ? [importGraph(m.file)]
-              : [],
-          ),
-        )
-      ).flat(),
-    ]),
-  ];
+  // Grows with what Node loads when it imports them, like an awaited
+  // import() at their top level
+  const sharedFiles = new Set([
+    ...matcherFiles,
+    ...(
+      await Promise.all(
+        matchers.flatMap((m) =>
+          m.file && !m.file.includes(`${sep}node_modules${sep}`)
+            ? [importGraph(m.file)]
+            : [],
+        ),
+      )
+    ).flat(),
+  ]);
   const matcherUrls = new Set(matchers.map((m) => m.url));
 
   // Watched like a test's imports
   addBundledFiles({
-    files: sharedFiles.filter((f) => !f.includes(`${sep}node_modules${sep}`)),
+    files: [...sharedFiles].filter(
+      (f) => !f.includes(`${sep}node_modules${sep}`),
+    ),
     failed: false,
   });
   // Each file gets its own copy of the matchers modules
@@ -385,6 +404,18 @@ export async function startRun(
       abandoned: false,
     };
 
+    // Its code knows it's this file's, even once it's given up on
+    return fileScope.run(fileState, () =>
+      runFileIn(file, fileSuite, fileState, stallMs),
+    );
+  }
+
+  async function runFileIn(
+    file: string,
+    fileSuite: Suite,
+    fileState: { bailed: boolean; abandoned: boolean },
+    stallMs: number,
+  ): Promise<FileRun> {
     unriftGlobalContext.currentSuite = fileSuite;
     unriftGlobalContext.state = RunState.Register;
 
@@ -403,23 +434,36 @@ export async function startRun(
         // require() of it in the test then gets this copy too.
         for (const f of matcherFiles) forgetCommonJs(f);
 
-        for (const m of matchers) {
-          await settles(import(`${m.url}?${copy}`), stallMs);
+        noteLoads(true);
 
-          if (fileSuite.tests.length > 0 || fileSuite.suites.length > 0) {
-            // They aren't the file's, only the error is
-            fileSuite.tests.length = 0;
-            fileSuite.suites.length = 0;
+        try {
+          for (const m of matchers) {
+            await settles(import(`${m.url}?${copy}`), stallMs);
 
-            throw new Error(
-              `Unrift: matchers module ${m.spec} defined tests. It can add matchers and hooks, put tests in a test file.`,
-            );
+            if (fileSuite.tests.length > 0 || fileSuite.suites.length > 0) {
+              // They aren't the file's, only the error is
+              fileSuite.tests.length = 0;
+              fileSuite.suites.length = 0;
+
+              throw new Error(
+                `Unrift: matchers module ${m.spec} defined tests. It can add matchers and hooks, put tests in a test file.`,
+              );
+            }
+          }
+        } finally {
+          // What Node loaded with them, it can load again for a test
+          for (const url of noteLoads(false)) {
+            if (!url.startsWith("file:")) continue;
+
+            const path = fileURLToPath(url);
+
+            if (isSharedCode(path)) sharedFiles.add(path);
           }
         }
 
         const built = await toImportUrl(file, "bundle-test", {
           coverage: !!coverage,
-          shared: sharedFiles,
+          shared: [...sharedFiles],
         });
         const url = freshImportUrl(built);
 
@@ -431,6 +475,12 @@ export async function startRun(
         await settles(import(url), stallMs);
       } catch (err) {
         fileSuite.errors.push({ label: "import", error: toError(err) });
+
+        // What it registers if it resumes goes nowhere
+        if (err instanceof Stalled) fileState.abandoned = true;
+
+        // A failed file, like any other under --bail
+        if (options.bail) state.bailed = true;
 
         // Tests registered before the error mustn't run. The run loop goes by
         // mode, so marking statuses alone wasn't enough.
