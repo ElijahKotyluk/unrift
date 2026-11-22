@@ -450,6 +450,24 @@ describe("workers", () => {
     expect(run()).toEqual(expected);
     expect(run("--workers", "2")).toEqual(expected);
 
+    // Printed under its file, and named with it in the failures
+    const printed = spawnSync(
+      process.execPath,
+      [
+        resolve(process.cwd(), "bin/unrift.mjs"),
+        "--config",
+        join(dir, "unrift.config.ts"),
+        "test/hook.spec.ts",
+      ],
+      { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
+    ).stdout.replace(/\x1b\[[0-9;]*m/g, "");
+
+    expect(printed).toMatch(
+      /✘ \S*test\/hook\.spec\.ts \(1 failed, 1 skipped\)/,
+    );
+    expect(printed).toContain("   ✘ [stalled]");
+    expect(printed).toMatch(/1\) \S*test\/hook\.spec\.ts › \[stalled\]/);
+
     // Alone, the file that set process.exitCode passes the run
     expect(run("test/code.spec.ts").status).toBe(0);
     expect(run("test/code.spec.ts", "--workers", "2").status).toBe(0);
@@ -478,10 +496,20 @@ describe("workers", () => {
       join(dir, "each.cjs"),
       `const { beforeEach } = require("@unrift/core");\nlet n = 0;\nexports.count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
     );
+    // A package, found from the config's folder
+    mkdirSync(join(dir, "node_modules/pkg-matchers"), { recursive: true });
+    writeFileSync(
+      join(dir, "node_modules/pkg-matchers/package.json"),
+      `{ "name": "pkg-matchers", "type": "module", "exports": { "import": "./index.js" } }\n`,
+    );
+    writeFileSync(
+      join(dir, "node_modules/pkg-matchers/index.js"),
+      `globalThis.pkg = true;\n`,
+    );
     // From the config's folder
     writeFileSync(
       join(dir, "unrift.config.ts"),
-      `export default { testDir: "test", matchers: ["./setup.mjs", "./each.cjs"] };\n`,
+      `export default { testDir: "test", matchers: ["./setup.mjs", "./each.cjs", "pkg-matchers"] };\n`,
     );
     writeFileSync(
       join(dir, "tsconfig.json"),
@@ -490,7 +518,7 @@ describe("workers", () => {
     writeFileSync(join(dir, "other.mjs"), `export const value = 1;\n`);
 
     const body = (setup: string, more = "") =>
-      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nit("store", () => expect(store.loads).toBe(1));\n${more}`;
+      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nit("store", () => expect([store.loads, globalThis.pkg]).toEqual([1, true]));\n${more}`;
 
     // Bundled, and loaded by Node
     writeFileSync(join(dir, "test/a.spec.ts"), body("../setup.mjs"));
@@ -549,7 +577,7 @@ describe("workers", () => {
         "-e",
         `import { runEngine } from ${JSON.stringify(resolve(process.cwd(), "dist/esm/index.js"))};
 for (let i = 0; i < 2; i++) {
-  const { results } = await runEngine({ files: ["a.spec.ts", "b.spec.mjs", "c.spec.ts"].map((f) => ${JSON.stringify(join(dir, "test"))} + "/" + f), matchers: ${JSON.stringify([join(dir, "setup.mjs"), join(dir, "each.cjs")])} });
+  const { results } = await runEngine({ files: ["a.spec.ts", "b.spec.mjs", "c.spec.ts"].map((f) => ${JSON.stringify(join(dir, "test"))} + "/" + f), matchers: ${JSON.stringify([join(dir, "setup.mjs"), join(dir, "each.cjs"), join(dir, "node_modules/pkg-matchers/index.js")])} });
   console.log(results.filter((r) => r.status !== "pass").length);
 }`,
       ],

@@ -410,7 +410,7 @@ async function starNames(
 const STAR_EXPORT = /^export \* from ("[^"\n]*");$/gm;
 
 /** Resolves `spec` from `resolveDir` with Node's import conditions. */
-async function resolveImport(
+export async function resolveImport(
   spec: string,
   resolveDir: string,
 ): Promise<string | null> {

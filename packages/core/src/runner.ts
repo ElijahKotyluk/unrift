@@ -5,7 +5,15 @@ import {
   statSync,
   type FSWatcher,
 } from "node:fs";
-import { basename, dirname, relative, resolve, join, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  join,
+  sep,
+} from "node:path";
 
 import {
   loadConfig,
@@ -35,6 +43,7 @@ import {
 
 import { normalizePath } from "./utils/normalizePath";
 import { isOwnWrite } from "./utils/ownWrites";
+import { resolveImport } from "./utils/moduleMockPlugin";
 import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
 import { TaskStatus } from "./types";
 
@@ -182,9 +191,13 @@ function formatDuration(ms: number): string {
 function getFileHeadingFromDescription(description: string): string | null {
   const index = description.indexOf("›");
 
-  if (index === -1) return null;
+  if (index !== -1) return description.slice(0, index).trim();
 
-  return description.slice(0, index).trim();
+  // A file's own result, like "a.spec.ts > [import]". The run's own ones
+  // ("root > [worker]") have no file.
+  const own = /^(.*) > \[[^\]]+\]$/.exec(description);
+
+  return own && own[1] !== "root" ? own[1] : null;
 }
 
 function shortenPath(absPath: string): string {
@@ -264,6 +277,14 @@ function getFileStats(group: FileGroup) {
 }
 
 function extractTestName(description: string): string {
+  // A file's own result is its label, under the file's heading
+  if (
+    getFileHeadingFromDescription(description) !== null &&
+    !description.includes("›")
+  ) {
+    return description.replace(/^.* > (\[[^\]]+\])$/, "$1");
+  }
+
   // Remove the file heading and first suite separator, keep nested describe structure
   return description.replace(/^.*?›\s*/, "");
 }
@@ -444,12 +465,19 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     bail,
     grep: options.grep,
     retries: config?.retries,
-    // From the config's folder, like testDir
-    matchers: config?.matchers?.map((spec) =>
-      typeof spec === "string" && spec.startsWith(".")
-        ? resolve(configDir, spec)
-        : spec,
-    ),
+    // From the config's folder, like testDir. A package too: from unrift's
+    // own folder it wouldn't be found when unrift is linked.
+    matchers:
+      config?.matchers &&
+      (await Promise.all(
+        config.matchers.map(async (spec) =>
+          typeof spec !== "string" || isAbsolute(spec)
+            ? spec
+            : spec.startsWith(".")
+              ? resolve(configDir, spec)
+              : ((await resolveImport(spec, configDir)) ?? spec),
+        ),
+      )),
     workers: options.workers ?? config?.workers,
     updateSnapshots: options.updateSnapshots ? "all" : undefined,
     coverage: coverageOn
@@ -657,7 +685,11 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     console.log(`\n${horizontalRule(colors.boldRed(" FAILURES "))}\n`);
 
     failures.forEach((r, i) => {
-      const testName = extractTestName(r.description);
+      const heading = getFileHeadingFromDescription(r.description);
+      // With its file, two files can have a test of the same name
+      const testName = heading
+        ? `${shortenPath(heading)} › ${extractTestName(r.description)}`
+        : extractTestName(r.description);
 
       console.log(colors.boldRed(`  ${i + 1}) ${testName}`));
 
