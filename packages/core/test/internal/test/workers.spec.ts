@@ -197,7 +197,6 @@ describe("workers", () => {
 
   it("reports a worker that stops outside a file, and keeps the rest", () => {
     const dir = resolve(process.cwd(), "test/workers/.work/outside");
-    const marker = join(dir, "marker");
     const runWith = (setup: string, specs: Record<string, string>) => {
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(join(dir, "test"), { recursive: true });
@@ -229,6 +228,7 @@ describe("workers", () => {
 
       return {
         status: res.status,
+        stderr: res.stderr,
         results: JSON.parse(res.stdout).results.map(
           (r: {
             description: string;
@@ -240,23 +240,19 @@ describe("workers", () => {
       };
     };
 
-    // The worker that takes over from a can't start. b and c still report.
-    const replaced = runWith(
-      `import { existsSync } from "node:fs";\nif (existsSync(${JSON.stringify(marker)})) throw new Error("setup failed");\n`,
-      {
-        // a waits so the other worker started before the marker is there
-        a: `it("a", async () => { await wait(500); writeFileSync(${JSON.stringify(marker)}, ""); process.exit(2); });`,
-        b: `it("b", async () => { await wait(1000); expect(1).toBe(2); });`,
-        c: `it("c", () => wait(500));`,
-      },
-    ).results;
+    // A new worker takes over from a and runs c. b still reports.
+    const replaced = runWith("", {
+      // a waits so the other worker took b
+      a: `it("a", async () => { await wait(500); process.exit(2); });`,
+      b: `it("b", async () => { await wait(1000); expect(1).toBe(2); });`,
+      c: `it("c", () => wait(500));`,
+    }).results;
 
-    expect([replaced[0], replaced[1], replaced[3]]).toEqual([
-      "root > [worker]: fail (setup failed\n\nA worker couldn't start.)",
+    expect([replaced[0], replaced[2]]).toEqual([
       "a.spec.ts > [worker]: fail (Unrift worker stopped with exit code 2\n\nThe worker stopped while running a.spec.ts.)",
       "c.spec.ts › c: pass",
     ]);
-    expect(replaced[2]).toMatch(/^b\.spec\.ts › b: fail/);
+    expect(replaced[1]).toMatch(/^b\.spec\.ts › b: fail/);
 
     // An error right after the last file's afterAll. One file, one worker.
     const late = runWith(
@@ -266,17 +262,53 @@ describe("workers", () => {
 
     expect(late.status).toBe(1);
 
-    // Each worker stops right after it starts, none takes its place
+    // Each worker stops in its first file, from the matchers module
     const early = runWith(
       `setImmediate(() => { throw new Error("early"); });\n`,
       { a: `it("a", () => {});`, b: `it("b", () => {});` },
     );
 
+    // The matchers module runs with each file, what it throws is that file's
     expect(early.results).toEqual([
-      "root > [worker]: fail (early\n\nThe worker stopped before its first file.)",
-      "root > [worker]: fail (early\n\nThe worker stopped before its first file.)",
-      "a.spec.ts > [worker]: fail (Not run, no worker could start to run it.)",
-      "b.spec.ts > [worker]: fail (Not run, no worker could start to run it.)",
+      "a.spec.ts > [worker]: fail (early\n\nThe worker stopped while running a.spec.ts.)",
+      "b.spec.ts > [worker]: fail (early\n\nThe worker stopped while running b.spec.ts.)",
+    ]);
+
+    // A timer's error after its worker's last file, while no other worker
+    // runs, still fails the run like without workers
+    const timer = runWith("", {
+      a: `it("a", () => { setTimeout(() => { throw new Error("timer"); }, 100); });`,
+      b: `it("b", () => {});`,
+    });
+
+    expect(timer.status).toBe(1);
+    expect(timer.results).toEqual([
+      "a.spec.ts › a: pass",
+      "a.spec.ts > [worker]: fail (timer\n\nThe worker stopped after running a.spec.ts.)",
+      "b.spec.ts › b: pass",
+    ]);
+
+    // One that never exits is stopped, and says so
+    const open = runWith("", {
+      a: `it("a", () => { setInterval(() => {}, 1000); });`,
+    });
+
+    expect([open.status, open.results]).toEqual([0, ["a.spec.ts › a: pass"]]);
+    expect(open.stderr).toMatch(
+      /A worker was still running 1000ms after \S*\/test\/a\.spec\.ts, a test left a timer, socket or other handle open\. It was stopped\./,
+    );
+
+    // A result that can't be sent fails the file, the worker doesn't wait
+    // on it forever
+    const unsent = runWith("", {
+      a: `process.on("unhandledRejection", () => {});\nit("a", () => { const e = new Error("odd"); Object.defineProperty(e, "name", { value: () => 1 }); throw e; });`,
+      b: `it("b", () => {});`,
+    });
+
+    expect(unsent.status).toBe(1);
+    expect(unsent.results).toEqual([
+      "a.spec.ts › a: fail (odd)",
+      "b.spec.ts › b: pass",
     ]);
 
     // Fake timers a test left on don't stop its worker from finishing
@@ -352,6 +384,101 @@ describe("workers", () => {
     ).toEqual([
       "Output from test/a.spec.ts after its tests were done. Did a test leave a timer running?",
     ]);
+  });
+
+  it("gives each test file its own copy of the matchers module, the one it imports", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/per-file");
+
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "test"), { recursive: true });
+    // Each counts the tests it ran before, and every run of a beforeEach.
+    // A copy shared across files counts on, a second one from the test's
+    // own import runs its beforeEach twice. One is CommonJS, which a query
+    // in its URL doesn't load again.
+    writeFileSync(
+      join(dir, "setup.mjs"),
+      `import { beforeEach } from "@unrift/core";\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
+    );
+    writeFileSync(
+      join(dir, "each.cjs"),
+      `const { beforeEach } = require("@unrift/core");\nlet n = 0;\nexports.count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
+    );
+    // From the config's folder
+    writeFileSync(
+      join(dir, "unrift.config.ts"),
+      `export default { testDir: "test", matchers: ["./setup.mjs", "./each.cjs"] };\n`,
+    );
+    writeFileSync(
+      join(dir, "tsconfig.json"),
+      `{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./*"] } } }\n`,
+    );
+    writeFileSync(join(dir, "other.mjs"), `export const value = 1;\n`);
+
+    const body = (setup: string, more = "") =>
+      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\n${more}`;
+
+    // Bundled, and loaded by Node
+    writeFileSync(join(dir, "test/a.spec.ts"), body("../setup.mjs"));
+    writeFileSync(join(dir, "test/b.spec.mjs"), body("../setup.mjs"));
+    // By a path alias, and with a mocked module
+    writeFileSync(
+      join(dir, "test/c.spec.ts"),
+      body(
+        "@/setup.mjs",
+        `import { value } from "../other.mjs";\nmock.module("../other.mjs", () => ({ value: 2 }));\nit("mocked", () => expect(value).toBe(2));\n`,
+      ),
+    );
+
+    const statuses = (...args: string[]) =>
+      JSON.parse(
+        spawnSync(
+          process.execPath,
+          [
+            resolve(process.cwd(), "bin/unrift.mjs"),
+            "--config",
+            join(dir, "unrift.config.ts"),
+            "--json",
+            ...args,
+          ],
+          {
+            encoding: "utf8",
+            env: { ...process.env, CI: "" },
+            timeout: 20_000,
+          },
+        ).stdout,
+      ).results.map(
+        (r: { description: string; status: string }) =>
+          `${r.description.split("/").pop()}: ${r.status}`,
+      );
+    const expected = [
+      "a.spec.ts › 1: pass",
+      "a.spec.ts › 2: pass",
+      "b.spec.mjs › 1: pass",
+      "b.spec.mjs › 2: pass",
+      "c.spec.ts › 1: pass",
+      "c.spec.ts › 2: pass",
+      "c.spec.ts › mocked: pass",
+    ];
+
+    expect(statuses()).toEqual(expected);
+    expect(statuses("--workers", "2")).toEqual(expected);
+
+    // Again on a second run in the same process, like watch mode
+    const twice = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { runEngine } from ${JSON.stringify(resolve(process.cwd(), "dist/esm/index.js"))};
+for (let i = 0; i < 2; i++) {
+  const { results } = await runEngine({ files: ["a.spec.ts", "b.spec.mjs", "c.spec.ts"].map((f) => ${JSON.stringify(join(dir, "test"))} + "/" + f), matchers: ${JSON.stringify([join(dir, "setup.mjs"), join(dir, "each.cjs")])} });
+  console.log(results.filter((r) => r.status !== "pass").length);
+}`,
+      ],
+      { encoding: "utf8", cwd: dir, timeout: 20_000 },
+    );
+
+    expect(twice.stdout.trim().split("\n")).toEqual(["0", "0"]);
   });
 
   it("runs the top level's beforeAll and afterAll around each file with a test to run", () => {
@@ -433,13 +560,18 @@ for (let i = 0; i < 2; i++) {
         "-e",
         `import { runEngine } from ${JSON.stringify(resolve(process.cwd(), "dist/esm/index.js"))};
 for (let i = 0; i < 2; i++) {
-  await runEngine({ files: [], matchers: [${JSON.stringify(join(dir, "tests.mjs"))}] }).then(() => console.log("ran"), (e) => console.log(e.message.includes("defined tests") ? "threw" : e.message));
+  const { results } = await runEngine({ files: [${JSON.stringify(join(dir, "test/a.spec.ts"))}], matchers: [${JSON.stringify(join(dir, "tests.mjs"))}] });
+  console.log(results.map((r) => r.description.split("/").pop() + ": " + r.status + (r.error?.message.includes("defined tests") ? " (defined tests)" : "")).join(", "));
 }`,
       ],
       { encoding: "utf8", timeout: 20_000 },
     );
 
-    expect(tests.stdout.trim().split("\n")).toEqual(["threw", "threw"]);
+    // The file fails, its tests don't run
+    expect(tests.stdout.trim().split("\n")).toEqual([
+      "a.spec.ts > [import]: fail (defined tests)",
+      "a.spec.ts > [import]: fail (defined tests)",
+    ]);
 
     // Around a and b, with workers or without. The afterAll after the one
     // that threw still runs.

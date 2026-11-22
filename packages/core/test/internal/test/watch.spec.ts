@@ -231,6 +231,88 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
     }
   }, 15000);
 
+  it("runs the edited code of a plain JS import and the matchers module", async () => {
+    const ws = workspace("fresh", {
+      "unrift.config.ts": `export default { testDir: "test", matchers: ["./setup.mjs"] };\n`,
+      "setup.mjs": `import { beforeAll } from "@unrift/core";\nbeforeAll(() => console.log("setup one"));\n`,
+      "test/helper.js": `import { expect } from "@unrift/core";\nexport function check() {\n  expect(1).toMatchInlineSnapshot();\n}\n`,
+      "test/a.spec.js": `import { it } from "@unrift/core";\nimport { check } from "./helper.js";\nit("a", () => check());\n`,
+    });
+    const helper = join(ws.dir, "test/helper.js");
+    const w = watch(ws.dir);
+
+    try {
+      expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
+        true,
+      );
+
+      // Node cached the first one, its offsets would land in the new code
+      ws.write(
+        "test/helper.js",
+        `import { expect } from "@unrift/core";\nexport function check() {\n  expect(7).toMatchInlineSnapshot();\n  expect(5).toMatchInlineSnapshot();\n}\n`,
+      );
+      expect(await w.waitFor(() => w.out.text.includes("2 written"))).toBe(
+        true,
+      );
+      expect(readFileSync(helper, "utf8")).toContain(
+        "expect(7).toMatchInlineSnapshot(`7`);\n  expect(5).toMatchInlineSnapshot(`5`);",
+      );
+
+      // Outside the test dir, and loaded by Node
+      ws.write(
+        "setup.mjs",
+        `import { beforeAll } from "@unrift/core";\nbeforeAll(() => console.log("setup two"));\n`,
+      );
+      expect(await w.waitFor(() => w.out.text.includes("setup two"))).toBe(
+        true,
+      );
+    } finally {
+      w.kill();
+    }
+  }, 15000);
+
+  it("doesn't rerun for a snapshot a worker writes during the run", async () => {
+    const ws = workspace("worker-snap", {
+      "unrift.config.ts": `export default { testDir: "test" };\n`,
+      "test/a.spec.ts": `import { it, expect } from "@unrift/core";\nit("a", () => expect(1).toMatchSnapshot());\n`,
+      // Keeps the run going once a's worker wrote its .snap
+      "test/b.spec.ts": `import { it } from "@unrift/core";\nit("b", () => new Promise((r) => setTimeout(r, 1000)));\n`,
+    });
+    const w = watch(ws.dir, "--workers", "2");
+
+    try {
+      expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
+        true,
+      );
+
+      ws.write(
+        "test/a.spec.ts",
+        `import { it, expect } from "@unrift/core";\nit("a", () => { expect(1).toMatchSnapshot(); expect(2).toMatchSnapshot(); });\n`,
+      );
+      expect(
+        await w.waitFor(() => w.out.text.split("written").length === 3),
+      ).toBe(true);
+      await sleep(1000);
+      expect(w.reruns()).toBe(1);
+
+      // An edit to it after the worker wrote it, while the run goes on, is
+      // the user's
+      const snap = join(ws.dir, "test/__snapshots__/a.spec.ts.snap");
+
+      ws.write(
+        "test/a.spec.ts",
+        `import { it, expect } from "@unrift/core";\nit("a", () => { expect(1).toMatchSnapshot(); expect(2).toMatchSnapshot(); expect(3).toMatchSnapshot(); });\n`,
+      );
+      expect(
+        await w.waitFor(() => readFileSync(snap, "utf8").includes("a 3")),
+      ).toBe(true);
+      writeFileSync(snap, readFileSync(snap, "utf8").replace("`3`", "`4`"));
+      expect(await w.waitFor(() => w.reruns() === 3)).toBe(true);
+    } finally {
+      w.kill();
+    }
+  }, 15000);
+
   it("says it's watching once the watchers are set up", async () => {
     const ws = workspace("ready", {
       "unrift.config.ts": `export default { testDir: "test" };\n`,

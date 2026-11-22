@@ -20,6 +20,7 @@ import {
   type InlineEdits,
 } from "./inline";
 import { serialize } from "./serialize";
+import { noteWrite } from "../utils/ownWrites";
 
 /**
  * - "all": write new snapshots and overwrite mismatches (`-u`)
@@ -352,10 +353,12 @@ export function finishSnapshots(
     try {
       if (file.data.size === 0) {
         rmSync(file.path, { force: true });
+        noteWrite(file.path);
         emptied.push(dirname(file.path));
       } else {
         mkdirSync(dirname(file.path), { recursive: true });
         writeFileSync(file.path, formatSnapshotFile(file.data));
+        noteWrite(file.path);
       }
     } catch (err) {
       summary.errors.push({
@@ -441,7 +444,10 @@ export function removeEmptyDirs(dirs: string[]) {
 
 function removeDirIfEmpty(dir: string) {
   try {
-    if (readdirSync(dir).length === 0) rmdirSync(dir);
+    if (readdirSync(dir).length === 0) {
+      rmdirSync(dir);
+      noteWrite(dir);
+    }
   } catch {
     // Not ours to worry about
   }

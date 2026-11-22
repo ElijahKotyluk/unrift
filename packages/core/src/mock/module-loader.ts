@@ -1,5 +1,6 @@
 /**
- * Node module hooks for `mock.doMock`, installed with `module.registerHooks()`
+ * Node module hooks for `mock.doMock`, the matchers modules and loading
+ * project files again on each run. Installed with `module.registerHooks()`
  * (see register-loader.ts).
  *
  * The hooks run in the thread that imports, so they read the registry in
@@ -43,13 +44,43 @@ export function generateMockSource(
   return lines.join("\n");
 }
 
+// Unrift's own files, never loaded twice: a second copy would have its own
+// suites and state
+const OWN = new URL("../../", import.meta.url).href;
+
+// Which run this is. Node caches a module by URL, so a project file imported
+// again on a later run (watch mode) would run the code from the first one.
+// Every run after the first gets its own URL for them, like a bundle does.
+let generation = 1;
+
+export function setRunGeneration(run: number): void {
+  generation = run;
+}
+
+/** A matchers module's URL, and the URL of the running file's copy of it. */
+export type MatcherInstances = Map<string, string>;
+
+let matcherInstances: MatcherInstances = new Map();
+
+/**
+ * Each test file gets its own copy of the matchers modules, like a setup
+ * file in Jest and Vitest. A test that imports one gets that same copy.
+ */
+export function setMatcherInstances(instances: MatcherInstances): void {
+  matcherInstances = instances;
+}
+
 /** Points a mocked spec at a `unrift-mock:` URL. */
 export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
-  const entry = registrations.get(specifier);
-
   // Only imports, like module.register() hooks were. A require() inside a
   // package keeps the real module.
-  if (entry && !context.conditions.includes("require")) {
+  if (context.conditions.includes("require")) {
+    return nextResolve(specifier, context);
+  }
+
+  const entry = registrations.get(specifier);
+
+  if (entry) {
     // The registration ID in the URL makes each doMock of the same spec a
     // new module, Node caches modules by URL
     return {
@@ -59,7 +90,26 @@ export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
     };
   }
 
-  return nextResolve(specifier, context);
+  const resolved = nextResolve(specifier, context);
+
+  if (!resolved.url.startsWith("file:")) return resolved;
+
+  const instance = matcherInstances.get(resolved.url.replace(/[?#].*$/, ""));
+
+  if (instance) return { url: instance, shortCircuit: true };
+
+  // Packages don't change between runs, a URL that already has a query was
+  // given one on purpose
+  if (
+    generation > 1 &&
+    !resolved.url.includes("?") &&
+    !resolved.url.includes("/node_modules/") &&
+    !resolved.url.startsWith(OWN)
+  ) {
+    return { ...resolved, url: `${resolved.url}?unrift-run=${generation}` };
+  }
+
+  return resolved;
 };
 
 /** Generates the source for a `unrift-mock:` URL. */

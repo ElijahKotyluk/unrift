@@ -1,4 +1,4 @@
-import { build } from "esbuild";
+import { build, type Plugin } from "esbuild";
 import { threadId } from "node:worker_threads";
 import { createHash } from "node:crypto";
 import {
@@ -317,7 +317,43 @@ function pickCacheRoot(projectRoot: string, selfHost: boolean): string {
 export type TransformOptions = {
   /** Keep code no test uses, so it shows up as uncovered. */
   coverage?: boolean;
+  /**
+   * The matchers modules' files. Left out of the bundle: a test that imports
+   * one gets the copy that ran for its file (see module-loader.ts).
+   */
+  matchers?: string[];
 };
+
+function matchersPlugin(files: string[]): Plugin {
+  const paths = new Set(files.flatMap((f) => [f, safeRealpath(f)]));
+
+  return {
+    name: "unrift-matchers",
+    setup(build) {
+      // Every import, a path alias can lead to one too
+      build.onResolve({ filter: /.*/ }, async (args) => {
+        // The mock plugin's own lookups, and ours, use the same mark: each
+        // resolving through the other would never end
+        if (args.pluginData?.unriftSkip || args.kind === "entry-point") return;
+        // Node can't require() a URL, a required one stays in the bundle
+        if (args.kind === "require-call" || args.kind === "require-resolve")
+          return;
+
+        const found = await build.resolve(args.path, {
+          kind: args.kind,
+          importer: args.importer,
+          resolveDir: args.resolveDir,
+          pluginData: { unriftSkip: true },
+        });
+
+        if (found.errors.length > 0 || found.external || !paths.has(found.path))
+          return undefined;
+
+        return { path: pathToFileURL(found.path).href, external: true };
+      });
+    },
+  };
+}
 
 export async function toImportUrl(
   filePath: string,
@@ -327,7 +363,8 @@ export async function toImportUrl(
   if (!isTsLike(filePath)) return pathToFileURL(filePath).href;
 
   const coverage = options.coverage ?? false;
-  const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${filePath}`;
+  const matchers = (options.matchers ?? []).filter((f) => f !== filePath);
+  const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${matchers.join("\0")}:${filePath}`;
 
   usedIn.set(key, generation);
 
@@ -393,8 +430,9 @@ export async function toImportUrl(
       treeShaking: !coverage,
       metafile: true,
       logLevel: "silent",
-      plugins:
-        mocks.calls.length > 0
+      // Mocks first, a mocked matchers module is the mock
+      plugins: [
+        ...(mocks.calls.length > 0
           ? [
               moduleMockPlugin(
                 filePath,
@@ -403,7 +441,9 @@ export async function toImportUrl(
                 resolveInjectedGlobals(),
               ),
             ]
-          : [],
+          : []),
+        ...(matchers.length > 0 ? [matchersPlugin(matchers)] : []),
+      ],
     });
 
     // Inputs that aren't files on disk (esbuild's own) can't change

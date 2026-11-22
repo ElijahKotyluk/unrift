@@ -9,11 +9,17 @@ import { parentPort, workerData } from "node:worker_threads";
 import { registerModuleLoader } from "./mock/register-loader";
 import { startRun, type EngineOptions } from "./run";
 import { bundledFiles } from "./utils/transform";
-import { copyFileRun, type FromWorker, type ToWorker } from "./workers";
+import {
+  copyError,
+  copyFileRun,
+  type FromWorker,
+  type ToWorker,
+} from "./workers";
 
-// Before any test can fake it
+// Before any test can fake or replace them
 const microtask = globalThis.queueMicrotask;
 const immediate = globalThis.setImmediate;
+const exit = process.exit.bind(process);
 
 // Hooks added in the main thread don't reach this one
 registerModuleLoader();
@@ -79,38 +85,49 @@ for (const stream of ["stdout", "stderr"] as const) {
 let queue = Promise.resolve();
 
 port.on("message", (message: ToWorker) => {
-  queue = queue.then(async () => {
-    if (message.type === "file") {
-      current = message.index;
-      post({ type: "started", index: message.index });
+  queue = queue
+    .then(async () => {
+      if (message.type === "file") {
+        current = message.index;
+        post({ type: "started", index: message.index });
 
-      const result = await file.run(message.index, () =>
-        run.runFile(message.file),
-      );
-      // Its snapshots go with it, a crash later can't lose them
-      const part = run.take();
+        const result = await file.run(message.index, () =>
+          run.runFile(message.file),
+        );
+        // Its snapshots go with it, a crash later can't lose them
+        const part = run.take();
 
-      // Until the next file starts, output with no file of its own goes to this one
-      post({
-        type: "file",
-        index: message.index,
-        run: copyFileRun(result),
-        part,
-      });
-    } else {
-      const end = await run.finish();
+        // Until the next file starts, output with no file of its own goes to this one
+        post({
+          type: "file",
+          index: message.index,
+          run: copyFileRun(result),
+          part,
+        });
+      } else {
+        const end = await run.finish();
 
-      // An error thrown right after, like from a setImmediate the afterAll
-      // left, stops the worker before it ends: it's still part of the run
-      await new Promise((resolve) => immediate(resolve));
+        // An error thrown right after, like from a setImmediate the afterAll
+        // left, stops the worker before it ends: it's still part of the run
+        await new Promise((resolve) => immediate(resolve));
 
-      post({
-        type: "end",
-        end: { ...end, root: copyFileRun(end.root) },
-        bundled: bundledFiles(),
-      });
-    }
-  });
+        post({
+          type: "end",
+          end: { ...end, root: copyFileRun(end.root) },
+          bundled: bundledFiles(),
+        });
+
+        // Nothing more comes, it exits once what the tests left is done
+        port.unref();
+      }
+    })
+    .catch((error: unknown) => {
+      // Running a file or sending what it left failed, like a value that
+      // can't be copied. Every later message would wait on this one, say why
+      // and stop instead of hanging.
+      post({ type: "crash", error: copyError(error) });
+      exit(1);
+    });
 });
 
 post({ type: "ready" });

@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { isAbsolute, resolve as resolvePath, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   clearContext,
@@ -14,7 +15,8 @@ import { RunState, unriftGlobalContext } from "./context";
 import { normalizePath } from "./utils/normalizePath";
 import { TaskMode, TaskStatus } from "./types";
 import { toError } from "./utils/toError";
-import { toImportUrl } from "./utils/transform";
+import { addBundledFiles, toImportUrl } from "./utils/transform";
+import { takeWrites } from "./utils/ownWrites";
 import { assertValidRetries } from "./utils/helpers";
 import {
   finishSnapshots,
@@ -34,6 +36,12 @@ import { toFileCoverage, type FileCoverage } from "./coverage/convert";
 import type { InlineSource } from "./snapshot/inline";
 import { summarize, type CoverageSummary } from "./coverage/report";
 import { runInWorkers } from "./workers";
+import { registerModuleLoader } from "./mock/register-loader";
+import {
+  setMatcherInstances,
+  setRunGeneration,
+  type MatcherInstances,
+} from "./mock/module-loader";
 
 export type RunEngineCoverageOptions = {
   /** Files outside it aren't reported. Defaults to the working directory. */
@@ -90,6 +98,18 @@ function forgetCommonJs(file: string) {
   for (const key of [file, safeRealpath(file)]) delete requireCache[key];
 }
 
+// Project files a test required, so a later run loads them again like the
+// ESM ones (see module-loader.ts). Packages and unrift stay.
+const OWN_DIR = fileURLToPath(new URL("../", import.meta.url));
+
+function forgetProjectCommonJs() {
+  for (const key of Object.keys(requireCache)) {
+    if (!key.includes(`${sep}node_modules${sep}`) && !key.startsWith(OWN_DIR)) {
+      delete requireCache[key];
+    }
+  }
+}
+
 function safeRealpath(file: string): string {
   try {
     return realpathSync(file);
@@ -116,55 +136,32 @@ function unpassedTestNames(suite: Suite, names: string[] = []): string[] {
   return names;
 }
 
-type RootHooks = Pick<
-  Suite,
-  "beforeAllHooks" | "afterAllHooks" | "beforeEachHooks" | "afterEachHooks"
->;
+/** A matchers module, and the file it is if it's one. */
+type Matcher = { spec: string; url: string; file: string | null };
 
-// The top-level hooks each matchers module added when it was first imported,
-// and whether it defined tests. Node caches the module, so a later run in
-// this process (watch mode) gets them from here: clearContext empties the
-// root suite.
-const matcherHooks = new Map<string, RootHooks & { tests: boolean }>();
+/**
+ * Resolves the matchers modules. A relative path is from the working
+ * directory, the CLI passes them from the config's folder. Node loads them
+ * like a test file it doesn't bundle, they share its modules.
+ */
+function resolveMatchers(specifiers: string[] | undefined): Matcher[] {
+  // Not through the hooks, which would hand back a run's or a file's copy
+  setMatcherInstances(new Map());
 
-const HOOK_KINDS = [
-  "beforeAllHooks",
-  "afterAllHooks",
-  "beforeEachHooks",
-  "afterEachHooks",
-] as const;
+  // A module listed twice is one module, its hooks are added once
+  return [...new Set(specifiers ?? [])].map((spec) => {
+    const url =
+      spec.startsWith(".") || isAbsolute(spec)
+        ? // The real path, what Node resolves an import of it to
+          pathToFileURL(safeRealpath(resolvePath(spec))).href
+        : import.meta.resolve(spec).replace(/[?#].*$/, "");
 
-async function loadMatcherModules(specifiers?: string[]) {
-  // A module listed twice is imported once, its hooks are added once
-  for (const spec of new Set(specifiers ?? [])) {
-    let hooks = matcherHooks.get(spec);
-
-    if (!hooks) {
-      const before = HOOK_KINDS.map((kind) => rootSuite[kind].length);
-      const suites = rootSuite.suites.length;
-      const tests = rootSuite.tests.length;
-
-      await import(spec);
-
-      hooks = {
-        ...(Object.fromEntries(
-          HOOK_KINDS.map((kind, i) => [kind, rootSuite[kind].slice(before[i])]),
-        ) as RootHooks),
-        tests:
-          rootSuite.suites.length > suites || rootSuite.tests.length > tests,
-      };
-      matcherHooks.set(spec, hooks);
-    } else {
-      for (const kind of HOOK_KINDS) rootSuite[kind].push(...hooks[kind]);
-    }
-
-    // They'd belong to no file, and a worker would run them once each
-    if (hooks.tests) {
-      throw new Error(
-        `Unrift: matchers module ${spec} defined tests. It can add matchers and hooks, put tests in a test file.`,
-      );
-    }
-  }
+    return {
+      spec,
+      url,
+      file: url.startsWith("file:") ? fileURLToPath(url) : null,
+    };
+  });
 }
 
 /** The options a worker gets, all of them can be copied to another thread. */
@@ -188,6 +185,8 @@ export type RunPart = {
   scripts: V8ScriptCoverage[];
   /** URLs of the test bundles, for coverage. */
   bundles: string[];
+  /** Files written and their stamps, for watch mode in the main thread. */
+  writes: Array<[string, string]>;
 };
 
 export type RunEnd = RunPart & {
@@ -241,6 +240,10 @@ export async function startRun(
 ) {
   clearContext();
   runCount++;
+  // A worker thread has them already, the main thread may not without the CLI
+  registerModuleLoader();
+  setRunGeneration(runCount);
+  if (runCount > 1) forgetProjectCommonJs();
 
   resetSnapshots(snapshotMode(options));
 
@@ -256,7 +259,16 @@ export async function startRun(
   // Bundled since the last take
   let newBundles: string[] = [];
 
-  await loadMatcherModules(options.matchers);
+  const matchers = resolveMatchers(options.matchers);
+  const matcherFiles = matchers.flatMap((m) => (m.file ? [m.file] : []));
+
+  // Watched like a test's imports
+  addBundledFiles({
+    files: matcherFiles.filter((f) => !f.includes(`${sep}node_modules${sep}`)),
+    failed: false,
+  });
+  // Each file gets its own copy of the matchers modules
+  let fileCount = 0;
 
   /** Imports the file, which registers its tests, and runs them. */
   async function runFile(file: string): Promise<FileRun> {
@@ -267,13 +279,6 @@ export async function startRun(
     );
 
     rootSuite.addSuite(fileSuite);
-
-    // Hooks a matchers module adds at the top level are each file's, like a
-    // setup file's in Jest and Vitest: its beforeEach and afterEach reach each
-    // test through the parent chain, its beforeAll and afterAll run around
-    // the file's tests, only if it has a test to run. Before the file's own.
-    fileSuite.beforeAllHooks.push(...rootSuite.beforeAllHooks);
-    fileSuite.afterAllHooks.push(...rootSuite.afterAllHooks);
     unriftGlobalContext.currentSuite = fileSuite;
     unriftGlobalContext.state = RunState.Register;
 
@@ -281,8 +286,39 @@ export async function startRun(
       try {
         forgetCommonJs(file);
 
+        // Imported for each file, like a setup file in Jest and Vitest, so
+        // the hooks it adds at the top level are this file's and run before
+        // its own. A test that imports it gets this same copy.
+        const instances: MatcherInstances = new Map();
+        const copy = `unrift-file=${runCount}.${++fileCount}`;
+
+        for (const m of matchers) instances.set(m.url, `${m.url}?${copy}`);
+
+        setMatcherInstances(instances);
+
+        for (const m of matchers) {
+          const url = instances.get(m.url)!;
+
+          // A CommonJS one runs again only once it's out of the cache. A
+          // require() of it in the test then gets this copy too.
+          if (m.file) forgetCommonJs(m.file);
+
+          await import(url);
+
+          if (fileSuite.tests.length > 0 || fileSuite.suites.length > 0) {
+            // They aren't the file's, only the error is
+            fileSuite.tests.length = 0;
+            fileSuite.suites.length = 0;
+
+            throw new Error(
+              `Unrift: matchers module ${m.spec} defined tests. It can add matchers and hooks, put tests in a test file.`,
+            );
+          }
+        }
+
         const built = await toImportUrl(file, "bundle-test", {
           coverage: !!coverage,
+          matchers: matcherFiles,
         });
         const url = freshImportUrl(built);
 
@@ -362,7 +398,14 @@ export async function startRun(
 
     // Synchronous: nothing a test left, like a timer, can run between
     // writing the snapshot files and the worker sending what it wrote
-    return { snapshots, inline, emptied, scripts: [], bundles: fresh };
+    return {
+      snapshots,
+      inline,
+      emptied,
+      scripts: [],
+      bundles: fresh,
+      writes: takeWrites(),
+    };
   }
 
   /** Takes what's left, and the coverage. */

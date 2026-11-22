@@ -15,6 +15,7 @@ import { TaskStatus } from "./types";
 import { colors } from "./utils/colors";
 import { normalizePath } from "./utils/normalizePath";
 import { addBundledFiles } from "./utils/transform";
+import { addWrites } from "./utils/ownWrites";
 
 /** A write to stdout or stderr while a file ran. */
 type Output = { stream: "stdout" | "stderr"; bytes: Uint8Array };
@@ -36,26 +37,56 @@ export type FromWorker =
   | { type: "started"; index: number }
   | ({ type: "output"; index: number } & Output)
   | { type: "file"; index: number; run: CopiedFileRun; part: RunPart }
+  /** Sending failed, it stops after this. */
+  | { type: "crash"; error: CopiedError }
   | {
       type: "end";
       end: Omit<RunEnd, "root"> & { root: CopiedFileRun };
       bundled: { files: string[]; failed: boolean };
     };
 
+/** A field as text, or undefined if reading it or making it text throws. */
+function text(read: () => unknown): string | undefined {
+  try {
+    const value = read();
+
+    return value === undefined ? undefined : String(value);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Errors are copied by hand: a structured clone drops what isn't a plain
- * Error field, and a property it can't clone would throw instead.
+ * Errors are copied by hand, as text: a structured clone drops what isn't a
+ * plain Error field, and a field it can't clone (a test can throw anything)
+ * would throw instead.
  */
+export function copyError(error: unknown): CopiedError {
+  const field = (key: string) =>
+    text(() => (error as Record<string, unknown>)[key]);
+
+  return {
+    name: field("name") ?? "Error",
+    message: field("message") ?? text(() => error) ?? "",
+    stack: field("stack"),
+  };
+}
+
+export function restoreError(copied: CopiedError): Error {
+  const error = new Error(copied.message);
+
+  error.name = copied.name;
+  error.stack = copied.stack;
+
+  return error;
+}
+
 export function copyFileRun(run: FileRun): CopiedFileRun {
   return {
     ...run,
     results: run.results.map((result) => ({
       ...result,
-      error: result.error && {
-        name: result.error.name,
-        message: result.error.message,
-        stack: result.error.stack,
-      },
+      error: result.error && copyError(result.error),
     })),
   };
 }
@@ -63,16 +94,10 @@ export function copyFileRun(run: FileRun): CopiedFileRun {
 function restoreFileRun(run: CopiedFileRun): FileRun {
   return {
     ...run,
-    results: run.results.map((result) => {
-      if (!result.error) return { ...result, error: undefined };
-
-      const error = new Error(result.error.message);
-
-      error.name = result.error.name;
-      error.stack = result.error.stack;
-
-      return { ...result, error };
-    }),
+    results: run.results.map((result) => ({
+      ...result,
+      error: result.error && restoreError(result.error),
+    })),
   };
 }
 
@@ -110,6 +135,7 @@ type Slot = {
   /** Told to finish: its files are done. */
   finishing: boolean;
   ended: boolean;
+  exited: boolean;
   /** An error it threw, handled once it has exited and sent everything. */
   error?: Error;
 };
@@ -120,7 +146,17 @@ type Slot = {
  * loaded from a file, and an explicit execArgv without it would turn down
  * flags like --max-old-space-size.
  */
+/** How long a worker gets to exit on its own after its last file. */
+const EXIT_GRACE_MS = 1000;
+
 const WORKER_CODE = `import(${JSON.stringify(new URL("./worker.js", import.meta.url).href)})`;
+
+/** A file as a note shows it: from the working directory if it's in it. */
+function shown(file: string): string {
+  const path = relative(process.cwd(), file);
+
+  return normalizePath(path.startsWith("..") ? file : path);
+}
 
 /** The error's stack frames, without its message. */
 function frames(error: Error): string {
@@ -178,13 +214,46 @@ export async function runInWorkers(
       let anyReady = false;
       // Once it's over no new worker starts, cleanup is stopping them
       let settled = false;
+      let grace: ReturnType<typeof setTimeout> | null = null;
       const resolve = () => {
         settled = true;
+        if (grace) clearTimeout(grace);
         resolveRun();
       };
       const reject = (err: unknown) => {
         settled = true;
+        if (grace) clearTimeout(grace);
         rejectRun(err);
+      };
+
+      // Every file is done. A worker exits once nothing a test left is
+      // pending, so an error from a leftover timer still fails the run, like
+      // without workers. One still going after a while is stopped, and says
+      // which file it ran last, like Jest's "failed to exit gracefully".
+      const drain = () => {
+        if (slots.every((slot) => slot.exited)) {
+          resolve();
+          return;
+        }
+
+        grace ??= setTimeout(() => {
+          for (const slot of slots) {
+            if (slot.exited) continue;
+
+            const from =
+              slot.last === null
+                ? ""
+                : ` after ${shown(options.files[slot.last])}`;
+
+            process.stderr.write(
+              colors.yellow(
+                `\nA worker was still running ${EXIT_GRACE_MS}ms${from}, a test left a timer, socket or other handle open. It was stopped.\n`,
+              ),
+            );
+          }
+
+          resolve();
+        }, EXIT_GRACE_MS);
       };
 
       const dispatch = (slot: Slot) => {
@@ -273,6 +342,7 @@ export async function runInWorkers(
           ready: false,
           finishing: false,
           ended: false,
+          exited: false,
         };
 
         slots.push(slot);
@@ -288,7 +358,7 @@ export async function runInWorkers(
                   late = message.index;
                   process.stderr.write(
                     colors.yellow(
-                      `\nOutput from ${normalizePath(relative(process.cwd(), options.files[message.index]))} after its tests were done. Did a test leave a timer running?\n`,
+                      `\nOutput from ${shown(options.files[message.index])} after its tests were done. Did a test leave a timer running?\n`,
                     ),
                   );
                 }
@@ -309,6 +379,7 @@ export async function runInWorkers(
             case "file":
               files[message.index] = restoreFileRun(message.run);
               parts.push(message.part);
+              addWrites(message.part.writes);
               slot.sent = null;
               slot.started = null;
               slot.last = message.index;
@@ -320,10 +391,14 @@ export async function runInWorkers(
             case "end":
               slot.ended = true;
               parts.push(message.end);
+              addWrites(message.end.writes);
               roots.push(restoreFileRun(message.end.root));
               addBundledFiles(message.bundled);
 
-              if (--alive === 0) resolve();
+              if (--alive === 0) drain();
+              break;
+            case "crash":
+              slot.error ??= restoreError(message.error);
               break;
           }
         });
@@ -336,6 +411,8 @@ export async function runInWorkers(
 
         // After every message it sent
         slot.worker.on("exit", (code) => {
+          slot.exited = true;
+
           if (settled) return;
 
           const error =
@@ -349,6 +426,8 @@ export async function runInWorkers(
               if (slot.last !== null) fail(slot, slot.last, error);
               else failRoot(error, "The worker stopped after the run.");
             }
+
+            if (alive === 0) drain();
             return;
           }
 
@@ -393,7 +472,7 @@ export async function runInWorkers(
           // Only for one that got through a file: one that stopped before
           // would only stop again, every time
           if (more() && at !== null) start();
-          else if (alive === 0) resolve();
+          else if (alive === 0) drain();
         });
       };
 
@@ -441,6 +520,8 @@ export async function runInWorkers(
       emptied: parts.flatMap((part) => part.emptied),
       scripts: parts.flatMap((part) => part.scripts),
       bundles: parts.flatMap((part) => part.bundles),
+      // Already added as they came in
+      writes: [],
     },
   };
 }

@@ -85,7 +85,7 @@ The module should call `expect.extend()` when imported.
 
 Hooks it adds at the top level are every test file's, like a setup file in Jest (`setupFilesAfterEnv`) or Vitest (`setupFiles`). `beforeAll` and `afterAll` run around each file that has a test to run, after the file is loaded. `beforeEach` and `afterEach` run around each test.
 
-The module itself is loaded once, before any test file (once in each worker, with `--workers`). Code a test file needs when it loads goes at the module's top level, not in a `beforeAll`.
+The module is loaded again for each test file, before it, so what it keeps at its top level starts fresh in every file, with workers or without. A test file that imports it gets that same copy, its hooks run once. Code a test file needs when it loads goes at the module's top level, not in a `beforeAll`. A relative path is from the config's folder.
 
 ## CLI overrides
 

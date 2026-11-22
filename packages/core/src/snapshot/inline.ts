@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { diffLines, escapeTemplate } from "./file";
 import { serialize } from "./serialize";
+import { noteWrite } from "../utils/ownWrites";
 import type { SnapshotUpdateMode } from "./state";
 
 // Frames from Unrift itself are skipped when looking for the call site
@@ -705,6 +706,7 @@ export function writeInlineSnapshots(taken: InlineSource[]): {
     // Not a skip: the matcher passed expecting this to land, so the run fails
     try {
       writeFileSync(path, source);
+      noteWrite(path);
     } catch (err) {
       errors.push({ file: path, message: errorMessage(err) });
       continue;

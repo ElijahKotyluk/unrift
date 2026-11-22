@@ -34,6 +34,7 @@ import {
 } from "./coverage/report";
 
 import { normalizePath } from "./utils/normalizePath";
+import { isOwnWrite } from "./utils/ownWrites";
 import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
 import { TaskStatus } from "./types";
 
@@ -443,7 +444,12 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     bail,
     grep: options.grep,
     retries: config?.retries,
-    matchers: config?.matchers,
+    // From the config's folder, like testDir
+    matchers: config?.matchers?.map((spec) =>
+      typeof spec === "string" && spec.startsWith(".")
+        ? resolve(configDir, spec)
+        : spec,
+    ),
     workers: options.workers ?? config?.workers,
     updateSnapshots: options.updateSnapshots ? "all" : undefined,
     coverage: coverageOn
@@ -504,8 +510,6 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     ? checkThresholds(coverage.summary.total, coverageConfig?.thresholds)
     : [];
 
-  // Reports inside the test dir would set off watch mode again
-  noteOwnWrites([...snapshots.filesWritten, ...coverageReports]);
   // Obsolete snapshots fail the run until they're removed with -u, and so
   // does a snapshot that couldn't be read or written
   const obsoleteLeft = snapshots.obsolete - snapshots.removed;
@@ -759,20 +763,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
  * platforms (Linux `fs.watch` does not support `recursive: true` before Node 22).
  * Returns a cleanup function to stop watching.
  */
-// What the last run wrote, so the watcher can tell its own writes from user
-// edits. Stamped by mtime and size: an edit after that changes the stamp.
-const ownWrites = new Map<string, string>();
-
-function stamp(path: string): string {
-  try {
-    const st = statSync(path);
-
-    return `${st.mtimeMs}:${st.size}`;
-  } catch {
-    return "missing";
-  }
-}
-
+// Watch mode tells its own writes from the user's by what's in ownWrites.ts,
+// stamped as they're written, by a worker too
 function modifiedSince(path: string, time: number): boolean {
   try {
     return statSync(resolve(path)).mtimeMs >= time;
@@ -781,36 +773,24 @@ function modifiedSince(path: string, time: number): boolean {
   }
 }
 
-function noteOwnWrites(paths: string[]) {
-  ownWrites.clear();
-
-  for (const path of paths) {
-    ownWrites.set(resolve(path), stamp(path));
-    // Creating or removing the .snap also shows up as a change to its folder
-    ownWrites.set(dirname(resolve(path)), stamp(dirname(path)));
-  }
-}
-
-function isOwnWrite(path: string): boolean {
-  const own = ownWrites.get(resolve(path));
-
-  return own !== undefined && own === stamp(path);
-}
-
 function watchRecursive(
   dir: string,
   onChange: (filename: string, path: string) => void,
   debounceMs = 150,
 ): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let lastFile = "";
-  let lastPath = "";
+  // Every path changed within the debounce, one may be a run's own write
+  let changed = new Map<string, string>();
 
   function trigger(filename: string, path: string) {
-    lastFile = filename;
-    lastPath = path;
+    changed.set(path, filename);
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => onChange(lastFile, lastPath), debounceMs);
+    timer = setTimeout(() => {
+      const paths = changed;
+
+      changed = new Map();
+      for (const [path, filename] of paths) onChange(filename, path);
+    }, debounceMs);
   }
 
   // A folder deleted and made again at the same path (like __snapshots__)
@@ -971,6 +951,7 @@ function waitForDir(dir: string, onCreated: () => void): () => void {
  */
 function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let changed = new Set<string>();
   let files = new Set<string>();
   const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
   // Folders that are gone, watched for when they're made again
@@ -981,8 +962,14 @@ function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
   const renamed = new Set<string>();
 
   function trigger(path: string) {
+    changed.add(path);
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => onChange(path), debounceMs);
+    timer = setTimeout(() => {
+      const paths = changed;
+
+      changed = new Set();
+      for (const path of paths) onChange(path);
+    }, debounceMs);
   }
 
   function unwatch(d: string) {
@@ -1112,8 +1099,9 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
   let running = false;
   let runStart = 0;
-  // A change saved during a run, run again for it after
-  let changedDuring: string | null = null;
+  // Paths changed during a run. A worker writes its snapshots mid-run, which
+  // ones the run wrote itself is only known once it's done.
+  const changedDuring = new Map<string, string>();
 
   // Source files and the config live outside the test dir. Watch the ones
   // the last run bundled, the test dir is already watched as a whole.
@@ -1145,11 +1133,13 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
   const rerun = async (filename: string, path = filename) => {
     if (running) {
-      // One save can be reported again after the debounce. Only a file
-      // written since the run started is a new change.
-      if (modifiedSince(path, runStart)) changedDuring = filename;
+      changedDuring.set(path, filename);
       return;
     }
+
+    // Seen during the last run, written by it
+    if (isOwnWrite(path)) return;
+
     running = true;
     runStart = Date.now();
 
@@ -1193,12 +1183,16 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
       running = false;
     }
 
-    if (changedDuring) {
-      const next = changedDuring;
+    // One save can be reported again after the debounce. Only a file
+    // written since the run started, and not by it, is a new change.
+    const next = [...changedDuring].find(
+      ([path]) => !isOwnWrite(path) && modifiedSince(path, runStart),
+    );
 
-      changedDuring = null;
-      void rerun(next, next);
-    } else if (moved) logWatching(testDir);
+    changedDuring.clear();
+
+    if (next) void rerun(next[1], next[0]);
+    else if (moved) logWatching(testDir);
     else {
       console.log(
         ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,
