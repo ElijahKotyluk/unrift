@@ -10,6 +10,7 @@ Versions are `@unrift/core` / `unrift`.
 - `beforeAll` and `afterAll` that a `matchers` module adds at the top level run again, in watch reruns too. A `matchers` module that defines tests is an error
 - A file's tests run right after it loads, before the next file is imported
 - Bundles are written to a temp file and renamed, so a run never imports a half-written one
+- Watch mode prints that it's watching once its watchers are set up, a save right after the message isn't missed
 
 ## 0.10.0 / 0.11.0 - 2026-11-21
 
