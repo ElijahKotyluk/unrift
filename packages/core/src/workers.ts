@@ -113,19 +113,12 @@ type Slot = {
 };
 
 /**
- * The process's Node flags, for the workers. --input-type is for code given
- * with -e or on stdin, a worker loaded from a file can't start with it.
+ * Loads worker.js from code, not the file. A worker takes the process's Node
+ * flags: --input-type, from a run started with -e or stdin, stops a worker
+ * loaded from a file, and an explicit execArgv without it would turn down
+ * flags like --max-old-space-size.
  */
-function workerExecArgv(argv: string[]): string[] {
-  const kept: string[] = [];
-
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--input-type") i++;
-    else if (!argv[i].startsWith("--input-type=")) kept.push(argv[i]);
-  }
-
-  return kept;
-}
+const WORKER_CODE = `import(${JSON.stringify(new URL("./worker.js", import.meta.url).href)})`;
 
 /** The error's stack frames, without its message. */
 function frames(error: Error): string {
@@ -265,9 +258,9 @@ export async function runInWorkers(
 
       const start = () => {
         const slot: Slot = {
-          worker: new Worker(new URL("./worker.js", import.meta.url), {
+          worker: new Worker(WORKER_CODE, {
+            eval: true,
             workerData: { options, bailed },
-            execArgv: workerExecArgv(process.execArgv),
           }),
           sent: null,
           started: null,

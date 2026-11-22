@@ -711,7 +711,7 @@ for (let i = 0; i < 2; i++) {
     );
   });
 
-  it("starts workers from code run with --input-type", () => {
+  it("starts workers with the process's Node flags", () => {
     const files = ["order-a", "order-b"].map((name) =>
       resolve(process.cwd(), `test/workers/fixture/${name}.spec.ts`),
     );
@@ -719,8 +719,13 @@ for (let i = 0; i < 2; i++) {
 const { results } = await runEngine({ files: ${JSON.stringify(files)}, workers: 2 });
 console.log(results.map((r) => r.status).join(","));`;
 
-    // Both ways of passing it
-    for (const flag of [["--input-type=module"], ["--input-type", "module"]]) {
+    // Both ways of passing it, and with a flag a worker only takes from the
+    // process
+    for (const flag of [
+      ["--input-type=module"],
+      ["--input-type", "module"],
+      ["--input-type=module", "--max-old-space-size=4096"],
+    ]) {
       const res = spawnSync(process.execPath, [...flag, "-e", code], {
         encoding: "utf8",
         timeout: 20_000,
@@ -728,6 +733,26 @@ console.log(results.map((r) => r.status).join(","));`;
 
       expect(res.stdout.trim()).toBe("pass,pass");
     }
+
+    // And alone, from the CLI
+    const cli = spawnSync(
+      process.execPath,
+      [
+        "--max-old-space-size=4096",
+        resolve(process.cwd(), "bin/unrift.mjs"),
+        "--config",
+        resolve(process.cwd(), "test/workers/unrift.config.ts"),
+        "--json",
+        "--workers",
+        "2",
+        "order-a|order-b",
+      ],
+      { encoding: "utf8", timeout: 20_000 },
+    );
+
+    expect(JSON.parse(cli.stdout).results.map((r: Result) => r.status)).toEqual(
+      ["pass", "pass"],
+    );
   });
 
   it("applies .only per file", () => {
