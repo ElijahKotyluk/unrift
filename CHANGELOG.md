@@ -9,7 +9,7 @@ Versions are `@unrift/core` / `unrift`.
 - Breaking: `.only` skips the other tests in its own file, not other files, like Jest and Vitest
 - Breaking: a `matchers` module is loaded for each test file, like a setup file in Jest and Vitest. The `beforeAll` and `afterAll` it adds at the top level run around each file that has a test to run. A test file that imports it gets the same copy, so its hooks run once. The project files it imports are the same ones a test file gets, bundled or not A `matchers` module that defines tests fails each file
 - A relative `matchers` path, or a package name, is resolved from the config's folder
-- A test, hook or file waiting on a promise that nothing is left to settle fails, and the run goes on. Before, the run could exit 0 with nothing printed, or hang with workers
+- A test, hook or file left waiting with nothing keeping Node going fails after `timeoutMs`, or 5s, and the run goes on. Before, the run could exit 0 with nothing printed, or hang with workers
 - Only the results decide the exit code, a test that sets `process.exitCode` doesn't
 - Watch mode reruns for a file deleted or renamed during a run
 - A file's own failures, like `[import]`, print under its name, and the failures list says which file each one is in

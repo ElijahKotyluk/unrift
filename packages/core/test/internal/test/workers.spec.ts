@@ -393,6 +393,12 @@ describe("workers", () => {
       hook: `import { beforeAll, it } from "@unrift/core";\nbeforeAll(() => new Promise(() => {}));\nit("x", () => {});\n`,
       test: `import { it } from "@unrift/core";\nit("before", () => {});\nit("stuck", () => new Promise(() => {}));\nit("after", () => {});\n`,
       top: `await new Promise(() => {});\n`,
+      // An unref'd timer doesn't keep Node going, but it fires
+      unref: `import { it } from "@unrift/core";\nit("waits", () => new Promise((r) => setTimeout(r, 50).unref()));\n`,
+      // Given up on before its timer fires: nothing more of it runs, not in
+      // the next file's time either
+      zombie: `import { beforeAll, it } from "@unrift/core";\nbeforeAll(() => new Promise((r) => setTimeout(r, 600).unref()));\nit("never runs", () => { globalThis.zombie = true; });\n`,
+      zz: `import { it, expect } from "@unrift/core";\nit("after", async () => { await new Promise((r) => setTimeout(r, 800)); expect(globalThis.zombie).toBeUndefined(); });\n`,
       // Real timers again in the next file, its fetch body reads
       fake: `import { it, mock } from "@unrift/core";\nit("left on", () => { mock.useFakeTimers({ toFake: ["setTimeout", "queueMicrotask", "process.nextTick"] }); });\n`,
       fetch: `import { it, expect } from "@unrift/core";\nit("reads", async () => { await new Promise((r) => setTimeout(r, 5)); expect(await new Response("ok").text()).toBe("ok"); });\n`,
@@ -421,7 +427,11 @@ describe("workers", () => {
           "--json",
           ...args,
         ],
-        { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
+        {
+          encoding: "utf8",
+          env: { ...process.env, CI: "", UNRIFT_STALL_MS: "200" },
+          timeout: 20_000,
+        },
       );
 
       return {
@@ -444,6 +454,10 @@ describe("workers", () => {
         "test.spec.ts › stuck: fail",
         "test.spec.ts › after: skipped",
         "top.spec.ts > [import]: fail",
+        "unref.spec.ts › waits: pass",
+        "zombie.spec.ts > [stalled]: fail",
+        "zombie.spec.ts › never runs: skipped",
+        "zz.spec.ts › after: pass",
       ],
     };
 
@@ -459,7 +473,11 @@ describe("workers", () => {
         join(dir, "unrift.config.ts"),
         "test/hook.spec.ts",
       ],
-      { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
+      {
+        encoding: "utf8",
+        env: { ...process.env, CI: "", UNRIFT_STALL_MS: "200" },
+        timeout: 20_000,
+      },
     ).stdout.replace(/\x1b\[[0-9;]*m/g, "");
 
     expect(printed).toMatch(

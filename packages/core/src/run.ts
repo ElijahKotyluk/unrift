@@ -7,6 +7,7 @@ import {
   clearContext,
   computeOnlyFlags,
   rootSuite,
+  runProgress,
   Suite,
   type TestResult,
 } from "./suite";
@@ -133,31 +134,61 @@ function unpassedTestNames(suite: Suite, names: string[] = []): string[] {
   return names;
 }
 
+// Before any test can fake them
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+
+/**
+ * How long a file may sit with nothing keeping Node going, by default.
+ * UNRIFT_STALL_MS is for unrift's own tests, which stall on purpose.
+ */
+const STALL_MS = Number(process.env.UNRIFT_STALL_MS) || 5000;
+
 class Stalled extends Error {
-  constructor() {
+  constructor(ms: number) {
     super(
-      "Nothing is left that could finish this, it waits on a promise that never settles",
+      `Nothing kept Node going for ${ms}ms and it didn't finish: it waits on a promise nothing settles, or only on an unref'd timer or handle. A longer timeoutMs gives that one longer.`,
     );
     this.name = "Stalled";
   }
 }
 
 /**
- * The promise, or a Stalled error once nothing is left to run that could
- * settle it. Without this, a hook or test awaiting such a promise would let
- * Node exit as if the run passed, or keep a worker waiting forever. Node
- * says so with beforeExit, a worker's port is unref'd while it runs a file.
+ * The promise, or a Stalled error once it's clear nothing will settle it.
+ * Without this, a hook or test awaiting such a promise would let Node exit
+ * as if the run passed, or keep a worker waiting forever.
+ *
+ * Node says nothing keeps it going with beforeExit (a worker's port is
+ * unref'd while it runs a file). An unref'd timer doesn't, and may still
+ * settle it, so Node is kept going for a while first. Any hook or test that
+ * finishes in that time starts it over.
  */
-function settles<T>(work: Promise<T>): Promise<T> {
+function settles<T>(work: Promise<T>, ms = STALL_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
   let onExit: () => void = () => {};
   const stalled = new Promise<never>((_, reject) => {
-    onExit = () => reject(new Stalled());
-    process.once("beforeExit", onExit);
+    const wait = (from: number) => {
+      timer = realSetTimeout(() => {
+        timer = null;
+
+        // Something moved, it's not stuck. If it drains again, beforeExit
+        // starts another wait.
+        if (runProgress() !== from) return;
+
+        reject(new Stalled(ms));
+      }, ms);
+    };
+
+    onExit = () => {
+      if (!timer) wait(runProgress());
+    };
+    process.on("beforeExit", onExit);
   });
 
-  return Promise.race([work, stalled]).finally(() =>
-    process.off("beforeExit", onExit),
-  );
+  return Promise.race([work, stalled]).finally(() => {
+    process.off("beforeExit", onExit);
+    if (timer) realClearTimeout(timer);
+  });
 }
 
 /** Fails the tests still running in it, whether there were any. */
@@ -340,6 +371,20 @@ export async function startRun(
     );
 
     rootSuite.addSuite(fileSuite);
+
+    // A test timeout says how long something may take, otherwise a while
+    const stallMs = options.timeoutMs ?? STALL_MS;
+    // The run's state as this file sees it: a stall gives up on it alone
+    const fileState = {
+      get bailed() {
+        return state.bailed;
+      },
+      set bailed(value: boolean) {
+        state.bailed = value;
+      },
+      abandoned: false,
+    };
+
     unriftGlobalContext.currentSuite = fileSuite;
     unriftGlobalContext.state = RunState.Register;
 
@@ -359,7 +404,7 @@ export async function startRun(
         for (const f of matcherFiles) forgetCommonJs(f);
 
         for (const m of matchers) {
-          await settles(import(`${m.url}?${copy}`));
+          await settles(import(`${m.url}?${copy}`), stallMs);
 
           if (fileSuite.tests.length > 0 || fileSuite.suites.length > 0) {
             // They aren't the file's, only the error is
@@ -383,7 +428,7 @@ export async function startRun(
           newBundles.push(url);
         }
 
-        await settles(import(url));
+        await settles(import(url), stallMs);
       } catch (err) {
         fileSuite.errors.push({ label: "import", error: toError(err) });
 
@@ -407,9 +452,16 @@ export async function startRun(
       unriftGlobalContext.state = RunState.Run;
 
       try {
-        await settles(fileSuite.run(runOptions, state, hasOnly, false));
+        await settles(
+          fileSuite.run(runOptions, fileState, hasOnly, false),
+          stallMs,
+        );
       } catch (err) {
         if (!(err instanceof Stalled)) throw err;
+
+        // Nothing more of it runs, even if what it waited on settles later
+        // in another file's time
+        fileState.abandoned = true;
 
         // The test it was in fails, or the file if it was in a hook. The
         // ones it didn't get to are skipped.
@@ -418,6 +470,9 @@ export async function startRun(
         }
 
         fileSuite.markSubtreeSkipped();
+
+        // A failure like any other under --bail
+        if (options.bail) state.bailed = true;
       }
 
       return {

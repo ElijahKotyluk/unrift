@@ -214,6 +214,12 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       "test/gone.spec.ts": `import { it } from "@unrift/core";\nit("gone", () => {});\n`,
     });
     const spec = join(ws.dir, "test/slow.spec.ts");
+
+    // A file a test makes and removes during the run isn't a change
+    ws.write(
+      "test/temp.spec.ts",
+      `import { it } from "@unrift/core";\nimport { rmSync, writeFileSync } from "node:fs";\nit("temp", () => { writeFileSync(${JSON.stringify(join(ws.dir, "test/temp.json"))}, "{}"); rmSync(${JSON.stringify(join(ws.dir, "test/temp.json"))}); });\n`,
+    );
     const w = watch(ws.dir);
 
     try {
@@ -235,6 +241,8 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       await sleep(300);
       rmSync(join(ws.dir, "test/gone.spec.ts"));
       expect(await w.waitFor(() => w.reruns() === 4)).toBe(true);
+      await sleep(1500);
+      expect(w.reruns()).toBe(4);
     } finally {
       w.kill();
     }

@@ -18,6 +18,15 @@ interface RunOptions {
 
 interface SuiteRunState {
   bailed: boolean;
+  /** Given up on, stalled: nothing more of it runs, even if it resumes. */
+  abandoned?: boolean;
+}
+
+// Goes up as each hook and test finishes, a stalled file shows none
+let progress = 0;
+
+export function runProgress(): number {
+  return progress;
 }
 
 function appendHookFailure(
@@ -83,7 +92,8 @@ export class Suite {
 
   public markSubtreeSkipped() {
     for (const test of this.tests) {
-      if (test.status === TaskStatus.Pending) test.status = TaskStatus.Skipped;
+      if (test.status !== TaskStatus.Pending) continue;
+      test.status = TaskStatus.Skipped;
       test.durationMs = 0;
     }
 
@@ -222,7 +232,9 @@ export class Suite {
       // beforeAll
       try {
         for (const hook of this.beforeAllHooks) {
+          if (state.abandoned) return;
           await hook();
+          progress++;
         }
       } catch (error) {
         this.beforeAllError = toError(error);
@@ -242,7 +254,7 @@ export class Suite {
         const test = this.tests[i];
 
         // Another worker bailed while this suite was running
-        if (state.bailed) {
+        if (state.bailed || state.abandoned) {
           for (let j = i; j < this.tests.length; j++) {
             const t = this.tests[j];
             if (t.status === TaskStatus.Pending) t.status = TaskStatus.Skipped;
@@ -300,8 +312,11 @@ export class Suite {
 
           try {
             for (const hook of beforeEachHooks) {
+              if (state.abandoned) return;
+
               try {
                 await hook();
+                progress++;
               } catch (error) {
                 throw appendHookFailure(
                   undefined,
@@ -311,14 +326,19 @@ export class Suite {
               }
             }
 
+            if (state.abandoned) return;
             await test.run(options?.timeoutMs);
+            progress++;
           } catch (error) {
             test.status = TaskStatus.Fail;
             test.error = toError(error);
           } finally {
             for (const hook of afterEachHooks) {
+              if (state.abandoned) break;
+
               try {
                 await hook();
+                progress++;
               } catch (error) {
                 test.status = TaskStatus.Fail;
                 test.error = appendHookFailure(
@@ -383,7 +403,7 @@ export class Suite {
       for (let i = 0; i < this.suites.length; i++) {
         const childSuite = this.suites[i];
 
-        if (state.bailed) {
+        if (state.bailed || state.abandoned) {
           // Current and remaining suites won't run
           for (let j = i; j < this.suites.length; j++) {
             this.suites[j].markSubtreeSkipped();
@@ -398,8 +418,11 @@ export class Suite {
       // but it should not run for suites we haven't entered.
       if (entered) {
         for (const afterAllHook of this.afterAllHooks) {
+          if (state.abandoned) break;
+
           try {
             await afterAllHook();
+            progress++;
           } catch (error) {
             // Record once; keep running remaining afterAll hooks
             if (!this.afterAllError) {

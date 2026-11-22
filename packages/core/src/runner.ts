@@ -373,6 +373,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
 
   let files = discoverTestFiles(testDir);
 
+  lastTestFiles = new Set(files.map((f) => resolve(f)));
+
   const pattern =
     options.pattern ??
     (config?.pattern ? safeRegExp(config.pattern) : undefined);
@@ -475,7 +477,7 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
             ? spec
             : spec.startsWith(".")
               ? resolve(configDir, spec)
-              : ((await resolveImport(spec, configDir)) ?? spec),
+              : await resolveMatcherPackage(spec, configDir),
         ),
       )),
     workers: options.workers ?? config?.workers,
@@ -797,6 +799,21 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
  * platforms (Linux `fs.watch` does not support `recursive: true` before Node 22).
  * Returns a cleanup function to stop watching.
  */
+async function resolveMatcherPackage(spec: string, dir: string) {
+  const found = await resolveImport(spec, dir);
+
+  if (found === null) {
+    throw new Error(
+      `Unrift: matchers package ${spec} can't be imported from ${dir}: it isn't installed there, or it has no export for import`,
+    );
+  }
+
+  return found;
+}
+
+// The test files the last run found, for watch mode
+let lastTestFiles = new Set<string>();
+
 // Watch mode tells its own writes from the user's by what's in ownWrites.ts,
 // stamped as they're written, by a worker too
 function modifiedSince(path: string, time: number): boolean {
@@ -1200,17 +1217,39 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     }
   };
 
+  // What the last run used. One of them gone, or a folder with one in it,
+  // is a change, a file a test made and removed isn't. Snapshots deleted by
+  // hand are too.
+  const usedFiles = () => [
+    ...lastTestFiles,
+    ...bundledFiles().files.map((f) => resolve(f)),
+  ];
+  const wasUsed = (path: string, used: string[]) => {
+    const full = resolve(path);
+
+    return (
+      full.endsWith(".snap") ||
+      basename(full) === "__snapshots__" ||
+      used.some((f) => f === full || f.startsWith(full + sep))
+    );
+  };
+  const gone = (path: string) =>
+    !existsSync(path) && !wasUsed(path, usedFiles());
+
   const rerun = async (filename: string, path = filename) => {
     if (running) {
       changedDuring.set(path, filename);
       return;
     }
 
-    // Seen during the last run, written by it
-    if (isOwnWrite(path)) return;
+    // Seen during the last run, written by it, or a file a test made and
+    // removed
+    if (isOwnWrite(path) || gone(path)) return;
 
     running = true;
     runStart = Date.now();
+    // What the last run used, before this one changes it
+    const used = usedFiles();
     holdOpen(false);
 
     const shortFile = shortenPath(filename);
@@ -1256,11 +1295,13 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
     // One save can be reported again after the debounce. Only a file
     // written since the run started, and not by it, is a new change. One
-    // that's gone was deleted or renamed, which keeps its time.
+    // the last run used that's gone was deleted or renamed, which keeps its
+    // time.
     const next = [...changedDuring].find(
       ([path]) =>
         !isOwnWrite(path) &&
-        (modifiedSince(path, runStart) || !existsSync(path)),
+        (modifiedSince(path, runStart) ||
+          (!existsSync(path) && wasUsed(path, used))),
     );
 
     changedDuring.clear();
