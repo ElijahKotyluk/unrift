@@ -325,7 +325,7 @@ describe("workers", () => {
       );
     }
 
-    const out = spawnSync(
+    const { stdout, stderr } = spawnSync(
       process.execPath,
       [
         resolve(process.cwd(), "bin/unrift.mjs"),
@@ -334,14 +334,23 @@ describe("workers", () => {
         "--workers",
         "2",
       ],
-      { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
-    ).stdout;
+      {
+        encoding: "utf8",
+        cwd: dir,
+        env: { ...process.env, CI: "" },
+        timeout: 20_000,
+      },
+    );
 
     // a was printed already, so it goes out right away, not with c
-    expect(out.split("\n").filter((line) => line.startsWith("log:"))).toEqual([
-      "log: a timer",
-      "log: b",
-      "log: c",
+    expect(
+      stdout.split("\n").filter((line) => line.startsWith("log:")),
+    ).toEqual(["log: a timer", "log: b", "log: c"]);
+    // With a note that it's a's, not c's
+    expect(
+      stderr.split("\n").filter((line) => line.startsWith("Output from")),
+    ).toEqual([
+      "Output from test/a.spec.ts after its tests were done. Did a test leave a timer running?",
     ]);
   });
 

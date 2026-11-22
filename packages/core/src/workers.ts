@@ -5,12 +5,14 @@
  * takes the next one, and puts the results back in the order of the files.
  */
 
+import { relative } from "node:path";
 import { Worker } from "node:worker_threads";
 
 import type { EngineOptions, FileRun, RunEnd, RunPart } from "./run";
 import type { SnapshotSummary } from "./snapshot/state";
 import type { TestResult } from "./suite";
 import { TaskStatus } from "./types";
+import { colors } from "./utils/colors";
 import { normalizePath } from "./utils/normalizePath";
 import { addBundledFiles } from "./utils/transform";
 
@@ -136,6 +138,8 @@ export async function runInWorkers(
   const files: Array<FileRun | undefined> = Array.from({ length: total });
   const outputs: Output[][] = Array.from({ length: total }, () => []);
   let printed = 0;
+  // The file whose late output went out last, a note marks where it starts
+  let late: number | null = null;
 
   // Each file's output once it and every file before it are done, so it
   // reads like a run without workers. Output for a file already printed,
@@ -144,6 +148,7 @@ export async function runInWorkers(
     while (printed < total && files[printed]) {
       for (const { stream, bytes } of outputs[printed]) {
         process[stream].write(bytes);
+        late = null;
       }
 
       outputs[printed] = [];
@@ -277,6 +282,17 @@ export async function runInWorkers(
           switch (message.type) {
             case "output":
               if (message.index < printed) {
+                // Like Jest, it says whose it is: it lands among whatever
+                // prints now
+                if (late !== message.index) {
+                  late = message.index;
+                  process.stderr.write(
+                    colors.yellow(
+                      `\nOutput from ${normalizePath(relative(process.cwd(), options.files[message.index]))} after its tests were done. Did a test leave a timer running?\n`,
+                    ),
+                  );
+                }
+
                 process[message.stream].write(message.bytes);
               } else {
                 outputs[message.index].push(message);
