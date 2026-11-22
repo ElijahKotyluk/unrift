@@ -3,6 +3,7 @@
  * thread sends, one at a time, then finishes the run when told to.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { parentPort, workerData } from "node:worker_threads";
 
 import { registerModuleLoader } from "./mock/register-loader";
@@ -12,6 +13,7 @@ import { copyFileRun, type FromWorker, type ToWorker } from "./workers";
 
 // Before any test can fake it
 const microtask = globalThis.queueMicrotask;
+const immediate = globalThis.setImmediate;
 
 // Hooks added in the main thread don't reach this one
 registerModuleLoader();
@@ -38,8 +40,11 @@ const run = await startRun(options, state);
 
 // What a file writes goes to the main thread as it's written, which prints
 // it in file order. Sent right away, it isn't lost if the test exits the
-// worker. A write after a file's tests, from a timer it left, belongs to it
-// too. Writes before the first file go out as they happen.
+// worker. A write from a timer a file left belongs to that file, even once
+// the worker runs another: its async context says which. A write with none
+// goes to the file that ran last. Writes before the first file go out as
+// they happen.
+const file = new AsyncLocalStorage<number>();
 let current: number | null = null;
 
 for (const stream of ["stdout", "stderr"] as const) {
@@ -47,9 +52,9 @@ for (const stream of ["stdout", "stderr"] as const) {
   const write = target.write.bind(target) as (...args: unknown[]) => boolean;
 
   target.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
-    if (current === null) return write(chunk, ...rest);
+    const index = file.getStore() ?? current;
 
-    const index = current;
+    if (index === null) return write(chunk, ...rest);
 
     const encoding = typeof rest[0] === "string" ? rest[0] : "utf8";
 
@@ -79,11 +84,13 @@ port.on("message", (message: ToWorker) => {
       current = message.index;
       post({ type: "started", index: message.index });
 
-      const result = await run.runFile(message.file);
+      const result = await file.run(message.index, () =>
+        run.runFile(message.file),
+      );
       // Its snapshots go with it, a crash later can't lose them
       const part = run.take();
 
-      // Until the next file starts, output still goes to this one
+      // Until the next file starts, output with no file of its own goes to this one
       post({
         type: "file",
         index: message.index,
@@ -92,6 +99,10 @@ port.on("message", (message: ToWorker) => {
       });
     } else {
       const end = await run.finish();
+
+      // An error thrown right after, like from a setImmediate the afterAll
+      // left, stops the worker before it ends: it's still part of the run
+      await new Promise((resolve) => immediate(resolve));
 
       post({
         type: "end",

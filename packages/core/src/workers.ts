@@ -103,10 +103,29 @@ type Slot = {
   started: number | null;
   /** The file it finished last, late output and errors belong to it. */
   last: number | null;
+  /** It said it's ready, so it got through starting up. */
+  ready: boolean;
+  /** Told to finish: it runs the top level's afterAll. */
+  finishing: boolean;
   ended: boolean;
   /** An error it threw, handled once it has exited and sent everything. */
   error?: Error;
 };
+
+/**
+ * The process's Node flags, for the workers. --input-type is for code given
+ * with -e or on stdin, a worker loaded from a file can't start with it.
+ */
+function workerExecArgv(argv: string[]): string[] {
+  const kept: string[] = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--input-type") i++;
+    else if (!argv[i].startsWith("--input-type=")) kept.push(argv[i]);
+  }
+
+  return kept;
+}
 
 /** The error's stack frames, without its message. */
 function frames(error: Error): string {
@@ -156,6 +175,9 @@ export async function runInWorkers(
   try {
     await new Promise<void>((resolveRun, rejectRun) => {
       let alive = 0;
+      // A worker that can't start after one did fails the run, not the files
+      // the others ran
+      let anyReady = false;
       // Once it's over no new worker starts, cleanup is stopping them
       let settled = false;
       const resolve = () => {
@@ -171,6 +193,7 @@ export async function runInWorkers(
         const index = nextFile();
 
         if (index === null) {
+          slot.finishing = true;
           slot.worker.postMessage({ type: "finish" } satisfies ToWorker);
           return;
         }
@@ -217,14 +240,40 @@ export async function runInWorkers(
         print();
       };
 
+      // A worker that ran no file, or stopped outside one, has nothing else
+      // to put it on
+      const failRoot = (error: Error, why: string) => {
+        const message = `${error.message}\n\n${why}`;
+        const reported = new Error(message);
+
+        reported.stack = `Error: ${message}\n${frames(error)}`;
+        roots.push({
+          file: "root",
+          results: [
+            {
+              description: "root > [worker]",
+              status: TaskStatus.Fail,
+              error: reported,
+              durationMs: 0,
+            },
+          ],
+          hasOnly: false,
+        });
+
+        if (options.bail) Atomics.store(bailed, 0, 1);
+      };
+
       const start = () => {
         const slot: Slot = {
           worker: new Worker(new URL("./worker.js", import.meta.url), {
             workerData: { options, bailed },
+            execArgv: workerExecArgv(process.execArgv),
           }),
           sent: null,
           started: null,
           last: null,
+          ready: false,
+          finishing: false,
           ended: false,
         };
 
@@ -241,6 +290,8 @@ export async function runInWorkers(
               }
               break;
             case "ready":
+              slot.ready = true;
+              anyReady = true;
               dispatch(slot);
               break;
             case "started":
@@ -278,19 +329,21 @@ export async function runInWorkers(
         slot.worker.on("exit", (code) => {
           if (settled) return;
 
+          const error =
+            slot.error ??
+            new Error(`Unrift worker stopped with exit code ${code}`);
+
           if (slot.ended) {
-            // Thrown after its last file, while other workers still run
-            if (slot.error && slot.last !== null) {
-              fail(slot, slot.last, slot.error);
+            // After its last file, while other workers still run: an error a
+            // timer threw, or process.exit(). Without workers it'd fail the run.
+            if (slot.error || code !== 0) {
+              if (slot.last !== null) fail(slot, slot.last, error);
+              else failRoot(error, "The worker stopped after the run.");
             }
             return;
           }
 
           crashed = true;
-
-          const error =
-            slot.error ??
-            new Error(`Unrift worker stopped with exit code ${code}`);
 
           // Sent but never started, another worker runs it
           if (slot.sent !== null && slot.started !== slot.sent) {
@@ -299,17 +352,38 @@ export async function runInWorkers(
 
           const at = slot.started ?? slot.last;
 
-          // Before its first file: the run itself can't start, like a
-          // matchers module that throws
-          if (at === null) {
+          // No worker got started: the run itself can't, like a matchers
+          // module that throws
+          if (!anyReady) {
             reject(error);
             return;
           }
 
-          fail(slot, at, error);
+          // Outside a file: running the top level's afterAll, or starting up
+          if (slot.finishing) {
+            failRoot(
+              error,
+              "The worker stopped running the top level's afterAll." +
+                (slot.last === null
+                  ? ""
+                  : ` It can come from ${options.files[slot.last]}, which ran before it in the same worker.`),
+            );
+          } else if (at === null) {
+            failRoot(
+              error,
+              slot.ready
+                ? "The worker stopped before its first file."
+                : "A worker couldn't start.",
+            );
+          } else {
+            fail(slot, at, error);
+          }
+
           alive--;
 
-          if (more()) start();
+          // Only for one that got through a file: one that stopped before
+          // would only stop again, every time
+          if (more() && at !== null) start();
           else if (alive === 0) resolve();
         });
       };
@@ -333,9 +407,17 @@ export async function runInWorkers(
   return {
     files: files.map(
       (run, i) =>
+        // Left over when no worker could start to run it
         run ?? {
           file: normalizePath(options.files[i]),
-          results: [],
+          results: [
+            {
+              description: `${normalizePath(options.files[i])} > [worker]`,
+              status: TaskStatus.Fail,
+              error: new Error("Not run, no worker could start to run it."),
+              durationMs: 0,
+            },
+          ],
           hasOnly: false,
         },
     ),

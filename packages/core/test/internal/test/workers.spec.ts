@@ -167,6 +167,19 @@ describe("workers", () => {
       "c.spec.ts > [worker]: fail (from a\n\nThe worker stopped while running c.spec.ts. It can come from a.spec.ts, which ran before it in the same worker.)",
     ]);
 
+    // process.exit() from a timer once a's worker is done, while b still runs
+    expect(
+      runWith({
+        // a waits so the other worker is ready and takes b
+        a: `it("a", async () => { await wait(500); setTimeout(() => process.exit(4), 300); });`,
+        b: `it("b", () => wait(1500));`,
+      }),
+    ).toEqual([
+      "a.spec.ts › a: pass",
+      "a.spec.ts > [worker]: fail (Unrift worker stopped with exit code 4\n\nThe worker stopped after running a.spec.ts.)",
+      "b.spec.ts › b: pass",
+    ]);
+
     // a's snapshots are written though its worker dies in c
     runWith({
       a: `it("a", () => { expect(1).toMatchSnapshot(); expect(2).toMatchInlineSnapshot(); });`,
@@ -182,6 +195,104 @@ describe("workers", () => {
     );
   });
 
+  it("reports a worker that stops outside a file, and keeps the rest", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/outside");
+    const marker = join(dir, "marker");
+    const runWith = (setup: string, specs: Record<string, string>) => {
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(join(dir, "test"), { recursive: true });
+      writeFileSync(join(dir, "setup.mjs"), setup);
+      writeFileSync(
+        join(dir, "unrift.config.ts"),
+        `export default { testDir: "test", matchers: [${JSON.stringify(join(dir, "setup.mjs"))}] };\n`,
+      );
+
+      for (const [name, body] of Object.entries(specs)) {
+        writeFileSync(
+          join(dir, `test/${name}.spec.ts`),
+          `import { it, expect, mock } from "@unrift/core";\nimport { writeFileSync } from "node:fs";\nconst wait = (ms: number) => new Promise((r) => setTimeout(r, ms));\nvoid expect; void mock; void writeFileSync; void wait;\n${body}\n`,
+        );
+      }
+
+      const res = spawnSync(
+        process.execPath,
+        [
+          resolve(process.cwd(), "bin/unrift.mjs"),
+          "--config",
+          join(dir, "unrift.config.ts"),
+          "--json",
+          "--workers",
+          "2",
+        ],
+        { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
+      );
+
+      return {
+        status: res.status,
+        results: JSON.parse(res.stdout).results.map(
+          (r: {
+            description: string;
+            status: string;
+            error?: { message: string };
+          }) =>
+            `${r.description.split("/").pop()}: ${r.status}${r.error ? ` (${r.error.message.replace(/\/\S*\//g, "")})` : ""}`,
+        ),
+      };
+    };
+
+    // The worker that takes over from a can't start. b and c still report.
+    const replaced = runWith(
+      `import { existsSync } from "node:fs";\nif (existsSync(${JSON.stringify(marker)})) throw new Error("setup failed");\n`,
+      {
+        // a waits so the other worker started before the marker is there
+        a: `it("a", async () => { await wait(500); writeFileSync(${JSON.stringify(marker)}, ""); process.exit(2); });`,
+        b: `it("b", async () => { await wait(1000); expect(1).toBe(2); });`,
+        c: `it("c", () => wait(500));`,
+      },
+    ).results;
+
+    expect([replaced[0], replaced[1], replaced[3]]).toEqual([
+      "root > [worker]: fail (setup failed\n\nA worker couldn't start.)",
+      "a.spec.ts > [worker]: fail (Unrift worker stopped with exit code 2\n\nThe worker stopped while running a.spec.ts.)",
+      "c.spec.ts › c: pass",
+    ]);
+    expect(replaced[2]).toMatch(/^b\.spec\.ts › b: fail/);
+
+    // An error right after the top level's afterAll, in each worker
+    const late = runWith(
+      `import { afterAll } from "@unrift/core";\nafterAll(() => { setImmediate(() => { throw new Error("late"); }); });\n`,
+      { a: `it("a", () => {});`, b: `it("b", () => {});` },
+    );
+
+    expect(late.status).toBe(1);
+
+    // Each worker stops right after it starts, none takes its place
+    const early = runWith(
+      `setImmediate(() => { throw new Error("early"); });\n`,
+      { a: `it("a", () => {});`, b: `it("b", () => {});` },
+    );
+
+    expect(early.results).toEqual([
+      "root > [worker]: fail (early\n\nThe worker stopped before its first file.)",
+      "root > [worker]: fail (early\n\nThe worker stopped before its first file.)",
+      "a.spec.ts > [worker]: fail (Not run, no worker could start to run it.)",
+      "b.spec.ts > [worker]: fail (Not run, no worker could start to run it.)",
+    ]);
+
+    // Fake timers a test left on don't stop its worker from finishing
+    expect(
+      runWith("", {
+        a: `it("a", () => { mock.useFakeTimers(); });`,
+        b: `it("b", () => {});`,
+      }).results,
+    ).toEqual(["a.spec.ts › a: pass", "b.spec.ts › b: pass"]);
+    // In the order the workers stopped
+    expect(late.results.slice(0, 2).sort()).toEqual([
+      "root > [worker]: fail (late\n\nThe worker stopped running the top level's afterAll. It can come from a.spec.ts, which ran before it in the same worker.)",
+      "root > [worker]: fail (late\n\nThe worker stopped running the top level's afterAll. It can come from b.spec.ts, which ran before it in the same worker.)",
+    ]);
+  });
+
   it("keeps output written after a file's tests with that file", () => {
     const out = spawnRun(["--workers", "2", "late"]).stdout;
 
@@ -189,6 +300,49 @@ describe("workers", () => {
     expect(out.split("\n").filter((line) => line.startsWith("log:"))).toEqual([
       "log: first",
       "log: late",
+    ]);
+  });
+
+  it("keeps a timer's output with its file once the worker runs another", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/timer");
+    // a finishes first and its worker takes c, a's timer logs while c runs
+    const specs = {
+      a: `it("a", () => { setTimeout(() => console.log("log: a timer"), 200); });`,
+      b: `it("b", async () => { await wait(1000); console.log("log: b"); });`,
+      c: `it("c", async () => { await wait(500); console.log("log: c"); });`,
+    };
+
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "test"), { recursive: true });
+    writeFileSync(
+      join(dir, "unrift.config.ts"),
+      `export default { testDir: "test" };\n`,
+    );
+
+    for (const [name, body] of Object.entries(specs)) {
+      writeFileSync(
+        join(dir, `test/${name}.spec.ts`),
+        `import { it } from "@unrift/core";\nconst wait = (ms: number) => new Promise((r) => setTimeout(r, ms));\nvoid wait;\n${body}\n`,
+      );
+    }
+
+    const out = spawnSync(
+      process.execPath,
+      [
+        resolve(process.cwd(), "bin/unrift.mjs"),
+        "--config",
+        join(dir, "unrift.config.ts"),
+        "--workers",
+        "2",
+      ],
+      { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
+    ).stdout;
+
+    // a was printed already, so it goes out right away, not with c
+    expect(out.split("\n").filter((line) => line.startsWith("log:"))).toEqual([
+      "log: a timer",
+      "log: b",
+      "log: c",
     ]);
   });
 
@@ -555,6 +709,25 @@ for (let i = 0; i < 2; i++) {
     expect(readFileSync(file, "utf8")).toBe(
       line + 'check(toMatchInlineSnapshot(`"x"`));\n',
     );
+  });
+
+  it("starts workers from code run with --input-type", () => {
+    const files = ["order-a", "order-b"].map((name) =>
+      resolve(process.cwd(), `test/workers/fixture/${name}.spec.ts`),
+    );
+    const code = `import { runEngine } from ${JSON.stringify(resolve(process.cwd(), "dist/esm/index.js"))};
+const { results } = await runEngine({ files: ${JSON.stringify(files)}, workers: 2 });
+console.log(results.map((r) => r.status).join(","));`;
+
+    // Both ways of passing it
+    for (const flag of [["--input-type=module"], ["--input-type", "module"]]) {
+      const res = spawnSync(process.execPath, [...flag, "-e", code], {
+        encoding: "utf8",
+        timeout: 20_000,
+      });
+
+      expect(res.stdout.trim()).toBe("pass,pass");
+    }
   });
 
   it("applies .only per file", () => {
