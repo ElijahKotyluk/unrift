@@ -7,7 +7,7 @@ Versions are `@unrift/core` / `unrift`.
 - `--workers <n>` and the `workers` option run test files in worker threads. Each worker takes the next file when it's done, results are reported in file order. `--bail` stops the other workers too. A worker still running a second after its last file, from a timer or socket a test left, is stopped with a note
 - With workers, each file's stdout and stderr is printed once the file is done, in file order, so output from two files doesn't mix. Output a file writes after it was printed, from a timer, goes out as it's written, after a note on stderr that says which file it's from
 - Breaking: `.only` skips the other tests in its own file, not other files, like Jest and Vitest
-- Breaking: a `matchers` module is loaded for each test file, like a setup file in Jest and Vitest. The `beforeAll` and `afterAll` it adds at the top level run around each file that has a test to run. A test file that imports it gets the same copy, so its hooks run once. A `matchers` module that defines tests fails each file
+- Breaking: a `matchers` module is loaded for each test file, like a setup file in Jest and Vitest. The `beforeAll` and `afterAll` it adds at the top level run around each file that has a test to run. A test file that imports it, or a project file it imports, gets the same copy, so its hooks run once and state is shared. A `matchers` module that defines tests fails each file
 - A relative `matchers` path is from the config's folder
 - A test, hook or file waiting on a promise that nothing is left to settle fails, and the run goes on. Before, the run could exit 0 with nothing printed, or hang with workers
 - Only the results decide the exit code, a test that sets `process.exitCode` doesn't

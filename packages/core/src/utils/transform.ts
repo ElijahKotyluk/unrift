@@ -318,17 +318,48 @@ export type TransformOptions = {
   /** Keep code no test uses, so it shows up as uncovered. */
   coverage?: boolean;
   /**
-   * The matchers modules' files. Left out of the bundle: a test that imports
-   * one gets the copy that ran for its file (see module-loader.ts).
+   * The matchers modules and the project files they import. Left out of the
+   * bundle: a test that imports one gets the copy that ran for its file
+   * (see module-loader.ts).
    */
-  matchers?: string[];
+  shared?: string[];
 };
 
-function matchersPlugin(files: string[]): Plugin {
+/**
+ * The project files a module imports, itself included, packages and unrift
+ * left out. Empty if it doesn't build, importing it says why.
+ */
+export async function importGraph(file: string): Promise<string[]> {
+  const projectRoot = findProjectRoot(dirname(file));
+
+  try {
+    const result = await build({
+      entryPoints: [file],
+      write: false,
+      bundle: true,
+      format: "esm",
+      platform: "node",
+      target: "node22",
+      packages: "external",
+      external: ["@unrift/*", "@unrift/core", "@unrift/core/*"],
+      absWorkingDir: projectRoot,
+      metafile: true,
+      logLevel: "silent",
+    });
+
+    return Object.keys(result.metafile.inputs)
+      .map((input) => resolve(projectRoot, input))
+      .filter((path) => existsSync(path));
+  } catch {
+    return [];
+  }
+}
+
+function sharedPlugin(files: string[]): Plugin {
   const paths = new Set(files.flatMap((f) => [f, safeRealpath(f)]));
 
   return {
-    name: "unrift-matchers",
+    name: "unrift-shared",
     setup(build) {
       // Every import, a path alias can lead to one too
       build.onResolve({ filter: /.*/ }, async (args) => {
@@ -363,8 +394,8 @@ export async function toImportUrl(
   if (!isTsLike(filePath)) return pathToFileURL(filePath).href;
 
   const coverage = options.coverage ?? false;
-  const matchers = (options.matchers ?? []).filter((f) => f !== filePath);
-  const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${matchers.join("\0")}:${filePath}`;
+  const shared = (options.shared ?? []).filter((f) => f !== filePath);
+  const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${shared.join("\0")}:${filePath}`;
 
   usedIn.set(key, generation);
 
@@ -430,7 +461,7 @@ export async function toImportUrl(
       treeShaking: !coverage,
       metafile: true,
       logLevel: "silent",
-      // Mocks first, a mocked matchers module is the mock
+      // Mocks first, a mocked shared module is the mock
       plugins: [
         ...(mocks.calls.length > 0
           ? [
@@ -442,7 +473,7 @@ export async function toImportUrl(
               ),
             ]
           : []),
-        ...(matchers.length > 0 ? [matchersPlugin(matchers)] : []),
+        ...(shared.length > 0 ? [sharedPlugin(shared)] : []),
       ],
     });
 

@@ -57,17 +57,19 @@ export function setRunGeneration(run: number): void {
   generation = run;
 }
 
-/** A matchers module's URL, and the URL of the running file's copy of it. */
-export type MatcherInstances = Map<string, string>;
-
-let matcherInstances: MatcherInstances = new Map();
+// The matchers modules and the project files they import, by URL
+let shared = new Set<string>();
+// The query of the running file's copy of them
+let copy: string | null = null;
 
 /**
- * Each test file gets its own copy of the matchers modules, like a setup
- * file in Jest and Vitest. A test that imports one gets that same copy.
+ * Each test file gets its own copy of the matchers modules and what they
+ * import, like a setup file in Jest and Vitest. A test that imports one of
+ * them gets that same copy.
  */
-export function setMatcherInstances(instances: MatcherInstances): void {
-  matcherInstances = instances;
+export function setSharedFiles(urls: Set<string>, query: string | null): void {
+  shared = urls;
+  copy = query;
 }
 
 /** Points a mocked spec at a `unrift-mock:` URL. */
@@ -94,9 +96,11 @@ export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
 
   if (!resolved.url.startsWith("file:")) return resolved;
 
-  const instance = matcherInstances.get(resolved.url.replace(/[?#].*$/, ""));
+  const bare = resolved.url.replace(/[?#].*$/, "");
 
-  if (instance) return { url: instance, shortCircuit: true };
+  if (copy && shared.has(bare)) {
+    return { ...resolved, url: `${bare}?${copy}`, shortCircuit: true };
+  }
 
   // Packages don't change between runs, a URL that already has a query was
   // given one on purpose

@@ -461,7 +461,13 @@ describe("workers", () => {
     // in its URL doesn't load again.
     writeFileSync(
       join(dir, "setup.mjs"),
-      `import { beforeEach } from "@unrift/core";\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
+      `import { beforeEach } from "@unrift/core";\nimport { store } from "./store.ts";\nstore.loads++;\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
+    );
+    // What it imports is shared with the test too, and starts fresh in
+    // each file
+    writeFileSync(
+      join(dir, "store.ts"),
+      `export const store: { loads: number } = { loads: 0 };\n`,
     );
     writeFileSync(
       join(dir, "each.cjs"),
@@ -479,7 +485,7 @@ describe("workers", () => {
     writeFileSync(join(dir, "other.mjs"), `export const value = 1;\n`);
 
     const body = (setup: string, more = "") =>
-      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\n${more}`;
+      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nit("store", () => expect(store.loads).toBe(1));\n${more}`;
 
     // Bundled, and loaded by Node
     writeFileSync(join(dir, "test/a.spec.ts"), body("../setup.mjs"));
@@ -517,10 +523,13 @@ describe("workers", () => {
     const expected = [
       "a.spec.ts › 1: pass",
       "a.spec.ts › 2: pass",
+      "a.spec.ts › store: pass",
       "b.spec.mjs › 1: pass",
       "b.spec.mjs › 2: pass",
+      "b.spec.mjs › store: pass",
       "c.spec.ts › 1: pass",
       "c.spec.ts › 2: pass",
+      "c.spec.ts › store: pass",
       "c.spec.ts › mocked: pass",
     ];
 

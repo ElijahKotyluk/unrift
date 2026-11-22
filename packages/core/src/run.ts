@@ -15,7 +15,7 @@ import { RunState, unriftGlobalContext } from "./context";
 import { normalizePath } from "./utils/normalizePath";
 import { TaskMode, TaskStatus } from "./types";
 import { toError } from "./utils/toError";
-import { addBundledFiles, toImportUrl } from "./utils/transform";
+import { addBundledFiles, importGraph, toImportUrl } from "./utils/transform";
 import { takeWrites } from "./utils/ownWrites";
 import { assertValidRetries } from "./utils/helpers";
 import {
@@ -37,11 +37,7 @@ import type { InlineSource } from "./snapshot/inline";
 import { summarize, type CoverageSummary } from "./coverage/report";
 import { runInWorkers } from "./workers";
 import { registerModuleLoader } from "./mock/register-loader";
-import {
-  setMatcherInstances,
-  setRunGeneration,
-  type MatcherInstances,
-} from "./mock/module-loader";
+import { setRunGeneration, setSharedFiles } from "./mock/module-loader";
 
 export type RunEngineCoverageOptions = {
   /** Files outside it aren't reported. Defaults to the working directory. */
@@ -192,7 +188,7 @@ type Matcher = { spec: string; url: string; file: string | null };
  */
 function resolveMatchers(specifiers: string[] | undefined): Matcher[] {
   // Not through the hooks, which would hand back a run's or a file's copy
-  setMatcherInstances(new Map());
+  setSharedFiles(new Set(), null);
 
   // A module listed twice is one module, its hooks are added once
   return [...new Set(specifiers ?? [])].map((spec) => {
@@ -306,11 +302,29 @@ export async function startRun(
   let newBundles: string[] = [];
 
   const matchers = resolveMatchers(options.matchers);
-  const matcherFiles = matchers.flatMap((m) => (m.file ? [m.file] : []));
+  // The matchers modules and the project files they import: each test file
+  // gets its own copy of them, shared with the test like in Jest and Vitest
+  const sharedFiles = [
+    ...new Set([
+      ...matchers.flatMap((m) => (m.file ? [m.file] : [])),
+      ...(
+        await Promise.all(
+          matchers.flatMap((m) =>
+            m.file && !m.file.includes(`${sep}node_modules${sep}`)
+              ? [importGraph(m.file)]
+              : [],
+          ),
+        )
+      ).flat(),
+    ]),
+  ];
+  const sharedUrls = new Set(
+    sharedFiles.map((f) => pathToFileURL(safeRealpath(f)).href),
+  );
 
   // Watched like a test's imports
   addBundledFiles({
-    files: matcherFiles.filter((f) => !f.includes(`${sep}node_modules${sep}`)),
+    files: sharedFiles.filter((f) => !f.includes(`${sep}node_modules${sep}`)),
     failed: false,
   });
   // Each file gets its own copy of the matchers modules
@@ -335,21 +349,16 @@ export async function startRun(
         // Imported for each file, like a setup file in Jest and Vitest, so
         // the hooks it adds at the top level are this file's and run before
         // its own. A test that imports it gets this same copy.
-        const instances: MatcherInstances = new Map();
         const copy = `unrift-file=${runCount}.${++fileCount}`;
 
-        for (const m of matchers) instances.set(m.url, `${m.url}?${copy}`);
+        setSharedFiles(sharedUrls, copy);
 
-        setMatcherInstances(instances);
+        // A CommonJS one runs again only once it's out of the cache. A
+        // require() of it in the test then gets this copy too.
+        for (const f of sharedFiles) forgetCommonJs(f);
 
         for (const m of matchers) {
-          const url = instances.get(m.url)!;
-
-          // A CommonJS one runs again only once it's out of the cache. A
-          // require() of it in the test then gets this copy too.
-          if (m.file) forgetCommonJs(m.file);
-
-          await settles(import(url));
+          await settles(import(`${m.url}?${copy}`));
 
           if (fileSuite.tests.length > 0 || fileSuite.suites.length > 0) {
             // They aren't the file's, only the error is
@@ -364,7 +373,7 @@ export async function startRun(
 
         const built = await toImportUrl(file, "bundle-test", {
           coverage: !!coverage,
-          matchers: matcherFiles,
+          shared: sharedFiles,
         });
         const url = freshImportUrl(built);
 
