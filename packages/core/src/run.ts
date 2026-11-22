@@ -37,7 +37,7 @@ import type { InlineSource } from "./snapshot/inline";
 import { summarize, type CoverageSummary } from "./coverage/report";
 import { runInWorkers } from "./workers";
 import { registerModuleLoader } from "./mock/register-loader";
-import { setRunGeneration, setSharedFiles } from "./mock/module-loader";
+import { setMatcherCopy, setRunGeneration } from "./mock/module-loader";
 import { useRealTimers } from "./mock/timers";
 
 export type RunEngineCoverageOptions = {
@@ -189,7 +189,7 @@ type Matcher = { spec: string; url: string; file: string | null };
  */
 function resolveMatchers(specifiers: string[] | undefined): Matcher[] {
   // Not through the hooks, which would hand back a run's or a file's copy
-  setSharedFiles(new Set(), null);
+  setMatcherCopy(new Set(), null);
 
   // A module listed twice is one module, its hooks are added once
   return [...new Set(specifiers ?? [])].map((spec) => {
@@ -303,11 +303,13 @@ export async function startRun(
   let newBundles: string[] = [];
 
   const matchers = resolveMatchers(options.matchers);
-  // The matchers modules and the project files they import: each test file
-  // gets its own copy of them, shared with the test like in Jest and Vitest
+  const matcherFiles = matchers.flatMap((m) => (m.file ? [m.file] : []));
+  // The matchers modules and the project files Node loads with them. Test
+  // bundles leave them out, so a bundled test shares them like one Node
+  // loads does, like in Jest and Vitest.
   const sharedFiles = [
     ...new Set([
-      ...matchers.flatMap((m) => (m.file ? [m.file] : [])),
+      ...matcherFiles,
       ...(
         await Promise.all(
           matchers.flatMap((m) =>
@@ -319,9 +321,7 @@ export async function startRun(
       ).flat(),
     ]),
   ];
-  const sharedUrls = new Set(
-    sharedFiles.map((f) => pathToFileURL(safeRealpath(f)).href),
-  );
+  const matcherUrls = new Set(matchers.map((m) => m.url));
 
   // Watched like a test's imports
   addBundledFiles({
@@ -352,11 +352,11 @@ export async function startRun(
         // its own. A test that imports it gets this same copy.
         const copy = `unrift-file=${runCount}.${++fileCount}`;
 
-        setSharedFiles(sharedUrls, copy);
+        setMatcherCopy(matcherUrls, copy);
 
         // A CommonJS one runs again only once it's out of the cache. A
         // require() of it in the test then gets this copy too.
-        for (const f of sharedFiles) forgetCommonJs(f);
+        for (const f of matcherFiles) forgetCommonJs(f);
 
         for (const m of matchers) {
           await settles(import(`${m.url}?${copy}`));

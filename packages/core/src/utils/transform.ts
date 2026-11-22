@@ -325,9 +325,15 @@ export type TransformOptions = {
   shared?: string[];
 };
 
+// Code Node loads itself. A JSON import needs an attribute a bundle can't
+// keep, it stays in the bundle.
+const CODE = /\.(m|c)?(j|t)s$/;
+
 /**
- * The project files a module imports, itself included, packages and unrift
- * left out. Empty if it doesn't build, importing it says why.
+ * The project files Node loads when it imports this module: itself and what
+ * it imports, statically, packages and unrift left out. An `import()` may
+ * never run, and what it reaches may need bundling. Empty if it doesn't
+ * build, importing it says why.
  */
 export async function importGraph(file: string): Promise<string[]> {
   const projectRoot = findProjectRoot(dirname(file));
@@ -347,9 +353,31 @@ export async function importGraph(file: string): Promise<string[]> {
       logLevel: "silent",
     });
 
-    return Object.keys(result.metafile.inputs)
+    const inputs = result.metafile.inputs;
+    const real = safeRealpath(file);
+    const start = Object.keys(inputs).find(
+      (input) => safeRealpath(resolve(projectRoot, input)) === real,
+    );
+    const seen = new Set<string>();
+    const visit = (input: string) => {
+      if (seen.has(input) || !inputs[input]) return;
+      seen.add(input);
+
+      for (const edge of inputs[input].imports) {
+        if (
+          !edge.external &&
+          (edge.kind === "import-statement" || edge.kind === "require-call")
+        ) {
+          visit(edge.path);
+        }
+      }
+    };
+
+    if (start) visit(start);
+
+    return [...seen]
       .map((input) => resolve(projectRoot, input))
-      .filter((path) => existsSync(path));
+      .filter((path) => CODE.test(path) && existsSync(path));
   } catch {
     return [];
   }

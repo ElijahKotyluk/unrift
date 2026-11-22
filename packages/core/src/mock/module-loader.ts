@@ -57,18 +57,18 @@ export function setRunGeneration(run: number): void {
   generation = run;
 }
 
-// The matchers modules and the project files they import, by URL
-let shared = new Set<string>();
+// The matchers modules, by URL
+let matchers = new Set<string>();
 // The query of the running file's copy of them
 let copy: string | null = null;
 
 /**
- * Each test file gets its own copy of the matchers modules and what they
- * import, like a setup file in Jest and Vitest. A test that imports one of
- * them gets that same copy.
+ * Each test file gets its own copy of the matchers modules, like a setup
+ * file in Jest and Vitest. A test that imports one gets that same copy.
+ * What they import is loaded once, like any module.
  */
-export function setSharedFiles(urls: Set<string>, query: string | null): void {
-  shared = urls;
+export function setMatcherCopy(urls: Set<string>, query: string | null): void {
+  matchers = urls;
   copy = query;
 }
 
@@ -98,7 +98,7 @@ export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
 
   const bare = resolved.url.replace(/[?#].*$/, "");
 
-  if (copy && shared.has(bare)) {
+  if (copy && matchers.has(bare)) {
     return { ...resolved, url: `${bare}?${copy}`, shortCircuit: true };
   }
 

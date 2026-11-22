@@ -484,13 +484,12 @@ describe("workers", () => {
     // in its URL doesn't load again.
     writeFileSync(
       join(dir, "setup.mjs"),
-      `import { beforeEach } from "@unrift/core";\nimport { store } from "./store.ts";\nstore.loads++;\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
+      `import { beforeEach } from "@unrift/core";\nimport { store } from "./store.ts";\nimport data from "./data.json" with { type: "json" };\nvoid data;\nexport const lazy = () => import("./enums.ts");\nstore.setup = true;\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
     );
-    // What it imports is shared with the test too, and starts fresh in
-    // each file
+    // What it imports is shared with the test too
     writeFileSync(
       join(dir, "store.ts"),
-      `export const store: { loads: number } = { loads: 0 };\n`,
+      `export const store: { setup?: boolean } = {};\n`,
     );
     writeFileSync(
       join(dir, "each.cjs"),
@@ -516,9 +515,13 @@ describe("workers", () => {
       `{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./*"] } } }\n`,
     );
     writeFileSync(join(dir, "other.mjs"), `export const value = 1;\n`);
+    // Left in a bundle: JSON needs an attribute the bundle can't keep, and
+    // what only an import() reaches may need bundling (Node can't load an enum)
+    writeFileSync(join(dir, "data.json"), `{ "ok": true }\n`);
+    writeFileSync(join(dir, "enums.ts"), `export enum Color { Red = "red" }\n`);
 
     const body = (setup: string, more = "") =>
-      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nit("store", () => expect([store.loads, globalThis.pkg]).toEqual([1, true]));\n${more}`;
+      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nit("store", () => expect([store.setup, globalThis.pkg]).toEqual([true, true]));\n${more}`;
 
     // Bundled, and loaded by Node
     writeFileSync(join(dir, "test/a.spec.ts"), body("../setup.mjs"));
@@ -528,7 +531,7 @@ describe("workers", () => {
       join(dir, "test/c.spec.ts"),
       body(
         "@/setup.mjs",
-        `import { value } from "../other.mjs";\nmock.module("../other.mjs", () => ({ value: 2 }));\nit("mocked", () => expect(value).toBe(2));\n`,
+        `import { value } from "../other.mjs";\nimport data from "../data.json";\nimport { Color } from "../enums";\nmock.module("../other.mjs", () => ({ value: 2 }));\nit("mocked", () => expect([value, data.ok, Color.Red]).toEqual([2, true, "red"]));\n`,
       ),
     );
 
