@@ -1,5 +1,5 @@
 import {
-  watch as fsWatch,
+  watch as nodeWatch,
   existsSync,
   readdirSync,
   statSync,
@@ -562,7 +562,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
 
     console.log(JSON.stringify(report, null, 2));
 
-    if (!ok) process.exitCode = 1;
+    // From the results only, a test that set it doesn't decide
+    process.exitCode = ok ? 0 : 1;
 
     return;
   }
@@ -754,7 +755,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
 
   console.log("");
 
-  if (!ok) process.exitCode = 1;
+  // From the results only, a test that set it doesn't decide
+  process.exitCode = ok ? 0 : 1;
 }
 
 /**
@@ -860,7 +862,14 @@ function watchRecursive(
         ) {
           return;
         }
-        trigger(filename ?? d, filename ? join(d, filename) : d);
+        // macOS reports a change to the watched folder by its own name
+        const path =
+          !filename ||
+          (filename === basename(d) && !existsSync(join(d, filename)))
+            ? d
+            : join(d, filename);
+
+        trigger(filename ?? d, path);
       });
 
       // Deleting a watched folder can emit an error on some platforms
@@ -1059,7 +1068,35 @@ function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
   };
 }
 
+// Every watcher, so a run can stop them from keeping the process alive:
+// with nothing else left, Node says a file is stuck (settles in run.ts)
+const watchers = new Set<FSWatcher>();
+let holding = true;
+
+function fsWatch(
+  path: string,
+  listener: (event: string, filename: string | null) => void,
+): FSWatcher {
+  const watcher = nodeWatch(path, listener);
+
+  watchers.add(watcher);
+  if (!holding) watcher.unref();
+
+  return watcher;
+}
+
+function holdOpen(on: boolean) {
+  holding = on;
+
+  for (const watcher of watchers) {
+    if (on) watcher.ref();
+    else watcher.unref();
+  }
+}
+
 function closeWatcher(watcher: FSWatcher) {
+  watchers.delete(watcher);
+
   try {
     watcher.close();
   } catch {
@@ -1142,6 +1179,7 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
     running = true;
     runStart = Date.now();
+    holdOpen(false);
 
     const shortFile = shortenPath(filename);
     console.log(
@@ -1180,13 +1218,17 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
       process.exitCode = 1;
     } finally {
       watchImports();
+      holdOpen(true);
       running = false;
     }
 
     // One save can be reported again after the debounce. Only a file
-    // written since the run started, and not by it, is a new change.
+    // written since the run started, and not by it, is a new change. One
+    // that's gone was deleted or renamed, which keeps its time.
     const next = [...changedDuring].find(
-      ([path]) => !isOwnWrite(path) && modifiedSince(path, runStart),
+      ([path]) =>
+        !isOwnWrite(path) &&
+        (modifiedSince(path, runStart) || !existsSync(path)),
     );
 
     changedDuring.clear();

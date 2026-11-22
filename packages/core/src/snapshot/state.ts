@@ -356,7 +356,10 @@ export function finishSnapshots(
         noteWrite(file.path);
         emptied.push(dirname(file.path));
       } else {
-        mkdirSync(dirname(file.path), { recursive: true });
+        // A folder it makes changes the one above it too
+        const made = mkdirSync(dirname(file.path), { recursive: true });
+
+        if (made) noteWrite(made);
         writeFileSync(file.path, formatSnapshotFile(file.data));
         noteWrite(file.path);
       }

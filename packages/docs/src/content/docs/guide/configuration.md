@@ -28,7 +28,7 @@ Unrift searches upward from your project root for a config file named `unrift.co
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `testDir` | `string` | `"test"` | Directory to search for test files (relative to config file) |
-| `timeoutMs` | `number` | - | Default timeout for each test in milliseconds |
+| `timeoutMs` | `number` | - | Default timeout for each test in milliseconds. Without one, a test or hook waiting on a promise that nothing is left to settle still fails |
 | `bail` | `boolean` | `false` | Stop running tests after the first failure |
 | `workers` | `number` | `1` | Run test files in this many worker threads, see [Workers](/guide/cli/#workers) |
 | `retries` | `number` | `0` | Retry failing tests this many times. Can be overridden per test |

@@ -211,6 +211,7 @@ it("value", () => expect(value).toBe(1));
       "test/slow.spec.ts": `import { it } from "@unrift/core";
 it("slow", () => new Promise((r) => setTimeout(r, 1000)));
 `,
+      "test/gone.spec.ts": `import { it } from "@unrift/core";\nit("gone", () => {});\n`,
     });
     const spec = join(ws.dir, "test/slow.spec.ts");
     const w = watch(ws.dir);
@@ -226,6 +227,14 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       await sleep(300);
       writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
       expect(await w.waitFor(() => w.reruns() === 2)).toBe(true);
+
+      // A delete keeps no time to compare, it's a change too
+      await w.waitFor(() => w.out.text.split("for changes").length === 3);
+      writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
+      expect(await w.waitFor(() => w.reruns() === 3)).toBe(true);
+      await sleep(300);
+      rmSync(join(ws.dir, "test/gone.spec.ts"));
+      expect(await w.waitFor(() => w.reruns() === 4)).toBe(true);
     } finally {
       w.kill();
     }

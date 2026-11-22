@@ -88,6 +88,9 @@ port.on("message", (message: ToWorker) => {
   queue = queue
     .then(async () => {
       if (message.type === "file") {
+        // So a file waiting on what can never settle is noticed (settles in
+        // run.ts), the port would keep the thread waiting forever
+        port.unref();
         current = message.index;
         post({ type: "started", index: message.index });
 
@@ -96,6 +99,9 @@ port.on("message", (message: ToWorker) => {
         );
         // Its snapshots go with it, a crash later can't lose them
         const part = run.take();
+
+        // Waits for the next file
+        port.ref();
 
         // Until the next file starts, output with no file of its own goes to this one
         post({
@@ -106,6 +112,10 @@ port.on("message", (message: ToWorker) => {
         });
       } else {
         const end = await run.finish();
+
+        // The worker's exit code is for errors after its last file, one a
+        // test set doesn't decide the run's
+        process.exitCode = undefined;
 
         // An error thrown right after, like from a setImmediate the afterAll
         // left, stops the worker before it ends: it's still part of the run

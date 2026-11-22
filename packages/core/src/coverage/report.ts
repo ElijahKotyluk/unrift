@@ -207,7 +207,9 @@ export function writeCoverageReports(
 ): string[] {
   const written: string[] = [];
   const write = (name: string, text: string) => {
-    mkdirSync(dir, { recursive: true });
+    const made = mkdirSync(dir, { recursive: true });
+
+    if (made) noteWrite(made);
 
     const path = join(dir, name);
 

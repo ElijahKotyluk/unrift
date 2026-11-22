@@ -386,6 +386,70 @@ describe("workers", () => {
     ]);
   });
 
+  it("fails a file left waiting on what can never settle, and runs the rest", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/stalled");
+    const specs = {
+      // Nothing keeps the process going, Node would exit as if it passed
+      hook: `import { beforeAll, it } from "@unrift/core";\nbeforeAll(() => new Promise(() => {}));\nit("x", () => {});\n`,
+      test: `import { it } from "@unrift/core";\nit("before", () => {});\nit("stuck", () => new Promise(() => {}));\nit("after", () => {});\n`,
+      top: `await new Promise(() => {});\n`,
+      // Only the results decide the exit code
+      code: `import { it } from "@unrift/core";\nit("sets it", () => { process.exitCode = 1; });\n`,
+    };
+
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "test"), { recursive: true });
+    writeFileSync(
+      join(dir, "unrift.config.ts"),
+      `export default { testDir: "test" };\n`,
+    );
+
+    for (const [name, body] of Object.entries(specs)) {
+      writeFileSync(join(dir, `test/${name}.spec.ts`), body);
+    }
+
+    const run = (...args: string[]) => {
+      const res = spawnSync(
+        process.execPath,
+        [
+          resolve(process.cwd(), "bin/unrift.mjs"),
+          "--config",
+          join(dir, "unrift.config.ts"),
+          "--json",
+          ...args,
+        ],
+        { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
+      );
+
+      return {
+        status: res.status,
+        results: JSON.parse(res.stdout).results.map(
+          (r: { description: string; status: string }) =>
+            `${r.description.split("/").pop()}: ${r.status}`,
+        ),
+      };
+    };
+    const expected = {
+      status: 1,
+      results: [
+        "code.spec.ts › sets it: pass",
+        "hook.spec.ts > [stalled]: fail",
+        "hook.spec.ts › x: skipped",
+        "test.spec.ts › before: pass",
+        "test.spec.ts › stuck: fail",
+        "test.spec.ts › after: skipped",
+        "top.spec.ts > [import]: fail",
+      ],
+    };
+
+    expect(run()).toEqual(expected);
+    expect(run("--workers", "2")).toEqual(expected);
+
+    // Alone, the file that set process.exitCode passes the run
+    expect(run("test/code.spec.ts").status).toBe(0);
+    expect(run("test/code.spec.ts", "--workers", "2").status).toBe(0);
+  });
+
   it("gives each test file its own copy of the matchers module, the one it imports", () => {
     const dir = resolve(process.cwd(), "test/workers/.work/per-file");
 

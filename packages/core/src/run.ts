@@ -136,6 +136,52 @@ function unpassedTestNames(suite: Suite, names: string[] = []): string[] {
   return names;
 }
 
+class Stalled extends Error {
+  constructor() {
+    super(
+      "Nothing is left that could finish this, it waits on a promise that never settles",
+    );
+    this.name = "Stalled";
+  }
+}
+
+/**
+ * The promise, or a Stalled error once nothing is left to run that could
+ * settle it. Without this, a hook or test awaiting such a promise would let
+ * Node exit as if the run passed, or keep a worker waiting forever. Node
+ * says so with beforeExit, a worker's port is unref'd while it runs a file.
+ */
+function settles<T>(work: Promise<T>): Promise<T> {
+  let onExit: () => void = () => {};
+  const stalled = new Promise<never>((_, reject) => {
+    onExit = () => reject(new Stalled());
+    process.once("beforeExit", onExit);
+  });
+
+  return Promise.race([work, stalled]).finally(() =>
+    process.off("beforeExit", onExit),
+  );
+}
+
+/** Fails the tests still running in it, whether there were any. */
+function failRunning(suite: Suite, error: Error): boolean {
+  let found = false;
+
+  for (const test of suite.tests) {
+    if (test.status === TaskStatus.Running) {
+      test.status = TaskStatus.Fail;
+      test.error = error;
+      found = true;
+    }
+  }
+
+  for (const child of suite.suites) {
+    if (failRunning(child, error)) found = true;
+  }
+
+  return found;
+}
+
 /** A matchers module, and the file it is if it's one. */
 type Matcher = { spec: string; url: string; file: string | null };
 
@@ -303,7 +349,7 @@ export async function startRun(
           // require() of it in the test then gets this copy too.
           if (m.file) forgetCommonJs(m.file);
 
-          await import(url);
+          await settles(import(url));
 
           if (fileSuite.tests.length > 0 || fileSuite.suites.length > 0) {
             // They aren't the file's, only the error is
@@ -327,7 +373,7 @@ export async function startRun(
           newBundles.push(url);
         }
 
-        await import(url);
+        await settles(import(url));
       } catch (err) {
         fileSuite.errors.push({ label: "import", error: toError(err) });
 
@@ -350,7 +396,19 @@ export async function startRun(
 
       unriftGlobalContext.state = RunState.Run;
 
-      await fileSuite.run(runOptions, state, hasOnly, false);
+      try {
+        await settles(fileSuite.run(runOptions, state, hasOnly, false));
+      } catch (err) {
+        if (!(err instanceof Stalled)) throw err;
+
+        // The test it was in fails, or the file if it was in a hook. The
+        // ones it didn't get to are skipped.
+        if (!failRunning(fileSuite, err)) {
+          fileSuite.errors.push({ label: "stalled", error: err });
+        }
+
+        fileSuite.markSubtreeSkipped();
+      }
 
       return {
         file: fileSuite.description,
