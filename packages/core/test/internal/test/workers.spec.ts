@@ -258,10 +258,10 @@ describe("workers", () => {
     ]);
     expect(replaced[2]).toMatch(/^b\.spec\.ts › b: fail/);
 
-    // An error right after the top level's afterAll, in each worker
+    // An error right after the last file's afterAll. One file, one worker.
     const late = runWith(
       `import { afterAll } from "@unrift/core";\nafterAll(() => { setImmediate(() => { throw new Error("late"); }); });\n`,
-      { a: `it("a", () => {});`, b: `it("b", () => {});` },
+      { a: `it("a", () => {});` },
     );
 
     expect(late.status).toBe(1);
@@ -286,10 +286,9 @@ describe("workers", () => {
         b: `it("b", () => {});`,
       }).results,
     ).toEqual(["a.spec.ts › a: pass", "b.spec.ts › b: pass"]);
-    // In the order the workers stopped
-    expect(late.results.slice(0, 2).sort()).toEqual([
-      "root > [worker]: fail (late\n\nThe worker stopped running the top level's afterAll. It can come from a.spec.ts, which ran before it in the same worker.)",
-      "root > [worker]: fail (late\n\nThe worker stopped running the top level's afterAll. It can come from b.spec.ts, which ran before it in the same worker.)",
+    expect(late.results).toEqual([
+      "root > [worker]: fail (late\n\nThe worker stopped after its last file. It can come from a.spec.ts, which ran before it in the same worker.)",
+      "a.spec.ts › a: pass",
     ]);
   });
 
@@ -346,55 +345,7 @@ describe("workers", () => {
     ]);
   });
 
-  it("keeps output from what the top level's beforeAll starts out of its first file", () => {
-    const dir = resolve(process.cwd(), "test/workers/.work/setup-timer");
-    const specs = {
-      a: `it("a", () => {});`,
-      b: `it("b", async () => { await wait(1500); console.log("log: b"); });`,
-      c: `it("c", async () => { await wait(900); console.log("log: c"); });`,
-    };
-
-    rmSync(dir, { recursive: true, force: true });
-    mkdirSync(join(dir, "test"), { recursive: true });
-    writeFileSync(
-      join(dir, "setup.mjs"),
-      `import { beforeAll } from "@unrift/core";\nbeforeAll(() => { setTimeout(() => console.log("log: setup timer"), 600); });\n`,
-    );
-    writeFileSync(
-      join(dir, "unrift.config.ts"),
-      `export default { testDir: "test", matchers: [${JSON.stringify(join(dir, "setup.mjs"))}] };\n`,
-    );
-
-    for (const [name, body] of Object.entries(specs)) {
-      writeFileSync(
-        join(dir, `test/${name}.spec.ts`),
-        `import { it } from "@unrift/core";\nconst wait = (ms: number) => new Promise((r) => setTimeout(r, ms));\nvoid wait;\n${body}\n`,
-      );
-    }
-
-    const out = spawnSync(
-      process.execPath,
-      [
-        resolve(process.cwd(), "bin/unrift.mjs"),
-        "--config",
-        join(dir, "unrift.config.ts"),
-        "--workers",
-        "2",
-      ],
-      { encoding: "utf8", env: { ...process.env, CI: "" }, timeout: 20_000 },
-    ).stdout;
-
-    // Each worker's timer goes with the file it's running, a's worker is on
-    // c by then. As a's, it'd go out first, a was printed already.
-    expect(out.split("\n").filter((line) => line.startsWith("log:"))).toEqual([
-      "log: setup timer",
-      "log: b",
-      "log: setup timer",
-      "log: c",
-    ]);
-  });
-
-  it("runs the top level's beforeAll and afterAll in each worker", () => {
+  it("runs the top level's beforeAll and afterAll around each file with a test to run", () => {
     const dir = resolve(process.cwd(), "test/workers/.work/root-hooks");
 
     rmSync(dir, { recursive: true, force: true });
@@ -414,6 +365,12 @@ describe("workers", () => {
         `import { it, expect } from "@unrift/core";\nit("${name}", () => expect([(globalThis as Record<string, unknown>).__setup, (globalThis as Record<string, unknown>).__each]).toEqual([true, 1]));\n`,
       );
     }
+
+    // Nothing to run, no hooks: like Jest and Vitest
+    writeFileSync(
+      join(dir, "test/c.spec.ts"),
+      `import { it } from "@unrift/core";\nit.skip("c", () => {});\n`,
+    );
 
     const statuses = (...args: string[]) =>
       JSON.parse(
@@ -450,8 +407,8 @@ for (let i = 0; i < 2; i++) {
 
     // Listed twice, its hooks still run once
     expect(twice.stdout.trim().split("\n")).toEqual([
-      "root > [afterAll]: fail, a.spec.ts › a: pass",
-      "root > [afterAll]: fail, a.spec.ts › a: pass",
+      "a.spec.ts > [afterAll]: fail, a.spec.ts › a: pass",
+      "a.spec.ts > [afterAll]: fail, a.spec.ts › a: pass",
     ]);
 
     // A matchers module that defines tests is an error on every run
@@ -475,34 +432,32 @@ for (let i = 0; i < 2; i++) {
 
     expect(tests.stdout.trim().split("\n")).toEqual(["threw", "threw"]);
 
-    // Once per worker, and once without workers. The afterAll after the
-    // one that threw still runs.
+    // Around a and b, with workers or without. The afterAll after the one
+    // that threw still runs.
     const ran = () =>
       readFileSync(join(dir, "after.log"), "utf8").split("\n").length - 1;
+    const expected = [
+      "a.spec.ts > [afterAll]: fail",
+      "a.spec.ts › a: pass",
+      "b.spec.ts > [afterAll]: fail",
+      "b.spec.ts › b: pass",
+      "c.spec.ts › c: skipped",
+    ];
 
     expect(ran()).toBe(2);
-    expect(statuses("--workers", "2")).toEqual([
-      "root > [afterAll]: fail",
-      "root > [afterAll]: fail",
-      "a.spec.ts › a: pass",
-      "b.spec.ts › b: pass",
-    ]);
+    expect(statuses("--workers", "2")).toEqual(expected);
     expect(ran()).toBe(4);
-    expect(statuses()).toEqual([
-      "root > [afterAll]: fail",
-      "a.spec.ts › a: pass",
-      "b.spec.ts › b: pass",
-    ]);
-    expect(ran()).toBe(5);
+    expect(statuses()).toEqual(expected);
+    expect(ran()).toBe(6);
 
-    // Nothing to run, nothing to set up: no beforeAll, no afterAll
+    // Nor when --grep leaves nothing to run
     expect(
       statuses("--workers", "2", "--grep", "nothing matches"),
-    ).not.toContain("root > [afterAll]: fail");
+    ).not.toContain("a.spec.ts > [afterAll]: fail");
     expect(statuses("--grep", "nothing matches")).not.toContain(
-      "root > [afterAll]: fail",
+      "a.spec.ts > [afterAll]: fail",
     );
-    expect(ran()).toBe(5);
+    expect(ran()).toBe(6);
   });
 
   it("prints each file's output together, in file order", () => {

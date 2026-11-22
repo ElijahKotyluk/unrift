@@ -93,10 +93,10 @@ A worker has its own modules, globals, mocks and copy of `process.env`, files in
 Things that work differently in a worker:
 
 - `process.chdir()` throws, the working directory is the process's
-- `process.exit()` in a test, or an error thrown from a timer, stops its worker. The file it was running fails, or the last one it ran, and a new worker takes the rest. Stopped outside a file, in the top level's `afterAll` say, or a new worker that can't start, fails the run. Coverage of what the stopped worker ran is lost, the run fails anyway
+- `process.exit()` in a test, or an error thrown from a timer, stops its worker. The file it was running fails, or the last one it ran, and a new worker takes the rest. Stopped outside a file, right after its last one say, or a new worker that can't start, fails the run. Coverage of what the stopped worker ran is lost, the run fails anyway
 - `process.exitCode` set by a test doesn't reach the run's exit code
 - stdout and stderr aren't a terminal, so libraries that check for one print without colors
-- `beforeAll` and `afterAll` that a `matchers` module adds at the top level run once in each worker, before its first file that has tests to run
+- A `matchers` module is loaded once in each worker
 - Files on disk are shared, two files writing the same path can collide
 - Only `process.stdout` and `process.stderr` are held per file. A child process started with `stdio: "inherit"`, or a write straight to file descriptor 1 or 2, goes out right away and can mix with another file's output
 

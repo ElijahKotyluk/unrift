@@ -83,6 +83,10 @@ export default defineConfig({
 
 The module should call `expect.extend()` when imported.
 
+Hooks it adds at the top level are every test file's, like a setup file in Jest (`setupFilesAfterEnv`) or Vitest (`setupFiles`). `beforeAll` and `afterAll` run around each file that has a test to run, after the file is loaded. `beforeEach` and `afterEach` run around each test.
+
+The module itself is loaded once, before any test file (once in each worker, with `--workers`). Code a test file needs when it loads goes at the module's top level, not in a `beforeAll`.
+
 ## CLI overrides
 
 CLI flags override config file values:

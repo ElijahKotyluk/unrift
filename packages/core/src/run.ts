@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -259,30 +258,6 @@ export async function startRun(
 
   await loadMatcherModules(options.matchers);
 
-  // Hooks a matchers module adds at the top level are the run's own. Its
-  // beforeEach and afterEach reach each test through the parent chain, its
-  // beforeAll and afterAll run here, once per thread. Like a suite's, only
-  // if a test runs: not for a --grep that matches nothing, or a worker that
-  // got no file to run.
-  let setUp = false;
-  // Outside any file: in a worker, what the hooks start (a timer, a server)
-  // isn't a file's, its output goes where the running file's does
-  const outside = AsyncLocalStorage.snapshot();
-
-  async function setUpRoot() {
-    setUp = true;
-
-    try {
-      unriftGlobalContext.state = RunState.Run;
-
-      for (const hook of rootSuite.beforeAllHooks) await hook();
-    } catch (err) {
-      rootSuite.beforeAllError = toError(err);
-    } finally {
-      unriftGlobalContext.state = RunState.Idle;
-    }
-  }
-
   /** Imports the file, which registers its tests, and runs them. */
   async function runFile(file: string): Promise<FileRun> {
     const fileSuite = new Suite(
@@ -292,6 +267,13 @@ export async function startRun(
     );
 
     rootSuite.addSuite(fileSuite);
+
+    // Hooks a matchers module adds at the top level are each file's, like a
+    // setup file's in Jest and Vitest: its beforeEach and afterEach reach each
+    // test through the parent chain, its beforeAll and afterAll run around
+    // the file's tests, only if it has a test to run. Before the file's own.
+    fileSuite.beforeAllHooks.push(...rootSuite.beforeAllHooks);
+    fileSuite.afterAllHooks.push(...rootSuite.afterAllHooks);
     unriftGlobalContext.currentSuite = fileSuite;
     unriftGlobalContext.state = RunState.Register;
 
@@ -330,15 +312,9 @@ export async function startRun(
         retries: options.retries,
       };
 
-      if (!setUp && fileSuite.willRun(runOptions, state, hasOnly)) {
-        await outside(setUpRoot);
-      }
-
       unriftGlobalContext.state = RunState.Run;
 
-      // Like a suite whose beforeAll failed, nothing under it runs
-      if (rootSuite.beforeAllError) fileSuite.markSubtreeSkipped();
-      else await fileSuite.run(runOptions, state, hasOnly, false);
+      await fileSuite.run(runOptions, state, hasOnly, false);
 
       return {
         file: fileSuite.description,
@@ -389,30 +365,13 @@ export async function startRun(
     return { snapshots, inline, emptied, scripts: [], bundles: fresh };
   }
 
-  /** Runs the top level's afterAll and takes what's left. */
+  /** Takes what's left, and the coverage. */
   async function finish(): Promise<RunEnd> {
-    if (setUp && !rootSuite.beforeAllError) {
-      try {
-        unriftGlobalContext.state = RunState.Run;
-
-        // Like a suite's: each one runs, the first error is kept
-        for (const hook of rootSuite.afterAllHooks) {
-          try {
-            await hook();
-          } catch (err) {
-            rootSuite.afterAllError ??= toError(err);
-          }
-        }
-      } finally {
-        unriftGlobalContext.state = RunState.Idle;
-      }
-    }
-
     return {
-      // The top level's own errors, a failed beforeAll or afterAll
+      // The top level's own errors
       root: {
         file: rootSuite.description,
-        results: rootSuite.getResults().slice(0, rootErrorCount()),
+        results: rootSuite.getResults().slice(0, rootSuite.errors.length),
         hasOnly: false,
       },
       ...take(),
@@ -430,15 +389,6 @@ export async function startRun(
   }
 
   return { runFile, take, finish };
-}
-
-/** How many of the root suite's results are its own, before its files'. */
-function rootErrorCount(): number {
-  return (
-    rootSuite.errors.length +
-    (rootSuite.beforeAllError ? 1 : 0) +
-    (rootSuite.afterAllError ? 1 : 0)
-  );
 }
 
 export async function runEngine(

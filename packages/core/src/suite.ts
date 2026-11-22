@@ -96,7 +96,7 @@ export class Suite {
    * skipped.
    */
   private markSubtreeFilteredOut(
-    grep: RegExp,
+    grep: RegExp | undefined,
     isOnly: boolean,
     inOnlyContext: boolean,
   ) {
@@ -119,6 +119,8 @@ export class Suite {
         (isOnly && !suite.subtreeHasOnly && !childOnly)
       ) {
         suite.markSubtreeSkipped();
+      } else if (suite.mode === TaskMode.Todo && !grep) {
+        suite.markSubtreeTodo();
       } else {
         suite.markSubtreeFilteredOut(grep, isOnly, childOnly);
       }
@@ -171,27 +173,6 @@ export class Suite {
     return afterEachHooks;
   }
 
-  /** False when run() would skip this suite, its hooks included. */
-  willRun(
-    options: RunOptions | undefined,
-    state: SuiteRunState,
-    isOnly: boolean,
-    ancestorOnly = false,
-  ): boolean {
-    if (state.bailed) return false;
-    if (this.mode === TaskMode.Skip || this.mode === TaskMode.Todo)
-      return false;
-
-    const inOnlyContext = ancestorOnly || this.mode === TaskMode.Only;
-
-    if (isOnly && !this.subtreeHasOnly && !inOnlyContext) return false;
-
-    return (
-      !options?.grep ||
-      this.hasRunnableMatch(options.grep, isOnly, inOnlyContext)
-    );
-  }
-
   async run(
     options?: RunOptions,
     state: SuiteRunState = { bailed: false },
@@ -227,12 +208,10 @@ export class Suite {
       return;
     }
 
-    // Same for --grep: nothing below can run, so don't run hooks either
-    if (
-      options?.grep &&
-      !this.hasRunnableMatch(options.grep, isOnly, inOnlyContext)
-    ) {
-      this.markSubtreeFilteredOut(options.grep, isOnly, inOnlyContext);
+    // Same when nothing below can run, all skipped or left out by --grep:
+    // no hooks either, like Jest and Vitest
+    if (!this.hasRunnableMatch(options?.grep, isOnly, inOnlyContext)) {
+      this.markSubtreeFilteredOut(options?.grep, isOnly, inOnlyContext);
 
       return;
     }
@@ -432,7 +411,9 @@ export class Suite {
     }
   }
 
-  private testMatchesGrep(test: Test, grep: RegExp): boolean {
+  private testMatchesGrep(test: Test, grep: RegExp | undefined): boolean {
+    if (!grep) return true;
+
     return regexTest(
       grep,
       `${this.getFullDescription()} › ${test.description}`,
@@ -445,7 +426,7 @@ export class Suite {
    * shouldn't cause this suite's hooks to fire.
    */
   private hasRunnableMatch(
-    grep: RegExp,
+    grep: RegExp | undefined,
     isOnly: boolean,
     inOnlyContext: boolean,
   ): boolean {

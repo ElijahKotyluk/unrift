@@ -105,7 +105,7 @@ type Slot = {
   last: number | null;
   /** It said it's ready, so it got through starting up. */
   ready: boolean;
-  /** Told to finish: it runs the top level's afterAll. */
+  /** Told to finish: its files are done. */
   finishing: boolean;
   ended: boolean;
   /** An error it threw, handled once it has exited and sent everything. */
@@ -352,11 +352,11 @@ export async function runInWorkers(
             return;
           }
 
-          // Outside a file: running the top level's afterAll, or starting up
+          // Outside a file: after its last one, or starting up
           if (slot.finishing) {
             failRoot(
               error,
-              "The worker stopped running the top level's afterAll." +
+              "The worker stopped after its last file." +
                 (slot.last === null
                   ? ""
                   : ` It can come from ${options.files[slot.last]}, which ran before it in the same worker.`),
