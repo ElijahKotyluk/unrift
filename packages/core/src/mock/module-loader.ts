@@ -9,6 +9,7 @@
  */
 
 import type { LoadHookSync, ResolveHookSync } from "node:module";
+import { fileURLToPath } from "node:url";
 
 import { MOCKS_GLOBAL_KEY, MOCK_URL_PREFIX, registrations } from "./module";
 
@@ -82,6 +83,14 @@ export function noteLoads(on: boolean): string[] {
   loading = on ? new Set() : null;
 
   return noted;
+}
+
+// Files Node loaded as CommonJS
+const commonJs = new Set<string>();
+
+/** Whether Node loaded `path` as CommonJS. */
+export function loadedAsCommonJs(path: string): boolean {
+  return commonJs.has(path);
 }
 
 // Project files Node loaded since the last take, for watch mode
@@ -162,7 +171,18 @@ export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
 
 /** Generates the source for a `unrift-mock:` URL. */
 export const load: LoadHookSync = (url, context, nextLoad) => {
-  if (!url.startsWith(MOCK_URL_PREFIX)) return nextLoad(url, context);
+  if (!url.startsWith(MOCK_URL_PREFIX)) {
+    const loaded = nextLoad(url, context);
+
+    if (
+      url.startsWith("file:") &&
+      (loaded.format === "commonjs" || loaded.format === "commonjs-typescript")
+    ) {
+      commonJs.add(fileURLToPath(url.replace(/[?#].*$/, "")));
+    }
+
+    return loaded;
+  }
 
   // `unrift-mock:<spec>?v=<registrationId>`
   const rest = url.slice(MOCK_URL_PREFIX.length);

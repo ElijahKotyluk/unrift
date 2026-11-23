@@ -827,15 +827,31 @@ function modifiedSince(path: string, time: number): boolean {
   }
 }
 
+// When a watched folder was first seen to have each path, for a file a test
+// makes and removes. Kept past the event, its delete can be reported late.
+const appeared = new Map<string, number>();
+
+/** Whether `path`, or a folder it's in, showed up at `time` or later. */
+function appearedSince(path: string, time: number): boolean {
+  for (let p = resolve(path); ; p = dirname(p)) {
+    if ((appeared.get(p) ?? -1) >= time) return true;
+    if (dirname(p) === p) return false;
+  }
+}
+
+/** Drops what showed up before `time`, it's no longer asked about. */
+function forgetAppearedBefore(time: number) {
+  for (const [path, at] of appeared) if (at < time) appeared.delete(path);
+}
+
 function watchRecursive(
   dir: string,
-  onChange: (filename: string, path: string, fresh: boolean) => void,
+  onChange: (filename: string, path: string) => void,
   debounceMs = 150,
 ): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  // Every path changed within the debounce, one may be a run's own write.
-  // Whether it's new: one that's gone by then was made and removed.
-  let changed = new Map<string, { filename: string; fresh: boolean }>();
+  // Every path changed within the debounce, one may be a run's own write
+  let changed = new Map<string, string>();
   // What each watched folder has, to tell a new file from one that was there
   const listing = new Map<string, Set<string>>();
 
@@ -847,16 +863,14 @@ function watchRecursive(
     }
   };
 
-  function trigger(filename: string, path: string, fresh = false) {
-    changed.set(path, { filename, fresh: changed.get(path)?.fresh ?? fresh });
+  function trigger(filename: string, path: string) {
+    changed.set(path, filename);
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       const paths = changed;
 
       changed = new Map();
-      for (const [path, { filename, fresh }] of paths) {
-        onChange(filename, path, fresh);
-      }
+      for (const [path, filename] of paths) onChange(filename, path);
     }, debounceMs);
   }
 
@@ -915,11 +929,21 @@ function watchRecursive(
 
     try {
       const watcher = fsWatch(d, (_event, filename) => {
-        // Not there before this event: made since, by a test say
-        const fresh =
-          !!filename && listing.has(d) && !listing.get(d)!.has(filename);
+        const before = listing.get(d);
 
         list(d);
+
+        // Not there before: made since, by a test say. Its name may be gone
+        // already, the files made with it may not have had their event yet.
+        if (before) {
+          const names = new Set(listing.get(d));
+          const now = Date.now();
+
+          if (filename) names.add(filename);
+          for (const name of names) {
+            if (!before.has(name)) appeared.set(join(d, name), now);
+          }
+        }
 
         if (filename) watchIfNewDir(join(d, filename));
 
@@ -940,7 +964,7 @@ function watchRecursive(
             ? d
             : join(d, filename);
 
-        trigger(filename ?? d, path, fresh && path !== d);
+        trigger(filename ?? d, path);
       });
 
       // Deleting a watched folder can emit an error on some platforms
@@ -1031,11 +1055,11 @@ function waitForDir(dir: string, onCreated: () => void): () => void {
  * the old one would leave a watcher on the file looking at nothing.
  */
 function watchFiles(
-  onChange: (filename: string, path: string, fresh: boolean) => void,
+  onChange: (filename: string, path: string) => void,
   debounceMs = 150,
 ) {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let changed = new Map<string, boolean>();
+  let changed = new Set<string>();
   let files = new Set<string>();
   const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
   // Folders that are gone, watched for when they're made again
@@ -1046,14 +1070,13 @@ function watchFiles(
   const renamed = new Set<string>();
 
   function trigger(path: string) {
-    // A file a run used, it was there
-    changed.set(path, false);
+    changed.add(path);
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       const paths = changed;
 
-      changed = new Map();
-      for (const [path, fresh] of paths) onChange(path, path, fresh);
+      changed = new Set();
+      for (const path of paths) onChange(path, path);
     }, debounceMs);
   }
 
@@ -1211,16 +1234,18 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
   let { testDir, configDir, configPath } = await resolveDirs(options);
 
   let running = false;
-  let runStart = 0;
+  // Set while a run starts: the rest of the changes that started it, the
+  // run already sees them
+  let starting = false;
+  // What was there from before watching isn't new
+  let runStart = Date.now();
   // Paths changed during a run. A worker writes its snapshots mid-run, which
   // ones the run wrote itself is only known once it's done.
-  const changedDuring = new Map<string, { filename: string; fresh: boolean }>();
+  const changedDuring = new Map<string, { filename: string; early: boolean }>();
 
   // Source files and the config live outside the test dir. Watch the ones
   // the last run bundled, the test dir is already watched as a whole.
-  const imports = watchFiles((filename, path, fresh) =>
-    rerun(filename, path, fresh),
-  );
+  const imports = watchFiles((filename, path) => rerun(filename, path));
   // A build that failed doesn't say what it imports, so until it builds
   // anything under the config's folder reruns
   let stopFallback: (() => void) | null = null;
@@ -1264,24 +1289,27 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
   };
   // New at its first change and gone now: made and removed, like a test's
   // temp file. One that was there before is a delete.
-  const madeAndRemoved = (path: string, fresh: boolean, used: string[]) =>
-    !existsSync(path) && fresh && !wasUsed(path, used);
+  const madeAndRemoved = (path: string, used: string[]) =>
+    !existsSync(path) && appearedSince(path, runStart) && !wasUsed(path, used);
 
-  const rerun = async (filename: string, path = filename, fresh = false) => {
+  const rerun = async (filename: string, path = filename) => {
     if (running) {
       changedDuring.set(path, {
         filename,
-        fresh: changedDuring.get(path)?.fresh ?? fresh,
+        early: starting && (changedDuring.get(path)?.early ?? true),
       });
       return;
     }
 
     // Seen during the last run, written by it, or a file a test made and
     // removed
-    if (isOwnWrite(path) || madeAndRemoved(path, fresh, usedFiles())) return;
+    if (isOwnWrite(path) || madeAndRemoved(path, usedFiles())) return;
 
     running = true;
     runStart = Date.now();
+    forgetAppearedBefore(runStart);
+    starting = true;
+    queueMicrotask(() => (starting = false));
     // What the last run used, before this one changes it
     const used = usedFiles();
     holdOpen(false);
@@ -1328,15 +1356,19 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     }
 
     // One save can be reported again after the debounce. Only a file
-    // written since the run started, and not by it, is a new change. One
-    // that's gone was deleted or renamed, which keeps its time, unless it
-    // was made during the run too.
-    const next = [...changedDuring].find(
-      ([path, { fresh }]) =>
-        !isOwnWrite(path) &&
-        (modifiedSince(path, runStart) ||
-          (!existsSync(path) && !madeAndRemoved(path, fresh, used))),
-    );
+    // written since the run started, and not by it, is a new change. A move
+    // keeps its time: one that showed up during the run is a change, one
+    // that's gone a delete, unless it showed up during the run too. What
+    // came in with the change that started the run, the run already saw.
+    const next = [...changedDuring].find(([path, { early }]) => {
+      if (isOwnWrite(path)) return false;
+      if (modifiedSince(path, runStart)) return true;
+      if (early) return false;
+
+      return existsSync(path)
+        ? appearedSince(path, runStart)
+        : !madeAndRemoved(path, used);
+    });
 
     changedDuring.clear();
 

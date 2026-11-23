@@ -20,6 +20,8 @@ interface SuiteRunState {
   bailed: boolean;
   /** Given up on, stalled: nothing more of it runs, even if it resumes. */
   abandoned?: boolean;
+  /** The test being run, its hooks included. A stall fails it. */
+  current?: Test | null;
 }
 
 // Goes up as each hook and test finishes, a stalled file shows none
@@ -353,6 +355,8 @@ export class Suite {
           }
         };
 
+        state.current = test;
+
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           test.attempts = attempt;
 
@@ -383,6 +387,7 @@ export class Suite {
         // What it did after it was given up on doesn't count, nor is written
         if (state.abandoned) return;
 
+        state.current = null;
         test.durationMs = totalMs;
         snapshots?.finish();
 

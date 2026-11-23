@@ -14,6 +14,7 @@ import {
 import { ensureInternalMatchers } from "./matchers";
 import { fileScope, RunState, unriftGlobalContext } from "./context";
 import { normalizePath } from "./utils/normalizePath";
+import type { Test } from "./test";
 import { TaskMode, TaskStatus } from "./types";
 import { toError } from "./utils/toError";
 import {
@@ -26,6 +27,7 @@ import {
 import { takeWrites } from "./utils/ownWrites";
 import { assertValidRetries } from "./utils/helpers";
 import {
+  dropSnapshotScope,
   finishSnapshots,
   removeEmptyDirs,
   writeInline,
@@ -45,6 +47,7 @@ import { summarize, type CoverageSummary } from "./coverage/report";
 import { runInWorkers } from "./workers";
 import { registerModuleLoader } from "./mock/register-loader";
 import {
+  loadedAsCommonJs,
   noteLoads,
   takeLoads,
   setMatcherCopy,
@@ -208,25 +211,6 @@ function settles<T>(work: Promise<T>, ms = STALL_MS): Promise<T> {
     process.off("beforeExit", onExit);
     if (timer) realClearTimeout(timer);
   });
-}
-
-/** Fails the tests still running in it, whether there were any. */
-function failRunning(suite: Suite, error: Error): boolean {
-  let found = false;
-
-  for (const test of suite.tests) {
-    if (test.status === TaskStatus.Running) {
-      test.status = TaskStatus.Fail;
-      test.error = error;
-      found = true;
-    }
-  }
-
-  for (const child of suite.suites) {
-    if (failRunning(child, error)) found = true;
-  }
-
-  return found;
 }
 
 /** A matchers module, and the file it is if it's one. */
@@ -404,6 +388,7 @@ export async function startRun(
         state.bailed = value;
       },
       abandoned: false,
+      current: null as Test | null,
     };
 
     // Its code knows it's this file's, even once it's given up on
@@ -415,7 +400,7 @@ export async function startRun(
   async function runFileIn(
     file: string,
     fileSuite: Suite,
-    fileState: { bailed: boolean; abandoned: boolean },
+    fileState: { bailed: boolean; abandoned: boolean; current: Test | null },
     stallMs: number,
   ): Promise<FileRun> {
     unriftGlobalContext.currentSuite = fileSuite;
@@ -464,6 +449,9 @@ export async function startRun(
         const built = await toImportUrl(file, "bundle-test", {
           coverage: !!coverage,
           shared: [...sharedFiles],
+          sharedCommonJs: [...sharedFiles].filter(
+            (f) => loadedAsCommonJs(f) || /\.c(j|t)s$/.test(f),
+          ),
         });
         const url = freshImportUrl(built);
 
@@ -513,9 +501,17 @@ export async function startRun(
         // in another file's time
         fileState.abandoned = true;
 
-        // The test it was in fails, or the file if it was in a hook. The
-        // ones it didn't get to are skipped.
-        if (!failRunning(fileSuite, err)) {
+        dropSnapshotScope();
+
+        // The test it was in fails, even in an afterEach after it passed,
+        // like a throw there. In a suite hook, the file does. The ones it
+        // didn't get to are skipped.
+        const test = fileState.current;
+
+        if (test) {
+          test.status = TaskStatus.Fail;
+          test.error = err;
+        } else {
           fileSuite.errors.push({ label: "stalled", error: err });
         }
 

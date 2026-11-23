@@ -9,7 +9,7 @@ import { scanSource, type MockCall } from "../mock/hoist";
 import { MODULE_MOCKS_GLOBAL_KEY } from "../mock/module";
 
 const NAMESPACE = "unrift-mock";
-const PRELUDE = "unrift-mock-prelude";
+export const PRELUDE = "unrift-mock-prelude";
 
 // An import from these gives the hoisted factories `mock` and the rest.
 // Matched where the scanner found an `import`, comments allowed inside.

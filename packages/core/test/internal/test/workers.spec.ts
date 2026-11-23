@@ -474,6 +474,60 @@ for (let i = 0; i < 2; i++) {
     ]);
   });
 
+  it("keeps the snapshots of a test stalled in its afterEach", () => {
+    const dir = resolve(process.cwd(), "test/workers/.work/stalled-snap");
+
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, "test"), { recursive: true });
+    writeFileSync(
+      join(dir, "unrift.config.ts"),
+      `export default { testDir: "test" };\n`,
+    );
+    // Stalls after its body passed, like a throw there it fails the test
+    writeFileSync(
+      join(dir, "test/a.spec.ts"),
+      `import { it, expect, afterEach } from "@unrift/core";\nafterEach(() => { if (process.env.STALL) return new Promise(() => {}); });\nit("keeps", () => expect(1).toMatchSnapshot());\n`,
+    );
+    // Outside a test, even right after one was given up on
+    writeFileSync(
+      join(dir, "test/b.spec.ts"),
+      `import { it, expect, beforeAll } from "@unrift/core";\nlet threw = false;\nbeforeAll(() => { try { expect(5).toMatchSnapshot(); } catch { threw = true; } });\nit("throws", () => expect(threw).toBe(true));\n`,
+    );
+
+    const snap = join(dir, "test/__snapshots__/a.spec.ts.snap");
+    const run = (env: Record<string, string>, ...args: string[]) =>
+      JSON.parse(
+        spawnSync(
+          process.execPath,
+          [
+            resolve(process.cwd(), "bin/unrift.mjs"),
+            "--config",
+            join(dir, "unrift.config.ts"),
+            "--json",
+            ...args,
+          ],
+          {
+            encoding: "utf8",
+            env: { ...process.env, CI: "", UNRIFT_STALL_MS: "200", ...env },
+            timeout: 20_000,
+          },
+        ).stdout,
+      ).results.map(
+        (r: { description: string; status: string }) =>
+          `${r.description.split("/").pop()}: ${r.status}`,
+      );
+
+    run({});
+    expect(readFileSync(snap, "utf8")).toContain("keeps 1");
+
+    const expected = ["a.spec.ts › keeps: fail", "b.spec.ts › throws: pass"];
+
+    expect(run({ STALL: "1" }, "-u")).toEqual(expected);
+    expect(readFileSync(snap, "utf8")).toContain("keeps 1");
+    expect(run({ STALL: "1" }, "-u", "--workers", "2")[0]).toBe(expected[0]);
+    expect(readFileSync(snap, "utf8")).toContain("keeps 1");
+  });
+
   it("fails a file left waiting on what can never settle, and runs the rest", () => {
     const dir = resolve(process.cwd(), "test/workers/.work/stalled");
     const specs = {
@@ -601,7 +655,7 @@ for (let i = 0; i < 2; i++) {
     // in its URL doesn't load again.
     writeFileSync(
       join(dir, "setup.mjs"),
-      `import { beforeEach } from "@unrift/core";\nimport { store } from "./store.ts";\nimport data from "./data.json" with { type: "json" };\nvoid data;\nexport const lazy = () => import("./enums.ts");\nstore.setup = true;\nconst { dyn } = await import("./dyn.ts");\ndyn.set = true;\nimport { createRequire } from "node:module";\ncreateRequire(import.meta.url)("./req.cjs").set = true;\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
+      `import { beforeEach } from "@unrift/core";\nimport { store } from "./store.ts";\nimport data from "./data.json" with { type: "json" };\nvoid data;\nexport const lazy = () => import("./enums.ts");\nstore.setup = true;\nconst { dyn } = await import("./dyn.ts");\ndyn.set = true;\nimport { createRequire } from "node:module";\nconst req = createRequire(import.meta.url);\nreq("./req.cjs").set = true;\nreq("./cjs/state.js").state.set = true;\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
     );
     // What it imports is shared with the test too
     writeFileSync(
@@ -615,6 +669,14 @@ for (let i = 0; i < 2; i++) {
     );
     // And what it loads with a require() the import graph can't see
     writeFileSync(join(dir, "req.cjs"), `module.exports = {};\n`);
+    // CommonJS whose names Node can't see, a bundled test still can. It's
+    // CommonJS only by how Node loads it.
+    mkdirSync(join(dir, "cjs"));
+    writeFileSync(join(dir, "cjs/package.json"), `{ "type": "commonjs" }\n`);
+    writeFileSync(
+      join(dir, "cjs/state.js"),
+      `const make = () => ({ state: {} });\nmodule.exports = make();\n`,
+    );
     writeFileSync(
       join(dir, "each.cjs"),
       `const { beforeEach } = require("@unrift/core");\nlet n = 0;\nexports.count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
@@ -647,15 +709,17 @@ for (let i = 0; i < 2; i++) {
     const body = (setup: string, more = "") =>
       `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nimport { dyn } from "../dyn.ts";\nimport req from "../req.cjs";\nit("store", () => expect([store.setup, dyn.set, req.set, globalThis.pkg]).toEqual([true, true, true, true]));\n${more}`;
 
+    const bundled = `import { state } from "../cjs/state.js";\nit("cjs", () => expect(state.set).toBe(true));\n`;
+
     // Bundled, and loaded by Node
-    writeFileSync(join(dir, "test/a.spec.ts"), body("../setup.mjs"));
+    writeFileSync(join(dir, "test/a.spec.ts"), body("../setup.mjs", bundled));
     writeFileSync(join(dir, "test/b.spec.mjs"), body("../setup.mjs"));
     // By a path alias, and with a mocked module
     writeFileSync(
       join(dir, "test/c.spec.ts"),
       body(
         "@/setup.mjs",
-        `import { value } from "../other.mjs";\nimport data from "../data.json";\nimport { Color } from "../enums";\nmock.module("../other.mjs", () => ({ value: 2 }));\nit("mocked", () => expect([value, data.ok, Color.Red]).toEqual([2, true, "red"]));\n`,
+        `import { value } from "../other.mjs";\nimport data from "../data.json";\nimport { Color } from "../enums";\nmock.module("../other.mjs", () => ({ value: 2 }));\nmock.module("../store.ts", async (importActual) => ({ ...(await importActual()) }));\nit("mocked", () => expect([value, data.ok, Color.Red]).toEqual([2, true, "red"]));\n`,
       ),
     );
 
@@ -684,6 +748,7 @@ for (let i = 0; i < 2; i++) {
       "a.spec.ts › 1: pass",
       "a.spec.ts › 2: pass",
       "a.spec.ts › store: pass",
+      "a.spec.ts › cjs: pass",
       "b.spec.mjs › 1: pass",
       "b.spec.mjs › 2: pass",
       "b.spec.mjs › store: pass",

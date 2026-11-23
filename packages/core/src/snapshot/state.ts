@@ -180,6 +180,14 @@ export function createSnapshotTest(
 
 type MatchResult = { pass: true } | { pass: false; message: string };
 
+/**
+ * For a file given up on mid-test: its attempt never ends, so the next
+ * file's hooks mustn't fall back to that test's scope.
+ */
+export function dropSnapshotScope(): void {
+  current = undefined;
+}
+
 function getScope(matcher: string): Scope {
   const scope = storage.getStore() ?? current;
 

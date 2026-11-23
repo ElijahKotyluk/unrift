@@ -16,7 +16,7 @@ import os from "node:os";
 import { join, basename, extname, resolve, dirname, sep } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
-import { moduleMockCalls, moduleMockPlugin } from "./moduleMockPlugin";
+import { moduleMockCalls, moduleMockPlugin, PRELUDE } from "./moduleMockPlugin";
 
 const injectedFilename = fileURLToPath(import.meta.url);
 const injectedDirname = dirname(injectedFilename);
@@ -332,6 +332,8 @@ export type TransformOptions = {
    * (see module-loader.ts).
    */
   shared?: string[];
+  /** The shared files Node loads as CommonJS. */
+  sharedCommonJs?: string[];
 };
 
 // Code Node loads itself. A JSON import needs an attribute a bundle can't
@@ -396,8 +398,11 @@ export async function importGraph(file: string): Promise<string[]> {
   }
 }
 
-function sharedPlugin(files: string[]): Plugin {
+const SHARED_CJS = "unrift-shared-cjs";
+
+function sharedPlugin(files: string[], commonJs: string[]): Plugin {
   const paths = new Set(files.flatMap((f) => [f, safeRealpath(f)]));
+  const cjs = new Set(commonJs.flatMap((f) => [f, safeRealpath(f)]));
 
   return {
     name: "unrift-shared",
@@ -405,8 +410,14 @@ function sharedPlugin(files: string[]): Plugin {
       // Every import, a path alias can lead to one too
       build.onResolve({ filter: /.*/ }, async (args) => {
         // The mock plugin's own lookups, and ours, use the same mark: each
-        // resolving through the other would never end
-        if (args.pluginData?.unriftSkip || args.kind === "entry-point") return;
+        // resolving through the other would never end. The mocks' prelude
+        // has it too, so it gets the real module, which is shared all the same.
+        if (
+          (args.pluginData?.unriftSkip && args.namespace !== PRELUDE) ||
+          args.kind === "entry-point"
+        ) {
+          return;
+        }
         // Node can't require() a URL, a required one stays in the bundle
         if (args.kind === "require-call" || args.kind === "require-resolve")
           return;
@@ -421,8 +432,18 @@ function sharedPlugin(files: string[]): Plugin {
         if (found.errors.length > 0 || found.external || !paths.has(found.path))
           return undefined;
 
+        // Imported by Node, the test would see Node's named and default
+        // exports instead of the bundle's. Required, it's the same module.
+        if (cjs.has(found.path))
+          return { path: found.path, namespace: SHARED_CJS };
+
         return { path: pathToFileURL(found.path).href, external: true };
       });
+
+      build.onLoad({ filter: /.*/, namespace: SHARED_CJS }, (args) => ({
+        contents: `module.exports = process.getBuiltinModule("node:module").createRequire(${JSON.stringify(args.path)})(${JSON.stringify(args.path)});\n`,
+        loader: "js",
+      }));
     },
   };
 }
@@ -436,7 +457,8 @@ export async function toImportUrl(
 
   const coverage = options.coverage ?? false;
   const shared = (options.shared ?? []).filter((f) => f !== filePath);
-  const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${shared.join("\0")}:${filePath}`;
+  const sharedCommonJs = options.sharedCommonJs ?? [];
+  const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${shared.join("\0")}:${sharedCommonJs.join("\0")}:${filePath}`;
 
   usedIn.set(key, generation);
 
@@ -514,7 +536,7 @@ export async function toImportUrl(
               ),
             ]
           : []),
-        ...(shared.length > 0 ? [sharedPlugin(shared)] : []),
+        ...(shared.length > 0 ? [sharedPlugin(shared, sharedCommonJs)] : []),
       ],
     });
 

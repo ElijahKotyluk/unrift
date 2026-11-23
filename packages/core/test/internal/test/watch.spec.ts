@@ -213,14 +213,21 @@ it("value", () => expect(value).toBe(1));
 it("slow", () => new Promise((r) => setTimeout(r, 1000)));
 `,
       "test/gone.spec.ts": `import { it } from "@unrift/core";\nit("gone", () => {});\n`,
+      "test/gone2.spec.ts": `import { it } from "@unrift/core";\nit("gone2", () => {});\n`,
       "test/data.txt": "1\n",
+      // Moved in later, it keeps this time
+      "staging/moved.spec.ts": `import { it } from "@unrift/core";\nit("moved in", () => {});\n`,
     });
     const spec = join(ws.dir, "test/slow.spec.ts");
+    const temps = JSON.stringify(
+      [1, 2, 3].map((n) => join(ws.dir, `test/temp${n}.json`)),
+    );
 
-    // A file a test makes and removes during the run isn't a change
+    // Files a test makes and removes during the run aren't a change, made
+    // together and kept a while, so their events come apart and late
     ws.write(
       "test/temp.spec.ts",
-      `import { it } from "@unrift/core";\nimport { rmSync, writeFileSync } from "node:fs";\nit("temp", () => { writeFileSync(${JSON.stringify(join(ws.dir, "test/temp.json"))}, "{}"); rmSync(${JSON.stringify(join(ws.dir, "test/temp.json"))}); });\n`,
+      `import { it } from "@unrift/core";\nimport { rmSync, writeFileSync } from "node:fs";\nit("temp", async () => {\n  for (const f of ${temps}) writeFileSync(f, "{}");\n  await new Promise((r) => setTimeout(r, 300));\n  for (const f of ${temps}) rmSync(f);\n});\n`,
     );
     const w = watch(ws.dir);
 
@@ -249,10 +256,32 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       // A file that was there, read by a test say, deleted while it waits
       rmSync(join(ws.dir, "test/data.txt"));
       expect(await w.waitFor(() => w.reruns() === 5)).toBe(true);
+
+      // An edit and a delete together, the run they start sees both
+      await w.waitFor(() => w.out.text.split("for changes").length === 7);
+      writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
+      await sleep(30);
+      rmSync(join(ws.dir, "test/gone2.spec.ts"));
+      expect(await w.waitFor(() => w.reruns() === 6)).toBe(true);
+      await sleep(2500);
+      expect(w.reruns()).toBe(6);
+
+      // Moved in during a run, with its old time
+      writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
+      expect(await w.waitFor(() => w.reruns() === 7)).toBe(true);
+      await sleep(300);
+      renameSync(
+        join(ws.dir, "staging/moved.spec.ts"),
+        join(ws.dir, "test/moved.spec.ts"),
+      );
+      expect(await w.waitFor(() => w.reruns() === 8)).toBe(true);
+      expect(await w.waitFor(() => w.out.text.includes("moved in"))).toBe(
+        true,
+      );
     } finally {
       w.kill();
     }
-  }, 15000);
+  }, 30000);
 
   it("runs the edited code of a plain JS import and the matchers module", async () => {
     const ws = workspace("fresh", {
