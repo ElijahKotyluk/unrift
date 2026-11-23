@@ -82,10 +82,11 @@ describe("workers", () => {
       `export default { testDir: "test" };\n`,
     );
 
+    const started = JSON.stringify(join(dir, "b-started"));
     const specs = {
-      a: `beforeAll(() => { throw new Error("setup"); });\nit("a", () => {});`,
-      // Keeps the other worker busy until a's hook failed
-      b: `it("b", () => new Promise((r) => setTimeout(r, 500)));`,
+      // Fails once b is running, b is the one test that had started
+      a: `beforeAll(async () => {\n  while (!existsSync(${started})) await new Promise((r) => setTimeout(r, 10));\n  throw new Error("setup");\n});\nit("a", () => {});`,
+      b: `it("b", () => {\n  writeFileSync(${started}, "");\n  return new Promise((r) => setTimeout(r, 500));\n});`,
       c: `it("c", () => {});`,
       d: `it("d", () => {});`,
     };
@@ -93,7 +94,7 @@ describe("workers", () => {
     for (const [name, body] of Object.entries(specs)) {
       writeFileSync(
         join(dir, `test/${name}.spec.ts`),
-        `import { beforeAll, it } from "@unrift/core";\n${body}\n`,
+        `import { beforeAll, it } from "@unrift/core";\nimport { existsSync, writeFileSync } from "node:fs";\n${body}\n`,
       );
     }
 

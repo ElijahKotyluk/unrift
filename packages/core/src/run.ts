@@ -452,13 +452,19 @@ export async function startRun(
           }
         } finally {
           // What Node loaded with them, it can load again for a test
+          const loaded: string[] = [];
+
           for (const url of noteLoads(false)) {
             if (!url.startsWith("file:")) continue;
 
             const path = fileURLToPath(url);
 
+            loaded.push(path);
             if (isSharedCode(path)) sharedFiles.add(path);
           }
+
+          // Watched like what they import statically
+          addBundledFiles({ files: loaded, failed: false });
         }
 
         const built = await toImportUrl(file, "bundle-test", {

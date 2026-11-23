@@ -257,6 +257,7 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
     const ws = workspace("fresh", {
       "unrift.config.ts": `export default { testDir: "test", matchers: ["./setup.mjs"] };\n`,
       "setup.mjs": `import { beforeAll } from "@unrift/core";\nbeforeAll(() => console.log("setup one"));\n`,
+      "lib/tag.mjs": `export const tag = "tag one";\n`,
       "test/helper.js": `import { expect } from "@unrift/core";\nexport function check() {\n  expect(1).toMatchInlineSnapshot();\n}\n`,
       "test/a.spec.js": `import { it } from "@unrift/core";\nimport { check } from "./helper.js";\nit("a", () => check());\n`,
     });
@@ -283,11 +284,16 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       // Outside the test dir, and loaded by Node
       ws.write(
         "setup.mjs",
-        `import { beforeAll } from "@unrift/core";\nbeforeAll(() => console.log("setup two"));\n`,
+        `import { beforeAll } from "@unrift/core";\nconst { tag } = await import("./lib/tag.mjs");\nbeforeAll(() => console.log("setup two", tag));\n`,
       );
       expect(await w.waitFor(() => w.out.text.includes("setup two"))).toBe(
         true,
       );
+
+      // What it loads with an awaited import() is watched too
+      await sleep(600);
+      ws.write("lib/tag.mjs", `export const tag = "tag two";\n`);
+      expect(await w.waitFor(() => w.out.text.includes("tag two"))).toBe(true);
     } finally {
       w.kill();
     }
