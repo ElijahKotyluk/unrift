@@ -84,12 +84,42 @@ export function noteLoads(on: boolean): string[] {
   return noted;
 }
 
+// Project files Node loaded since the last take, for watch mode
+let used = new Set<string>();
+
+/** The project files Node loaded since the last take. */
+export function takeLoads(): string[] {
+  const taken = [...used];
+
+  used = new Set();
+
+  return taken;
+}
+
+function noteLoad(url: string) {
+  if (
+    url.startsWith("file:") &&
+    !url.includes("/node_modules/") &&
+    !url.startsWith(OWN)
+  ) {
+    const bare = url.replace(/[?#].*$/, "");
+
+    used.add(bare);
+    loading?.add(bare);
+  }
+}
+
 /** Points a mocked spec at a `unrift-mock:` URL. */
 export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
   // Only imports, like module.register() hooks were. A require() inside a
   // package keeps the real module.
   if (context.conditions.includes("require")) {
-    return nextResolve(specifier, context);
+    const resolved = nextResolve(specifier, context);
+
+    // Loaded with them all the same, a require() the import graph can't see
+    noteLoad(resolved.url);
+
+    return resolved;
   }
 
   const entry = registrations.get(specifier);
@@ -110,13 +140,7 @@ export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
 
   const bare = resolved.url.replace(/[?#].*$/, "");
 
-  if (
-    loading &&
-    !resolved.url.includes("/node_modules/") &&
-    !resolved.url.startsWith(OWN)
-  ) {
-    loading.add(bare);
-  }
+  noteLoad(resolved.url);
 
   if (copy && matchers.has(bare)) {
     return { ...resolved, url: `${bare}?${copy}`, shortCircuit: true };

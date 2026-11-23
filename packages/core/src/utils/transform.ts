@@ -116,6 +116,15 @@ function safeRealpath(p: string): string {
   }
 }
 
+/** Whether `path` is in a cache unrift builds into, not the user's. */
+export function inBuildCache(path: string): boolean {
+  if (path.split(sep).includes("node_modules")) return true;
+
+  const tmp = join(os.tmpdir(), "unrift");
+
+  return isSubpath(path, tmp);
+}
+
 function projectNodeModulesCacheRoot(projectRoot: string) {
   return join(projectRoot, "node_modules", ".unrift", "cache");
 }

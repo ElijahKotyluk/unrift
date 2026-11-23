@@ -601,7 +601,7 @@ for (let i = 0; i < 2; i++) {
     // in its URL doesn't load again.
     writeFileSync(
       join(dir, "setup.mjs"),
-      `import { beforeEach } from "@unrift/core";\nimport { store } from "./store.ts";\nimport data from "./data.json" with { type: "json" };\nvoid data;\nexport const lazy = () => import("./enums.ts");\nstore.setup = true;\nconst { dyn } = await import("./dyn.ts");\ndyn.set = true;\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
+      `import { beforeEach } from "@unrift/core";\nimport { store } from "./store.ts";\nimport data from "./data.json" with { type: "json" };\nvoid data;\nexport const lazy = () => import("./enums.ts");\nstore.setup = true;\nconst { dyn } = await import("./dyn.ts");\ndyn.set = true;\nimport { createRequire } from "node:module";\ncreateRequire(import.meta.url)("./req.cjs").set = true;\nlet n = 0;\nexport const count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
     );
     // What it imports is shared with the test too
     writeFileSync(
@@ -613,6 +613,8 @@ for (let i = 0; i < 2; i++) {
       join(dir, "dyn.ts"),
       `export const dyn: { set?: boolean } = {};\n`,
     );
+    // And what it loads with a require() the import graph can't see
+    writeFileSync(join(dir, "req.cjs"), `module.exports = {};\n`);
     writeFileSync(
       join(dir, "each.cjs"),
       `const { beforeEach } = require("@unrift/core");\nlet n = 0;\nexports.count = () => n;\nbeforeEach(() => { n++; globalThis.runs = (globalThis.runs ?? 0) + 1; });\n`,
@@ -643,7 +645,7 @@ for (let i = 0; i < 2; i++) {
     writeFileSync(join(dir, "enums.ts"), `export enum Color { Red = "red" }\n`);
 
     const body = (setup: string, more = "") =>
-      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nimport { dyn } from "../dyn.ts";\nit("store", () => expect([store.setup, dyn.set, globalThis.pkg]).toEqual([true, true, true]));\n${more}`;
+      `import { it, expect, mock } from "@unrift/core";\nimport { count } from "${setup}";\nimport each from "../each.cjs";\nconst start = globalThis.runs ?? 0;\nit("1", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([1, 1, 2]));\nit("2", () => expect([count(), each.count(), globalThis.runs - start]).toEqual([2, 2, 4]));\nimport { store } from "../store.ts";\nimport { dyn } from "../dyn.ts";\nimport req from "../req.cjs";\nit("store", () => expect([store.setup, dyn.set, req.set, globalThis.pkg]).toEqual([true, true, true, true]));\n${more}`;
 
     // Bundled, and loaded by Node
     writeFileSync(join(dir, "test/a.spec.ts"), body("../setup.mjs"));

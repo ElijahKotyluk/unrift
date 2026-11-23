@@ -8,7 +8,7 @@
  */
 
 import { statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 
 /** Path to its stamp, kept across runs. Only an unchanged path matches. */
 const written = new Map<string, string>();
@@ -57,7 +57,32 @@ export function addWrites(entries: Array<[string, string]>): void {
 
 /** Whether `path` is as unrift left it. */
 export function isOwnWrite(path: string): boolean {
-  const own = written.get(resolve(path));
+  const full = resolve(path);
+  const own = written.get(full);
 
-  return own !== undefined && own === stamp(path);
+  if (own === undefined) return false;
+
+  const now = stamp(full);
+
+  if (own === "missing" && now !== "missing") {
+    forgetRemoved(full);
+
+    return false;
+  }
+
+  return own === now;
+}
+
+/**
+ * A path unrift removed that's there again was put back by someone else, so
+ * is what it removed under it. Deleted again, that's theirs too. A late
+ * change event can't make this wrong: had unrift made it again, its stamp
+ * would no longer be "missing".
+ */
+function forgetRemoved(path: string) {
+  for (const [p, value] of written) {
+    if (value === "missing" && (p === path || p.startsWith(path + sep))) {
+      written.delete(p);
+    }
+  }
 }

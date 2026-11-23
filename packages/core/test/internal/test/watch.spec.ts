@@ -1,6 +1,7 @@
 import { describe, it, expect } from "@unrift/core";
 import { spawn, spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -258,6 +259,10 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       "unrift.config.ts": `export default { testDir: "test", matchers: ["./setup.mjs"] };\n`,
       "setup.mjs": `import { beforeAll } from "@unrift/core";\nbeforeAll(() => console.log("setup one"));\n`,
       "lib/tag.mjs": `export const tag = "tag one";\n`,
+      "lib/x.mjs": `export const x = 1;\n`,
+      "lib/y.cjs": `exports.y = 1;\n`,
+      // Loaded by Node, with an import and a require() from outside the test dir
+      "test/b.spec.mjs": `import { it } from "@unrift/core";\nimport { createRequire } from "node:module";\nimport { x } from "../lib/x.mjs";\nconst { y } = createRequire(import.meta.url)("../lib/y.cjs");\nit("b", () => console.log("x", x, "y", y));\n`,
       "test/helper.js": `import { expect } from "@unrift/core";\nexport function check() {\n  expect(1).toMatchInlineSnapshot();\n}\n`,
       "test/a.spec.js": `import { it } from "@unrift/core";\nimport { check } from "./helper.js";\nit("a", () => check());\n`,
     });
@@ -294,6 +299,42 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       await sleep(600);
       ws.write("lib/tag.mjs", `export const tag = "tag two";\n`);
       expect(await w.waitFor(() => w.out.text.includes("tag two"))).toBe(true);
+
+      await sleep(600);
+      ws.write("lib/x.mjs", `export const x = 2;\n`);
+      expect(await w.waitFor(() => w.out.text.includes("x 2 y 1"))).toBe(true);
+      await sleep(600);
+      ws.write("lib/y.cjs", `exports.y = 2;\n`);
+      expect(await w.waitFor(() => w.out.text.includes("x 2 y 2"))).toBe(true);
+    } finally {
+      w.kill();
+    }
+  }, 15000);
+
+  it("reruns for a snapshot deleted by hand after unrift removed it once", async () => {
+    const snapText = "// Unrift Snapshot v1\n\nexports[`gone 1`] = `1`;\n";
+    const ws = workspace("snap-again", {
+      "unrift.config.ts": `export default { testDir: "test" };\n`,
+      "test/a.spec.ts": `import { it } from "@unrift/core";\nit("a", () => {});\n`,
+      // Obsolete, -u removes it
+      "test/__snapshots__/a.spec.ts.snap": snapText,
+    });
+    const snap = join(ws.dir, "test/__snapshots__/a.spec.ts.snap");
+    const w = watch(ws.dir, "-u");
+
+    try {
+      expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
+        true,
+      );
+      expect(existsSync(snap)).toBe(false);
+
+      // Put back, then deleted again: both the user's
+      ws.write("test/__snapshots__/a.spec.ts.snap", snapText);
+      expect(await w.waitFor(() => w.reruns() === 1)).toBe(true);
+      await w.waitFor(() => w.out.text.split("for changes").length === 3);
+      await sleep(300);
+      rmSync(snap);
+      expect(await w.waitFor(() => w.reruns() === 2)).toBe(true);
     } finally {
       w.kill();
     }

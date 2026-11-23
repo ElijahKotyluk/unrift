@@ -20,6 +20,8 @@ Versions are `@unrift/core` / `unrift`.
 - Bundles are written to a temp file and renamed, so a run never imports a half-written one
 - Watch mode prints that it's watching once its watchers are set up, a save right after the message isn't missed
 - Watch mode loads `.js` files a test imports and `matchers` modules again on each rerun, an edit no longer runs the old code or writes an inline snapshot into the wrong call. A `matchers` module is watched
+- Watch mode watches the files Node loads for a test outside the test dir too: a `.js` test's imports, an `import()` and a `require()`. Before, only what a bundle read was watched
+- Watch mode reruns for a `.snap` deleted by hand after `-u` removed it once and it was put back
 
 ## 0.10.0 / 0.11.0 - 2026-11-21
 
