@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 
 import type { FileCoverage } from "./convert";
 import { normalizePath } from "../utils/normalizePath";
+import { noteWrite } from "../utils/ownWrites";
 
 export type CoverageMetric = { covered: number; total: number; pct: number };
 
@@ -206,11 +207,14 @@ export function writeCoverageReports(
 ): string[] {
   const written: string[] = [];
   const write = (name: string, text: string) => {
-    mkdirSync(dir, { recursive: true });
+    const made = mkdirSync(dir, { recursive: true });
+
+    if (made) noteWrite(made);
 
     const path = join(dir, name);
 
     writeFileSync(path, text);
+    noteWrite(path);
     written.push(path);
   };
 

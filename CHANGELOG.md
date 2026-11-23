@@ -4,6 +4,26 @@ Versions are `@unrift/core` / `unrift`.
 
 ## Unreleased
 
+- `--workers <n>` and the `workers` option run test files in worker threads. Each worker takes the next file when it's done, results are reported in file order. `--bail` stops the other workers too. A worker still running a second after its last file, from a timer or socket a test left, is stopped with a note
+- With workers, each file's stdout and stderr is printed once the file is done, in file order, so output from two files doesn't mix. Output a file writes after it was printed, from a timer, goes out as it's written, after a note on stderr that says which file it's from
+- Breaking: `.only` skips the other tests in its own file, not other files, like Jest and Vitest
+- Breaking: a `matchers` module is loaded for each test file, like a setup file in Jest and Vitest. The `beforeAll` and `afterAll` it adds at the top level run around each file that has a test to run. A test file that imports it gets the same copy, so its hooks run once. The project files it imports are the same ones a test file gets, bundled or not A `matchers` module that defines tests fails each file
+- A relative `matchers` path, or a package name, is resolved from the config's folder
+- A test, hook or file left waiting with nothing keeping Node going fails after `timeoutMs`, or 5s, and the run goes on. Before, the run could exit 0 with nothing printed, or hang with workers
+- A test that stalls in its `afterEach` fails, like one that throws there, and `-u` keeps its snapshots
+- Only the results decide the exit code, a test that sets `process.exitCode` doesn't
+- Watch mode reruns for a file deleted, renamed or moved in during a run, not for one a test makes and removes
+- `--bail` stops on a failing `beforeAll`, `afterAll` or import too
+- A file's own failures, like `[import]`, print under its name, and the failures list says which file each one is in
+- Breaking: `useFakeTimers()` leaves `queueMicrotask` and `process.nextTick` real unless they're in `toFake`, like Vitest. Faked, reading a stream like a `fetch` body never finished. Fake timers a test leaves on end with its file
+- Breaking: a suite's `beforeAll` and `afterAll` don't run when none of its tests do, like Jest and Vitest
+- A file's tests run right after it loads, before the next file is imported
+- Bundles are written to a temp file and renamed, so a run never imports a half-written one
+- Watch mode prints that it's watching once its watchers are set up, a save right after the message isn't missed
+- Watch mode loads `.js` files a test imports and `matchers` modules again on each rerun, an edit no longer runs the old code or writes an inline snapshot into the wrong call. A `matchers` module is watched
+- Watch mode watches the files Node loads for a test outside the test dir too: a `.js` test's imports, an `import()` and a `require()`. Before, only what a bundle read was watched
+- Watch mode reruns for a `.snap` deleted by hand after `-u` removed it once and it was put back
+
 ## 0.10.0 / 0.11.0 - 2026-11-21
 
 - Breaking: Unrift needs Node 22.23.5+, 24.22.3+ or 26.13.1+, the November 2026 security releases. Older patches have known high-severity CVEs

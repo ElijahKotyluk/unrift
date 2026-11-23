@@ -1,4 +1,5 @@
-import { build } from "esbuild";
+import { build, type Plugin } from "esbuild";
+import { threadId } from "node:worker_threads";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -9,12 +10,13 @@ import {
   realpathSync,
   rmSync,
   writeFileSync,
+  renameSync,
 } from "node:fs";
 import os from "node:os";
 import { join, basename, extname, resolve, dirname, sep } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
-import { moduleMockCalls, moduleMockPlugin } from "./moduleMockPlugin";
+import { moduleMockCalls, moduleMockPlugin, PRELUDE } from "./moduleMockPlugin";
 
 const injectedFilename = fileURLToPath(import.meta.url);
 const injectedDirname = dirname(injectedFilename);
@@ -114,6 +116,15 @@ function safeRealpath(p: string): string {
   }
 }
 
+/** Whether `path` is in a cache unrift builds into, not the user's. */
+export function inBuildCache(path: string): boolean {
+  if (path.split(sep).includes("node_modules")) return true;
+
+  const tmp = join(os.tmpdir(), "unrift");
+
+  return isSubpath(path, tmp);
+}
+
 function projectNodeModulesCacheRoot(projectRoot: string) {
   return join(projectRoot, "node_modules", ".unrift", "cache");
 }
@@ -180,9 +191,22 @@ const failedInputs = new Map<CacheKey, string[]>();
 let generation = 0;
 const usedIn = new Map<CacheKey, number>();
 
+// What worker threads bundled this run, they keep their own cache
+let fromWorkers = { files: new Set<string>(), failed: false };
+
 /** Starts a new run for `bundledFiles`. */
 export function startBundleRun(): void {
   generation++;
+  fromWorkers = { files: new Set(), failed: false };
+}
+
+/** Adds a worker's `bundledFiles()` to this thread's. */
+export function addBundledFiles(worker: {
+  files: string[];
+  failed: boolean;
+}): void {
+  for (const file of worker.files) fromWorkers.files.add(file);
+  if (worker.failed) fromWorkers.failed = true;
 }
 
 function hashFile(path: string): string | null {
@@ -202,8 +226,8 @@ function inputsUnchanged(entry: CacheEntry): boolean {
  * they import. `failed` is true when a build failed, its imports are unknown.
  */
 export function bundledFiles(): { files: string[]; failed: boolean } {
-  const files = new Set<string>();
-  let failed = false;
+  const files = new Set(fromWorkers.files);
+  let failed = fromWorkers.failed;
 
   for (const [key, run] of usedIn) {
     if (run !== generation) continue;
@@ -265,7 +289,12 @@ function ensureSelfLink(cacheRoot: string, projectRoot: string) {
   const type =
     process.platform === "win32" ? ("junction" as const) : ("dir" as const);
 
-  symlinkSync(projectRoot, linkPath, type);
+  try {
+    symlinkSync(projectRoot, linkPath, type);
+  } catch (err) {
+    // Another worker made it first
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  }
 }
 
 function pickCacheRoot(projectRoot: string, selfHost: boolean): string {
@@ -297,7 +326,127 @@ function pickCacheRoot(projectRoot: string, selfHost: boolean): string {
 export type TransformOptions = {
   /** Keep code no test uses, so it shows up as uncovered. */
   coverage?: boolean;
+  /**
+   * The matchers modules and the project files they import. Left out of the
+   * bundle: a test that imports one gets the copy that ran for its file
+   * (see module-loader.ts).
+   */
+  shared?: string[];
+  /** The shared files Node loads as CommonJS. */
+  sharedCommonJs?: string[];
 };
+
+// Code Node loads itself. A JSON import needs an attribute a bundle can't
+// keep, it stays in the bundle.
+const CODE = /\.(m|c)?(j|t)s$/;
+
+export function isSharedCode(path: string): boolean {
+  return CODE.test(path);
+}
+
+/**
+ * The project files Node loads when it imports this module: itself and what
+ * it imports, statically, packages and unrift left out. An `import()` may
+ * never run, and what it reaches may need bundling. Empty if it doesn't
+ * build, importing it says why.
+ */
+export async function importGraph(file: string): Promise<string[]> {
+  const projectRoot = findProjectRoot(dirname(file));
+
+  try {
+    const result = await build({
+      entryPoints: [file],
+      write: false,
+      bundle: true,
+      format: "esm",
+      platform: "node",
+      target: "node22",
+      packages: "external",
+      external: ["@unrift/*", "@unrift/core", "@unrift/core/*"],
+      absWorkingDir: projectRoot,
+      metafile: true,
+      logLevel: "silent",
+    });
+
+    const inputs = result.metafile.inputs;
+    const real = safeRealpath(file);
+    const start = Object.keys(inputs).find(
+      (input) => safeRealpath(resolve(projectRoot, input)) === real,
+    );
+    const seen = new Set<string>();
+    const visit = (input: string) => {
+      if (seen.has(input) || !inputs[input]) return;
+      seen.add(input);
+
+      for (const edge of inputs[input].imports) {
+        if (
+          !edge.external &&
+          (edge.kind === "import-statement" || edge.kind === "require-call")
+        ) {
+          visit(edge.path);
+        }
+      }
+    };
+
+    if (start) visit(start);
+
+    return [...seen]
+      .map((input) => resolve(projectRoot, input))
+      .filter((path) => CODE.test(path) && existsSync(path));
+  } catch {
+    return [];
+  }
+}
+
+const SHARED_CJS = "unrift-shared-cjs";
+
+function sharedPlugin(files: string[], commonJs: string[]): Plugin {
+  const paths = new Set(files.flatMap((f) => [f, safeRealpath(f)]));
+  const cjs = new Set(commonJs.flatMap((f) => [f, safeRealpath(f)]));
+
+  return {
+    name: "unrift-shared",
+    setup(build) {
+      // Every import, a path alias can lead to one too
+      build.onResolve({ filter: /.*/ }, async (args) => {
+        // The mock plugin's own lookups, and ours, use the same mark: each
+        // resolving through the other would never end. The mocks' prelude
+        // has it too, so it gets the real module, which is shared all the same.
+        if (
+          (args.pluginData?.unriftSkip && args.namespace !== PRELUDE) ||
+          args.kind === "entry-point"
+        ) {
+          return;
+        }
+        // Node can't require() a URL, a required one stays in the bundle
+        if (args.kind === "require-call" || args.kind === "require-resolve")
+          return;
+
+        const found = await build.resolve(args.path, {
+          kind: args.kind,
+          importer: args.importer,
+          resolveDir: args.resolveDir,
+          pluginData: { unriftSkip: true },
+        });
+
+        if (found.errors.length > 0 || found.external || !paths.has(found.path))
+          return undefined;
+
+        // Imported by Node, the test would see Node's named and default
+        // exports instead of the bundle's. Required, it's the same module.
+        if (cjs.has(found.path))
+          return { path: found.path, namespace: SHARED_CJS };
+
+        return { path: pathToFileURL(found.path).href, external: true };
+      });
+
+      build.onLoad({ filter: /.*/, namespace: SHARED_CJS }, (args) => ({
+        contents: `module.exports = process.getBuiltinModule("node:module").createRequire(${JSON.stringify(args.path)})(${JSON.stringify(args.path)});\n`,
+        loader: "js",
+      }));
+    },
+  };
+}
 
 export async function toImportUrl(
   filePath: string,
@@ -307,7 +456,9 @@ export async function toImportUrl(
   if (!isTsLike(filePath)) return pathToFileURL(filePath).href;
 
   const coverage = options.coverage ?? false;
-  const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${filePath}`;
+  const shared = (options.shared ?? []).filter((f) => f !== filePath);
+  const sharedCommonJs = options.sharedCommonJs ?? [];
+  const key: CacheKey = `${mode}:${coverage ? "cov" : ""}:${shared.join("\0")}:${sharedCommonJs.join("\0")}:${filePath}`;
 
   usedIn.set(key, generation);
 
@@ -373,8 +524,9 @@ export async function toImportUrl(
       treeShaking: !coverage,
       metafile: true,
       logLevel: "silent",
-      plugins:
-        mocks.calls.length > 0
+      // Mocks first, a mocked shared module is the mock
+      plugins: [
+        ...(mocks.calls.length > 0
           ? [
               moduleMockPlugin(
                 filePath,
@@ -383,7 +535,9 @@ export async function toImportUrl(
                 resolveInjectedGlobals(),
               ),
             ]
-          : [],
+          : []),
+        ...(shared.length > 0 ? [sharedPlugin(shared, sharedCommonJs)] : []),
+      ],
     });
 
     // Inputs that aren't files on disk (esbuild's own) can't change
@@ -402,7 +556,12 @@ export async function toImportUrl(
       hashString(inputs.map((i) => `${i.path}\0${i.hash}`).join("\n")),
       coverage,
     );
-    writeFileSync(outFile, result.outputFiles[0].contents);
+    // Another worker may be writing or importing the same bundle, a rename
+    // never leaves a half-written file
+    const tmp = `${outFile}.${process.pid}.${threadId}.tmp`;
+
+    writeFileSync(tmp, result.outputFiles[0].contents);
+    renameSync(tmp, outFile);
   } catch (err) {
     const errors = (err as { errors?: Array<{ location?: { file: string } }> })
       .errors;

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "@unrift/core";
 import { spawn, spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -29,7 +30,15 @@ function workspace(name: string, files: Record<string, string>) {
   return { dir, write };
 }
 
-function watch(dir: string) {
+function watch(dir: string, ...args: string[]) {
+  return watchWith({}, dir, ...args);
+}
+
+function watchWith(
+  env: Record<string, string>,
+  dir: string,
+  ...args: string[]
+) {
   const child = spawn(
     process.execPath,
     [
@@ -37,8 +46,9 @@ function watch(dir: string) {
       "--config",
       join(dir, "unrift.config.ts"),
       "--watch",
+      ...args,
     ],
-    { env: { ...process.env, CI: "" } },
+    { env: { ...process.env, CI: "", ...env } },
   );
   const out = { text: "" };
 
@@ -79,7 +89,8 @@ it("b", () => void b);
 `,
     });
     const value = join(ws.dir, "src/value.ts");
-    const w = watch(ws.dir);
+    // The workers bundle the tests, they tell the main thread what to watch
+    const w = watch(ws.dir, "--workers", "2");
 
     try {
       expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
@@ -201,8 +212,23 @@ it("value", () => expect(value).toBe(1));
       "test/slow.spec.ts": `import { it } from "@unrift/core";
 it("slow", () => new Promise((r) => setTimeout(r, 1000)));
 `,
+      "test/gone.spec.ts": `import { it } from "@unrift/core";\nit("gone", () => {});\n`,
+      "test/gone2.spec.ts": `import { it } from "@unrift/core";\nit("gone2", () => {});\n`,
+      "test/data.txt": "1\n",
+      // Moved in later, it keeps this time
+      "staging/moved.spec.ts": `import { it } from "@unrift/core";\nit("moved in", () => {});\n`,
     });
     const spec = join(ws.dir, "test/slow.spec.ts");
+    const temps = JSON.stringify(
+      [1, 2, 3].map((n) => join(ws.dir, `test/temp${n}.json`)),
+    );
+
+    // Files a test makes and removes during the run aren't a change, made
+    // together and kept a while, so their events come apart and late
+    ws.write(
+      "test/temp.spec.ts",
+      `import { it } from "@unrift/core";\nimport { rmSync, writeFileSync } from "node:fs";\nit("temp", async () => {\n  for (const f of ${temps}) writeFileSync(f, "{}");\n  await new Promise((r) => setTimeout(r, 300));\n  for (const f of ${temps}) rmSync(f);\n});\n`,
+    );
     const w = watch(ws.dir);
 
     try {
@@ -216,10 +242,196 @@ it("slow", () => new Promise((r) => setTimeout(r, 1000)));
       await sleep(300);
       writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
       expect(await w.waitFor(() => w.reruns() === 2)).toBe(true);
+
+      // A delete keeps no time to compare, it's a change too
+      await w.waitFor(() => w.out.text.split("for changes").length === 3);
+      writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
+      expect(await w.waitFor(() => w.reruns() === 3)).toBe(true);
+      await sleep(300);
+      rmSync(join(ws.dir, "test/gone.spec.ts"));
+      expect(await w.waitFor(() => w.reruns() === 4)).toBe(true);
+      await sleep(1500);
+      expect(w.reruns()).toBe(4);
+
+      // A file that was there, read by a test say, deleted while it waits
+      rmSync(join(ws.dir, "test/data.txt"));
+      expect(await w.waitFor(() => w.reruns() === 5)).toBe(true);
+
+      // An edit and a delete together, the run they start sees both
+      await w.waitFor(() => w.out.text.split("for changes").length === 7);
+      writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
+      await sleep(30);
+      rmSync(join(ws.dir, "test/gone2.spec.ts"));
+      expect(await w.waitFor(() => w.reruns() === 6)).toBe(true);
+      await sleep(2500);
+      expect(w.reruns()).toBe(6);
+
+      // Moved in during a run, with its old time
+      writeFileSync(spec, readFileSync(spec, "utf8") + "\n");
+      expect(await w.waitFor(() => w.reruns() === 7)).toBe(true);
+      await sleep(300);
+      renameSync(
+        join(ws.dir, "staging/moved.spec.ts"),
+        join(ws.dir, "test/moved.spec.ts"),
+      );
+      expect(await w.waitFor(() => w.reruns() === 8)).toBe(true);
+      expect(await w.waitFor(() => w.out.text.includes("moved in"))).toBe(
+        true,
+      );
+    } finally {
+      w.kill();
+    }
+  }, 30000);
+
+  it("runs the edited code of a plain JS import and the matchers module", async () => {
+    const ws = workspace("fresh", {
+      "unrift.config.ts": `export default { testDir: "test", matchers: ["./setup.mjs"] };\n`,
+      "setup.mjs": `import { beforeAll } from "@unrift/core";\nbeforeAll(() => console.log("setup one"));\n`,
+      "lib/tag.mjs": `export const tag = "tag one";\n`,
+      "lib/x.mjs": `export const x = 1;\n`,
+      "lib/y.cjs": `exports.y = 1;\n`,
+      // Loaded by Node, with an import and a require() from outside the test dir
+      "test/b.spec.mjs": `import { it } from "@unrift/core";\nimport { createRequire } from "node:module";\nimport { x } from "../lib/x.mjs";\nconst { y } = createRequire(import.meta.url)("../lib/y.cjs");\nit("b", () => console.log("x", x, "y", y));\n`,
+      "test/helper.js": `import { expect } from "@unrift/core";\nexport function check() {\n  expect(1).toMatchInlineSnapshot();\n}\n`,
+      "test/a.spec.js": `import { it } from "@unrift/core";\nimport { check } from "./helper.js";\nit("a", () => check());\n`,
+    });
+    const helper = join(ws.dir, "test/helper.js");
+    const w = watch(ws.dir);
+
+    try {
+      expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
+        true,
+      );
+
+      // Node cached the first one, its offsets would land in the new code
+      ws.write(
+        "test/helper.js",
+        `import { expect } from "@unrift/core";\nexport function check() {\n  expect(7).toMatchInlineSnapshot();\n  expect(5).toMatchInlineSnapshot();\n}\n`,
+      );
+      expect(await w.waitFor(() => w.out.text.includes("2 written"))).toBe(
+        true,
+      );
+      expect(readFileSync(helper, "utf8")).toContain(
+        "expect(7).toMatchInlineSnapshot(`7`);\n  expect(5).toMatchInlineSnapshot(`5`);",
+      );
+
+      // Outside the test dir, and loaded by Node
+      ws.write(
+        "setup.mjs",
+        `import { beforeAll } from "@unrift/core";\nconst { tag } = await import("./lib/tag.mjs");\nbeforeAll(() => console.log("setup two", tag));\n`,
+      );
+      expect(await w.waitFor(() => w.out.text.includes("setup two"))).toBe(
+        true,
+      );
+
+      // What it loads with an awaited import() is watched too
+      await sleep(600);
+      ws.write("lib/tag.mjs", `export const tag = "tag two";\n`);
+      expect(await w.waitFor(() => w.out.text.includes("tag two"))).toBe(true);
+
+      await sleep(600);
+      ws.write("lib/x.mjs", `export const x = 2;\n`);
+      expect(await w.waitFor(() => w.out.text.includes("x 2 y 1"))).toBe(true);
+      await sleep(600);
+      ws.write("lib/y.cjs", `exports.y = 2;\n`);
+      expect(await w.waitFor(() => w.out.text.includes("x 2 y 2"))).toBe(true);
     } finally {
       w.kill();
     }
   }, 15000);
+
+  it("reruns for a snapshot deleted by hand after unrift removed it once", async () => {
+    const snapText = "// Unrift Snapshot v1\n\nexports[`gone 1`] = `1`;\n";
+    const ws = workspace("snap-again", {
+      "unrift.config.ts": `export default { testDir: "test" };\n`,
+      "test/a.spec.ts": `import { it } from "@unrift/core";\nit("a", () => {});\n`,
+      // Obsolete, -u removes it
+      "test/__snapshots__/a.spec.ts.snap": snapText,
+    });
+    const snap = join(ws.dir, "test/__snapshots__/a.spec.ts.snap");
+    const w = watch(ws.dir, "-u");
+
+    try {
+      expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
+        true,
+      );
+      expect(existsSync(snap)).toBe(false);
+
+      // Put back, then deleted again: both the user's
+      ws.write("test/__snapshots__/a.spec.ts.snap", snapText);
+      expect(await w.waitFor(() => w.reruns() === 1)).toBe(true);
+      await w.waitFor(() => w.out.text.split("for changes").length === 3);
+      await sleep(300);
+      rmSync(snap);
+      expect(await w.waitFor(() => w.reruns() === 2)).toBe(true);
+    } finally {
+      w.kill();
+    }
+  }, 15000);
+
+  it("doesn't rerun for a snapshot a worker writes during the run", async () => {
+    const ws = workspace("worker-snap", {
+      "unrift.config.ts": `export default { testDir: "test" };\n`,
+      "test/a.spec.ts": `import { it, expect } from "@unrift/core";\nit("a", () => expect(1).toMatchSnapshot());\n`,
+      // Keeps the run going once a's worker wrote its .snap
+      "test/b.spec.ts": `import { it } from "@unrift/core";\nit("b", () => new Promise((r) => setTimeout(r, 1000)));\n`,
+    });
+    const w = watch(ws.dir, "--workers", "2");
+
+    try {
+      expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
+        true,
+      );
+
+      ws.write(
+        "test/a.spec.ts",
+        `import { it, expect } from "@unrift/core";\nit("a", () => { expect(1).toMatchSnapshot(); expect(2).toMatchSnapshot(); });\n`,
+      );
+      expect(
+        await w.waitFor(() => w.out.text.split("written").length === 3),
+      ).toBe(true);
+      await sleep(1000);
+      expect(w.reruns()).toBe(1);
+
+      // An edit to it after the worker wrote it, while the run goes on, is
+      // the user's
+      const snap = join(ws.dir, "test/__snapshots__/a.spec.ts.snap");
+
+      ws.write(
+        "test/a.spec.ts",
+        `import { it, expect } from "@unrift/core";\nit("a", () => { expect(1).toMatchSnapshot(); expect(2).toMatchSnapshot(); expect(3).toMatchSnapshot(); });\n`,
+      );
+      expect(
+        await w.waitFor(() => readFileSync(snap, "utf8").includes("a 3")),
+      ).toBe(true);
+      writeFileSync(snap, readFileSync(snap, "utf8").replace("`3`", "`4`"));
+      expect(await w.waitFor(() => w.reruns() === 3)).toBe(true);
+    } finally {
+      w.kill();
+    }
+  }, 15000);
+
+  it("says it's watching once the watchers are set up", async () => {
+    const ws = workspace("ready", {
+      "unrift.config.ts": `export default { testDir: "test" };\n`,
+      "test/a.spec.ts": `import { it } from "@unrift/core";\nit("a", () => {});\n`,
+    });
+    const w = watchWith({ UNRIFT_DEBUG: "1" }, ws.dir);
+
+    try {
+      expect(await w.waitFor(() => w.out.text.includes("for changes"))).toBe(
+        true,
+      );
+
+      const text = w.out.text;
+
+      expect(
+        text.indexOf(`[unrift] watching ${join(ws.dir, "test")}`),
+      ).toBeLessThan(text.indexOf("for changes"));
+    } finally {
+      w.kill();
+    }
+  });
 
   it("reloads an edited config Node runs without bundling", () => {
     // Watch mode loads the config again on every run

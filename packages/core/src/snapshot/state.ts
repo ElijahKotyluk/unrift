@@ -14,10 +14,13 @@ import {
   commitInlineEdits,
   matchInlineSnapshot,
   resetInlineSnapshots,
+  takeInlineEdits,
   writeInlineSnapshots,
+  type InlineSource,
   type InlineEdits,
 } from "./inline";
 import { serialize } from "./serialize";
+import { noteWrite } from "../utils/ownWrites";
 
 /**
  * - "all": write new snapshots and overwrite mismatches (`-u`)
@@ -119,7 +122,12 @@ function getFile(testFile: string): SnapshotFile {
  * One per test. Each attempt runs in a fresh scope so a retry starts counting
  * from the same place. Only the last attempt is committed, when the test is done.
  */
-export function createSnapshotTest(testFile: string, testName: string) {
+/** `testId` is the test's id in the results, see commitInlineEdits. */
+export function createSnapshotTest(
+  testFile: string,
+  testName: string,
+  testId: string,
+) {
   let last: Scope | undefined;
 
   return {
@@ -152,7 +160,7 @@ export function createSnapshotTest(testFile: string, testName: string) {
     finish() {
       if (!last) return;
 
-      commitInlineEdits(last.inline);
+      commitInlineEdits(last.inline, testId);
       inlineFailed += last.inlineFailed;
 
       if (last.counters.size === 0) return;
@@ -171,6 +179,14 @@ export function createSnapshotTest(testFile: string, testName: string) {
 }
 
 type MatchResult = { pass: true } | { pass: false; message: string };
+
+/**
+ * For a file given up on mid-test: its attempt never ends, so the next
+ * file's hooks mustn't fall back to that test's scope.
+ */
+export function dropSnapshotScope(): void {
+  current = undefined;
+}
 
 function getScope(matcher: string): Scope {
   const scope = storage.getStore() ?? current;
@@ -272,7 +288,18 @@ export function matchSnapshot(received: unknown, hint?: string): MatchResult {
  */
 export function finishSnapshots(
   testFiles: Array<{ file: string; keep: string[] }>,
-): SnapshotSummary {
+): {
+  summary: SnapshotSummary;
+  /** Written with writeInline once every thread is done. */
+  inline: InlineSource[];
+  /**
+   * Snapshot dirs a removed file may have left empty. Removed with
+   * removeEmptyDirs once every thread is done, another worker may be about
+   * to write in one.
+   */
+  emptied: string[];
+} {
+  const emptied: string[] = [];
   const summary: SnapshotSummary = {
     added: 0,
     updated: 0,
@@ -334,10 +361,15 @@ export function finishSnapshots(
     try {
       if (file.data.size === 0) {
         rmSync(file.path, { force: true });
-        removeDirIfEmpty(dirname(file.path));
+        noteWrite(file.path);
+        emptied.push(dirname(file.path));
       } else {
-        mkdirSync(dirname(file.path), { recursive: true });
+        // A folder it makes changes the one above it too
+        const made = mkdirSync(dirname(file.path), { recursive: true });
+
+        if (made) noteWrite(made);
         writeFileSync(file.path, formatSnapshotFile(file.data));
+        noteWrite(file.path);
       }
     } catch (err) {
       summary.errors.push({
@@ -361,16 +393,37 @@ export function finishSnapshots(
 
   files.clear();
 
-  const inline = writeInlineSnapshots();
-
-  summary.added += inline.added;
-  summary.updated += inline.updated;
   summary.failed += inlineFailed;
-  summary.filesWritten.push(...inline.filesWritten);
-  summary.inlineSkipped = inline.skipped;
-  summary.errors.push(...inline.errors);
+  // A worker finishes its files one at a time, each counted once
+  inlineFailed = 0;
 
-  return summary;
+  return { summary, inline: takeInlineEdits(), emptied };
+}
+
+/**
+ * Writes the inline snapshots of every thread and adds them to `summary`.
+ * `conflicts` are tests to fail, their value conflicts with another worker's.
+ */
+export function writeInline(
+  summary: SnapshotSummary,
+  taken: InlineSource[],
+): {
+  summary: SnapshotSummary;
+  conflicts: Array<{ test: string; message: string }>;
+} {
+  const inline = writeInlineSnapshots(taken);
+
+  return {
+    conflicts: inline.conflicts,
+    summary: {
+      ...summary,
+      added: summary.added + inline.added,
+      updated: summary.updated + inline.updated,
+      filesWritten: [...summary.filesWritten, ...inline.filesWritten],
+      inlineSkipped: inline.skipped,
+      errors: [...summary.errors, ...inline.errors],
+    },
+  };
 }
 
 function peekFile(testFile: string): SnapshotFile | undefined {
@@ -396,9 +449,16 @@ function ownsKey(name: string, key: string): boolean {
   return key.startsWith(`${name} `) && /^\d+$/.test(key.slice(name.length + 1));
 }
 
+export function removeEmptyDirs(dirs: string[]) {
+  for (const dir of new Set(dirs)) removeDirIfEmpty(dir);
+}
+
 function removeDirIfEmpty(dir: string) {
   try {
-    if (readdirSync(dir).length === 0) rmdirSync(dir);
+    if (readdirSync(dir).length === 0) {
+      rmdirSync(dir);
+      noteWrite(dir);
+    }
   } catch {
     // Not ours to worry about
   }

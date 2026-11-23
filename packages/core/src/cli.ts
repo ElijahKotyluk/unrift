@@ -45,6 +45,7 @@ Options:
   -g, --grep <pattern>     Only run tests whose full name matches (regex)
   -b, --bail               Stop on first test failure
   -t, --timeout <ms>       Default test timeout in milliseconds
+      --workers <n>        Run test files in n worker threads
   -w, --watch              Re-run tests on file changes
   -u, --update-snapshots   Rewrite failing snapshots and remove obsolete ones
       --coverage           Report code coverage
@@ -63,6 +64,7 @@ Examples:
   unrift --grep "adds numbers"
   unrift -c test/config.ts --bail
   unrift --timeout 10000
+  unrift --workers 4
   unrift --watch
   unrift -u
   unrift --coverage --coverage-reporter lcov
@@ -74,6 +76,7 @@ function parseArgs(argv: string[]) {
   let pattern: RegExp | undefined;
   let grep: RegExp | undefined;
   let timeoutMs: number | undefined;
+  let workers: number | undefined;
   let bail: boolean | undefined;
   let debug = false;
   let help = false;
@@ -161,6 +164,24 @@ function parseArgs(argv: string[]) {
       continue;
     }
 
+    if (a === "--workers") {
+      const next = argv[i + 1];
+
+      if (!next) throw new Error(`${a} requires a number`);
+
+      workers = Number(next);
+
+      if (!Number.isInteger(workers) || workers < 1) {
+        throw new Error(
+          `Invalid workers: ${next}, use a whole number of 1 or more`,
+        );
+      }
+
+      i++;
+
+      continue;
+    }
+
     if (a === "--watch" || a === "-w") {
       watch = true;
 
@@ -209,6 +230,7 @@ function parseArgs(argv: string[]) {
     pattern,
     grep,
     timeoutMs,
+    workers,
     bail,
     debug,
     list,
@@ -228,6 +250,7 @@ const {
   pattern,
   grep,
   timeoutMs,
+  workers,
   bail,
   debug,
   list,
@@ -256,6 +279,7 @@ const runOpts = {
   grep,
   configPath,
   timeoutMs,
+  workers,
   bail,
   debug,
   list,

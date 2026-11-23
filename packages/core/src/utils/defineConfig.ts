@@ -17,6 +17,8 @@ export interface UnriftCoverageOptions {
 export interface UnriftConfigOptions {
   testDir?: string;
   timeoutMs?: number;
+  /** Run test files in this many worker threads. Defaults to 1. */
+  workers?: number;
   bail?: boolean;
   retries?: number;
   pattern?: string;

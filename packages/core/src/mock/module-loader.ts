@@ -1,5 +1,6 @@
 /**
- * Node module hooks for `mock.doMock`, installed with `module.registerHooks()`
+ * Node module hooks for `mock.doMock`, the matchers modules and loading
+ * project files again on each run. Installed with `module.registerHooks()`
  * (see register-loader.ts).
  *
  * The hooks run in the thread that imports, so they read the registry in
@@ -8,6 +9,7 @@
  */
 
 import type { LoadHookSync, ResolveHookSync } from "node:module";
+import { fileURLToPath } from "node:url";
 
 import { MOCKS_GLOBAL_KEY, MOCK_URL_PREFIX, registrations } from "./module";
 
@@ -43,13 +45,95 @@ export function generateMockSource(
   return lines.join("\n");
 }
 
+// Unrift's own files, never loaded twice: a second copy would have its own
+// suites and state
+const OWN = new URL("../../", import.meta.url).href;
+
+// Which run this is. Node caches a module by URL, so a project file imported
+// again on a later run (watch mode) would run the code from the first one.
+// Every run after the first gets its own URL for them, like a bundle does.
+let generation = 1;
+
+export function setRunGeneration(run: number): void {
+  generation = run;
+}
+
+// The matchers modules, by URL
+let matchers = new Set<string>();
+// The query of the running file's copy of them
+let copy: string | null = null;
+
+/**
+ * Each test file gets its own copy of the matchers modules, like a setup
+ * file in Jest and Vitest. A test that imports one gets that same copy.
+ * What they import is loaded once, like any module.
+ */
+export function setMatcherCopy(urls: Set<string>, query: string | null): void {
+  matchers = urls;
+  copy = query;
+}
+
+// Project files Node loads while a matchers module is imported
+let loading: Set<string> | null = null;
+
+/** Starts noting the project files Node loads, or stops and hands them back. */
+export function noteLoads(on: boolean): string[] {
+  const noted = loading ? [...loading] : [];
+
+  loading = on ? new Set() : null;
+
+  return noted;
+}
+
+// Files Node loaded as CommonJS
+const commonJs = new Set<string>();
+
+/** Whether Node loaded `path` as CommonJS. */
+export function loadedAsCommonJs(path: string): boolean {
+  return commonJs.has(path);
+}
+
+// Project files Node loaded since the last take, for watch mode
+let used = new Set<string>();
+
+/** The project files Node loaded since the last take. */
+export function takeLoads(): string[] {
+  const taken = [...used];
+
+  used = new Set();
+
+  return taken;
+}
+
+function noteLoad(url: string) {
+  if (
+    url.startsWith("file:") &&
+    !url.includes("/node_modules/") &&
+    !url.startsWith(OWN)
+  ) {
+    const bare = url.replace(/[?#].*$/, "");
+
+    used.add(bare);
+    loading?.add(bare);
+  }
+}
+
 /** Points a mocked spec at a `unrift-mock:` URL. */
 export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
-  const entry = registrations.get(specifier);
-
   // Only imports, like module.register() hooks were. A require() inside a
   // package keeps the real module.
-  if (entry && !context.conditions.includes("require")) {
+  if (context.conditions.includes("require")) {
+    const resolved = nextResolve(specifier, context);
+
+    // Loaded with them all the same, a require() the import graph can't see
+    noteLoad(resolved.url);
+
+    return resolved;
+  }
+
+  const entry = registrations.get(specifier);
+
+  if (entry) {
     // The registration ID in the URL makes each doMock of the same spec a
     // new module, Node caches modules by URL
     return {
@@ -59,12 +143,46 @@ export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
     };
   }
 
-  return nextResolve(specifier, context);
+  const resolved = nextResolve(specifier, context);
+
+  if (!resolved.url.startsWith("file:")) return resolved;
+
+  const bare = resolved.url.replace(/[?#].*$/, "");
+
+  noteLoad(resolved.url);
+
+  if (copy && matchers.has(bare)) {
+    return { ...resolved, url: `${bare}?${copy}`, shortCircuit: true };
+  }
+
+  // Packages don't change between runs, a URL that already has a query was
+  // given one on purpose
+  if (
+    generation > 1 &&
+    !resolved.url.includes("?") &&
+    !resolved.url.includes("/node_modules/") &&
+    !resolved.url.startsWith(OWN)
+  ) {
+    return { ...resolved, url: `${resolved.url}?unrift-run=${generation}` };
+  }
+
+  return resolved;
 };
 
 /** Generates the source for a `unrift-mock:` URL. */
 export const load: LoadHookSync = (url, context, nextLoad) => {
-  if (!url.startsWith(MOCK_URL_PREFIX)) return nextLoad(url, context);
+  if (!url.startsWith(MOCK_URL_PREFIX)) {
+    const loaded = nextLoad(url, context);
+
+    if (
+      url.startsWith("file:") &&
+      (loaded.format === "commonjs" || loaded.format === "commonjs-typescript")
+    ) {
+      commonJs.add(fileURLToPath(url.replace(/[?#].*$/, "")));
+    }
+
+    return loaded;
+  }
 
   // `unrift-mock:<spec>?v=<registrationId>`
   const rest = url.slice(MOCK_URL_PREFIX.length);

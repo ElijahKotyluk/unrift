@@ -133,6 +133,30 @@ it("hello", () => expect(hello("x")).toBe("hi x"));
     expect(plain.functions).toMatchObject({ covered: 1, total: 1 });
   });
 
+  it("maps lines from before inline snapshots were written", () => {
+    // Plain JS, so coverage reads it from disk after the run
+    const ws = workspace("inline", {
+      "src/check.js": `import { expect } from "@unrift/core";
+export function check(value) {
+  expect(value).toMatchInlineSnapshot();
+}
+export function unused() {
+  return 2;
+}
+`,
+      "test/a.spec.js": `import { it } from "@unrift/core";
+import { check } from "../src/check.js";
+it("checks", () => check({ a: 1, b: 2 }));
+`,
+    });
+
+    // -u writes the snapshot on CI too, it adds lines above unused()
+    const { report } = ws.run("--coverage", "-u");
+
+    expect(report.snapshots.added).toBe(1);
+    expect(fileIn(report, "src/check.js")?.uncoveredLines).toEqual([5, 6, 7]);
+  });
+
   it("adds up a file bundled into two test files", () => {
     // Each test takes one side of the if. V8 leaves out the side that ran as
     // often as the function, so each bundle alone only knows one branch.
@@ -151,11 +175,14 @@ it("neg", () => {
 `,
     });
 
-    const math = fileIn(ws.run("--coverage").report, "src/math.ts")!;
+    // In two workers too, the main thread adds up what each one ran
+    for (const args of [[], ["--workers", "2"]]) {
+      const math = fileIn(ws.run("--coverage", ...args).report, "src/math.ts")!;
 
-    expect(math.uncoveredLines).toEqual([16, 17, 18, 19]);
-    expect(math.functions).toMatchObject({ covered: 2, total: 3 });
-    expect(math.branches).toMatchObject({ covered: 2, total: 2 });
+      expect(math.uncoveredLines).toEqual([16, 17, 18, 19]);
+      expect(math.functions).toMatchObject({ covered: 2, total: 3 });
+      expect(math.branches).toMatchObject({ covered: 2, total: 2 });
+    }
   });
 
   it("filters files, writes lcov and json, and fails under a threshold", () => {

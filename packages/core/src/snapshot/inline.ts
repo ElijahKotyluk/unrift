@@ -1,10 +1,12 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { threadId } from "node:worker_threads";
 import { SourceMap } from "node:module";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { diffLines, escapeTemplate } from "./file";
 import { serialize } from "./serialize";
+import { noteWrite } from "../utils/ownWrites";
 import type { SnapshotUpdateMode } from "./state";
 
 // Frames from Unrift itself are skipped when looking for the call site
@@ -23,6 +25,13 @@ export interface InlineEdit {
    * different value is caught. "conflict" blocks the spot from being written.
    */
   kind: "new" | "update" | "same" | "conflict";
+  /**
+   * Ids of the tests whose call here passed, equal values included. A
+   * conflict between workers fails each of them, once per spot.
+   */
+  tests?: string[];
+  /** Tests whose call here already failed in their own worker, and counted. */
+  failed?: string[];
 }
 
 /** Edits by file, then by where the argument starts. */
@@ -42,11 +51,18 @@ interface SourceFile {
 
 const sources = new Map<string, SourceFile>();
 const sourceMaps = new Map<string, SourceMap | null>();
+// What changed since the last takeInlineEdits: the spots of each source, a
+// source with none is new or missed a write. A take looks only at these.
+const changed = new Map<string, Set<number>>();
+// How many of each spot's test ids a take sent, by source and spot
+const sent = new Map<string, Map<number, { tests: number; failed: number }>>();
 
 let runStartedAt = 0;
 
 export function resetInlineSnapshots() {
   sources.clear();
+  sent.clear();
+  changed.clear();
   sourceMaps.clear();
   runStartedAt = Date.now();
 }
@@ -158,7 +174,10 @@ function queueEdit(
   const file = getSource(site.file, site.content);
 
   if (file.stale) {
-    if (!optional) file.missed = true;
+    if (!optional && !file.missed) {
+      file.missed = true;
+      markChanged(site.file);
+    }
     return;
   }
 
@@ -196,18 +215,33 @@ function queueEdit(
   // A "same" never replaces a pending write for this spot
   if (!existing || existing.kind === "same") {
     edits.set(args.start, { ...args, value, kind });
+  } else if (!edits.has(args.start)) {
+    // Another test's write with the same value: nothing to write, but this
+    // test ran the spot too and fails with it on a conflict between workers
+    edits.set(args.start, { ...args, value, kind: "same" });
   }
 }
 
 /** Called when a test is done, with its last attempt's edits. */
-export function commitInlineEdits(pending: InlineEdits) {
+export function commitInlineEdits(pending: InlineEdits, testId?: string) {
   for (const [path, edits] of pending) {
     const file = getSource(path);
 
     for (const [start, edit] of edits) {
-      if (edit.kind !== "same" || !file.edits.has(start)) {
-        file.edits.set(start, edit);
+      const prev = file.edits.get(start);
+      // Added to in place, a spot every test hits would be copied each time
+      const tests = prev?.tests ?? [];
+      const failed = prev?.failed ?? [];
+
+      // A conflict in a test's own edits means its call here threw
+      if (testId) (edit.kind === "conflict" ? failed : tests).push(testId);
+
+      // A "same" never replaces a pending write, it still counts the test
+      if (edit.kind !== "same" || !prev) {
+        file.edits.set(start, { ...edit, tests, failed });
       }
+
+      markChanged(path, start);
     }
   }
 }
@@ -241,6 +275,8 @@ function getSource(path: string, bundled?: string): SourceFile {
       missed: false,
     };
     sources.set(path, file);
+    // Sent once even with no edits, other threads' copies are checked against it
+    markChanged(path);
   }
 
   return file;
@@ -406,24 +442,235 @@ function skipSpace(source: string, i: number): number {
   return i;
 }
 
-/** Write the committed edits into the test files. */
-export function writeInlineSnapshots(): {
+/** What changed in a source file's committed edits since the thread's last take. */
+export type InlineSource = {
+  /** The thread that saw them. Its takes of a file add up, in order. */
+  thread: number;
+  path: string;
+  /** Only in the thread's first take of the file. */
+  source?: string;
+  /**
+   * The spots that changed since its last take. Their `tests` and `failed`
+   * are the ids added since, a later take's add to an earlier one's.
+   */
+  edits: InlineEdit[];
+  missed: boolean;
+};
+
+/**
+ * This thread's committed edits since its last take. Workers send them to
+ * the main thread after each file. They're kept here, so the next file's
+ * tests still check against them, the way they do without workers.
+ */
+export function takeInlineEdits(): InlineSource[] {
+  const taken: InlineSource[] = [];
+
+  for (const [path, spots] of changed) {
+    const file = sources.get(path)!;
+    const first = !sent.has(path);
+    const counts = sent.get(path) ?? new Map();
+    const edits: InlineEdit[] = [];
+
+    // A spot's test lists only grow (commitInlineEdits): only the ids added
+    // since are sent
+    for (const start of spots) {
+      const edit = file.edits.get(start)!;
+      const count = counts.get(start) ?? { tests: 0, failed: 0 };
+
+      edits.push({
+        ...edit,
+        tests: edit.tests?.slice(count.tests),
+        failed: edit.failed?.slice(count.failed),
+      });
+      counts.set(start, {
+        tests: edit.tests?.length ?? 0,
+        failed: edit.failed?.length ?? 0,
+      });
+    }
+
+    taken.push({
+      thread: threadId,
+      path,
+      source: first ? file.source : undefined,
+      edits,
+      missed: file.missed,
+    });
+    sent.set(path, counts);
+  }
+
+  changed.clear();
+
+  return taken;
+}
+
+function markChanged(path: string, start?: number) {
+  let spots = changed.get(path);
+
+  if (!spots) {
+    spots = new Set();
+    changed.set(path, spots);
+  }
+
+  if (start !== undefined) spots.add(start);
+}
+
+/**
+ * Write the edits into the source files, each file once. Edits from more than
+ * one thread are merged first: two test files in different workers can run
+ * the same helper.
+ */
+export function writeInlineSnapshots(taken: InlineSource[]): {
   added: number;
   updated: number;
   filesWritten: string[];
   skipped: string[];
   errors: Array<{ file: string; message: string }>;
+  /** Tests whose values conflict with a test's in another worker. */
+  conflicts: Array<{ test: string; message: string }>;
 } {
+  const conflicts: Array<{ test: string; message: string }> = [];
   let added = 0;
   let updated = 0;
   const filesWritten: string[] = [];
   const skipped: string[] = [];
   const errors: Array<{ file: string; message: string }> = [];
+  const merged = new Map<
+    string,
+    {
+      source: string;
+      // What each thread saw at each spot
+      spots: Map<number, InlineEdit[]>;
+      missed: boolean;
+      // Seen in two versions, nothing is written to it
+      mismatched: boolean;
+    }
+  >();
 
-  for (const [path, file] of sources) {
+  // Each thread's takes of a file added up: the first has the source, the
+  // later ones what changed
+  const byThread = new Map<
+    string,
+    {
+      path: string;
+      source?: string;
+      edits: Map<number, InlineEdit>;
+      missed: boolean;
+    }
+  >();
+
+  for (const take of taken) {
+    const key = `${take.thread}\0${take.path}`;
+    let seen = byThread.get(key);
+
+    if (!seen) {
+      seen = { path: take.path, edits: new Map(), missed: false };
+      byThread.set(key, seen);
+    }
+
+    if (take.source !== undefined) seen.source = take.source;
+    if (take.missed) seen.missed = true;
+
+    for (const edit of take.edits) {
+      const prev = seen.edits.get(edit.start);
+      // Own lists, added to in place: a spot every file hits comes in each take
+      const tests = prev?.tests ?? [];
+      const failed = prev?.failed ?? [];
+
+      tests.push(...(edit.tests ?? []));
+      failed.push(...(edit.failed ?? []));
+      seen.edits.set(edit.start, { ...edit, tests, failed });
+    }
+  }
+
+  for (const thread of byThread.values()) {
+    // Its first take never came in, without the source the offsets mean nothing
+    if (thread.source === undefined) {
+      errors.push({
+        file: thread.path,
+        message:
+          "Inline snapshots from a worker came in without the source they were taken from",
+      });
+      continue;
+    }
+
+    let file = merged.get(thread.path);
+
+    if (!file) {
+      file = {
+        source: thread.source,
+        spots: new Map(),
+        missed: false,
+        mismatched: false,
+      };
+      merged.set(thread.path, file);
+    }
+
+    if (thread.missed) file.missed = true;
+
+    // Bundled from different versions, the offsets don't line up
+    if (thread.source !== file.source) file.mismatched = true;
+
+    for (const edit of thread.edits.values()) {
+      file.spots.set(edit.start, [...(file.spots.get(edit.start) ?? []), edit]);
+    }
+  }
+
+  // Decided per spot once every thread is in, so the order they finished in
+  // doesn't matter
+  const resolved = new Map<string, InlineEdit[]>();
+
+  for (const [path, file] of merged) {
+    if (file.mismatched) {
+      file.missed = true;
+      continue;
+    }
+
+    const edits: InlineEdit[] = [];
+
+    for (const seen of file.spots.values()) {
+      const values = new Set(
+        seen.filter((e) => e.kind !== "conflict").map((e) => e.value),
+      );
+
+      // One thread: its own check already ran
+      if (
+        seen.length === 1 ||
+        (values.size === 1 && seen.every((e) => e.kind !== "conflict"))
+      ) {
+        edits.push(
+          seen.find((e) => e.kind === "new" || e.kind === "update") ?? seen[0],
+        );
+        continue;
+      }
+
+      // Different values in different workers. Like a run without workers,
+      // where the test that hit it fails, but every one of them: there's no
+      // telling which ran first.
+      const line = file.source
+        .slice(0, seen[0].start)
+        .split(/\r\n|\r|\n/).length;
+      const message = `${NAME}() at ${path}:${line} ran with different values in different test files`;
+      // Each test that passed here fails once for this spot. One whose call
+      // here already failed in its worker was counted there.
+      const failed = new Set(seen.flatMap((e) => e.failed ?? []));
+      const tests = new Set(
+        seen.flatMap((e) => e.tests ?? []).filter((t) => !failed.has(t)),
+      );
+
+      for (const test of tests) conflicts.push({ test, message });
+
+      if (tests.size === 0 && failed.size === 0) {
+        errors.push({ file: path, message });
+      }
+    }
+
+    resolved.set(path, edits);
+  }
+
+  for (const [path, file] of merged) {
     if (file.missed) skipped.push(path);
 
-    const edits = [...file.edits.values()]
+    const edits = (resolved.get(path) ?? [])
       .filter((edit) => edit.kind === "new" || edit.kind === "update")
       .sort((a, b) => b.start - a.start);
 
@@ -459,6 +706,7 @@ export function writeInlineSnapshots(): {
     // Not a skip: the matcher passed expecting this to land, so the run fails
     try {
       writeFileSync(path, source);
+      noteWrite(path);
     } catch (err) {
       errors.push({ file: path, message: errorMessage(err) });
       continue;
@@ -472,9 +720,7 @@ export function writeInlineSnapshots(): {
     }
   }
 
-  sources.clear();
-
-  return { added, updated, filesWritten, skipped, errors };
+  return { added, updated, filesWritten, skipped, errors, conflicts };
 }
 
 function errorMessage(err: unknown): string {

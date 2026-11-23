@@ -40,11 +40,8 @@ const PRIORITY: Record<TaskKind, number> = {
 
 // State
 //
-// NOTE: this is process-global singleton state. It is correct today because
-// unrift runs every spec file sequentially in one process, and the
-// afterEach(restoreAll) contract resets between tests. If parallel per-file
-// execution lands (see ISSUES.md, parallel test file execution), the fake
-// clock would need per-worker isolation instead of module-level state.
+// One clock a thread. Files in a thread run one at a time, a worker thread
+// has its own, and real timers come back after each file (run.ts).
 
 let installed = false;
 let now = 0;
@@ -285,6 +282,13 @@ const ALL_FAKEABLE: readonly FakeableApi[] = [
   "performance",
 ];
 
+// What's faked unless toFake says otherwise, like Vitest. Node's streams
+// (a fetch Response body, say) run on queueMicrotask and process.nextTick:
+// faked, reading one never finishes and spins.
+const DEFAULT_FAKED: readonly FakeableApi[] = ALL_FAKEABLE.filter(
+  (api) => api !== "queueMicrotask" && api !== "process.nextTick",
+);
+
 export interface UseFakeTimersOptions {
   // Initial system time. Accepts a Date, ISO string, or epoch milliseconds.
   now?: Date | string | number;
@@ -294,7 +298,7 @@ export interface UseFakeTimersOptions {
    */
   toFake?: readonly FakeableApi[];
   /**
-   * Opt-out: everything is faked except the listed APIs.
+   * Opt-out: what's faked by default, except the listed APIs.
    * Mutually exclusive with `toFake`.
    */
   doNotFake?: readonly FakeableApi[];
@@ -311,9 +315,9 @@ function resolveFakedSet(options: UseFakeTimersOptions): Set<FakeableApi> {
   }
   if (options.doNotFake !== undefined) {
     const excluded = new Set(options.doNotFake);
-    return new Set(ALL_FAKEABLE.filter((api) => !excluded.has(api)));
+    return new Set(DEFAULT_FAKED.filter((api) => !excluded.has(api)));
   }
-  return new Set(ALL_FAKEABLE);
+  return new Set(DEFAULT_FAKED);
 }
 
 // Tracks what was actually patched on the most recent useFakeTimers call,

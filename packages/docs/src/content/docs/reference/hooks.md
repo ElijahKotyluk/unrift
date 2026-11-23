@@ -80,6 +80,8 @@ For `beforeAll`/`afterAll`, each suite's hooks run once for that suite's scope:
 - `beforeAll` runs depth-first (parent before child)
 - `afterAll` runs reverse depth-first (child before parent)
 
+A suite's `beforeAll` and `afterAll` only run if it has a test to run. A suite whose tests are all skipped, or left out by `.only` or `--grep`, runs neither, like Jest and Vitest.
+
 ## Error handling
 
 - If `beforeAll` fails, all tests in that suite are marked as skipped

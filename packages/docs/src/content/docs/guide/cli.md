@@ -19,6 +19,7 @@ The first positional argument is a regex pattern to filter test files by path. U
 | `-g, --grep <pattern>` | Only run tests whose full name matches the regex |
 | `-b, --bail` | Stop on first test failure |
 | `-t, --timeout <ms>` | Default test timeout in milliseconds |
+| `--workers <n>` | Run test files in `n` worker threads, see [Workers](#workers) |
 | `-w, --watch` | Re-run tests automatically when files change |
 | `-u, --update-snapshots` | Rewrite snapshots that don't match and remove obsolete ones |
 | `--coverage` | Report code coverage, see [Coverage](/guide/coverage/) |
@@ -44,6 +45,9 @@ unrift --grep "adds numbers"
 
 # Stop on first failure with a 10s timeout
 unrift --bail --timeout 10000
+
+# Run files in 4 worker threads
+unrift --workers 4
 
 # Watch mode - re-run on file changes
 unrift --watch
@@ -74,7 +78,27 @@ Tests that don't match show up as skipped so the totals stay the same, and a mat
 
 `--watch` reruns when anything in the test dir changes, or a file a TypeScript test or config imports, like your source files. A new import is watched from the run that first loads it.
 
-Files imported only by `.js` test files or a `.js` config aren't watched, Node loads those without bundling.
+Files imported only by `.js` test files or a `.js` config aren't watched, Node loads those without bundling. A rerun still loads them again, so it runs what's on disk. A `matchers` module is watched.
+
+## Workers
+
+`--workers <n>` runs test files in `n` worker threads at once. Each worker takes the next file when it's done with one, and the results are reported in file order like a run without workers.
+
+What a file writes to stdout and stderr is held until the file is done, then printed in file order. Output from two files doesn't mix, but it shows up once the file finishes, not as it's written. A timer that writes after the file's tests is still that file's output, even once its worker runs another file, until the run ends. Once every file is done, a worker gets a second to finish what its tests left, and an error from it still fails the run. One still going after that is stopped with a note on stderr, what it would do later is lost. If the file was already printed, that output goes out as it's written, so it can show up after a later file's output. A note on stderr says which file it's from, like Jest's "Cannot log after tests are done". If a worker stops early, what its files wrote is still printed.
+
+Inline snapshots are written once every worker is done, so a helper that files in different workers call gets one write. Different values at the same `toMatchInlineSnapshot()` from files in different workers fail every test that ran it, and count as failed snapshots. Without workers only the later one fails, with workers there's no telling which ran first.
+
+A worker has its own modules, globals, mocks and copy of `process.env`, files in different workers don't share them. Files in the same worker run one after another, like they do without workers.
+
+Things that work differently in a worker:
+
+- `process.chdir()` throws, the working directory is the process's
+- `process.exit()` in a test, or an error thrown from a timer, stops its worker. The file it was running fails, or the last one it ran, and a new worker takes the rest. Stopped outside a file, right after its last one say, or a new worker that can't start, fails the run. Coverage of what the stopped worker ran is lost, the run fails anyway
+- stdout and stderr aren't a terminal, so libraries that check for one print without colors
+- Files on disk are shared, two files writing the same path can collide
+- Only `process.stdout` and `process.stderr` are held per file. A child process started with `stdio: "inherit"`, or a write straight to file descriptor 1 or 2, goes out right away and can mix with another file's output
+
+`--bail` stops the other workers too. Tests they already started finish, the rest are skipped.
 
 ## JSON output
 

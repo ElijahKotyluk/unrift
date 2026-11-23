@@ -29,13 +29,15 @@ it("debounces", () => {
 | `setTimeout` / `clearTimeout` | ✓ |
 | `setInterval` / `clearInterval` | ✓ |
 | `setImmediate` / `clearImmediate` | ✓ |
-| `queueMicrotask` | ✓ |
-| `process.nextTick` | ✓ |
+| `queueMicrotask` | Only with `toFake` |
+| `process.nextTick` | Only with `toFake` |
 | `Date` constructor and `Date.now` | ✓ |
 | `performance.now` | ✓ |
 | `Date.parse` and `Date.UTC` | Unchanged (still useful for parsing) |
 
-Everything is restored when you call `useRealTimers()` or `restoreAll()`.
+`queueMicrotask` and `process.nextTick` stay real unless you list them in `toFake`, like Vitest. Node's streams run on them, so with them faked a `fetch` response body never finishes reading.
+
+Everything is restored when you call `useRealTimers()` or `restoreAll()`, and after each test file.
 
 ## Advancing the clock
 
@@ -119,7 +121,9 @@ The infinite-loop guard from the sync drainers still applies - a callback that a
 When tasks share the same `fireAt`, microtasks fire before macrotasks. `process.nextTick` is treated as microtask-priority - it runs before any `setTimeout`, even at the same scheduled time.
 
 ```ts
-mock.useFakeTimers();
+mock.useFakeTimers({
+  toFake: ["setTimeout", "queueMicrotask", "process.nextTick"],
+});
 
 const order: string[] = [];
 setTimeout(() => order.push("timeout"), 0);
@@ -132,7 +136,7 @@ mock.advanceTimersByTime(0);
 
 ## Selective faking
 
-By default `useFakeTimers()` patches every supported API. To fake only a subset, pass `toFake`:
+By default `useFakeTimers()` patches every supported API but `queueMicrotask` and `process.nextTick`. To fake only a subset, or those two as well, pass `toFake`:
 
 ```ts
 mock.useFakeTimers({ toFake: ["setTimeout", "Date"] });
@@ -144,9 +148,9 @@ mock.useFakeTimers({ toFake: ["setTimeout", "Date"] });
 Or to fake everything _except_ certain APIs, pass `doNotFake`:
 
 ```ts
-mock.useFakeTimers({ doNotFake: ["process.nextTick"] });
+mock.useFakeTimers({ doNotFake: ["Date"] });
 
-// Everything except process.nextTick is faked
+// What's faked by default, except Date
 ```
 
 The two options are mutually exclusive - passing both throws.

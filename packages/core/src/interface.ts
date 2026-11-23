@@ -45,6 +45,8 @@ function _describe(description: string, fn: () => void, mode: TaskMode) {
 
   const parent = getCurrentSuite();
   const suite = new Suite(description, parent, mode);
+  // Put back as it was: an abandoned file's parent isn't the run's
+  const previous = unriftGlobalContext.currentSuite;
 
   parent.addSuite(suite);
 
@@ -63,7 +65,7 @@ function _describe(description: string, fn: () => void, mode: TaskMode) {
       );
     }
   } finally {
-    unriftGlobalContext.currentSuite = parent;
+    unriftGlobalContext.currentSuite = previous;
   }
 }
 

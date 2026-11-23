@@ -1,11 +1,20 @@
 import {
-  watch as fsWatch,
+  watch as nodeWatch,
   existsSync,
   readdirSync,
   statSync,
   type FSWatcher,
 } from "node:fs";
-import { basename, dirname, relative, resolve, join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  join,
+  sep,
+} from "node:path";
 
 import {
   loadConfig,
@@ -34,6 +43,8 @@ import {
 } from "./coverage/report";
 
 import { normalizePath } from "./utils/normalizePath";
+import { isOwnWrite } from "./utils/ownWrites";
+import { resolveImport } from "./utils/moduleMockPlugin";
 import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
 import { TaskStatus } from "./types";
 
@@ -49,6 +60,7 @@ interface RunnerOptions {
   pattern?: RegExp;
   grep?: RegExp;
   timeoutMs?: number;
+  workers?: number;
   bail?: boolean;
   debug?: boolean;
   list?: boolean;
@@ -180,9 +192,13 @@ function formatDuration(ms: number): string {
 function getFileHeadingFromDescription(description: string): string | null {
   const index = description.indexOf("›");
 
-  if (index === -1) return null;
+  if (index !== -1) return description.slice(0, index).trim();
 
-  return description.slice(0, index).trim();
+  // A file's own result, like "a.spec.ts > [import]". The run's own ones
+  // ("root > [worker]") have no file.
+  const own = /^(.*) > \[[^\]]+\]$/.exec(description);
+
+  return own && own[1] !== "root" ? own[1] : null;
 }
 
 function shortenPath(absPath: string): string {
@@ -262,6 +278,14 @@ function getFileStats(group: FileGroup) {
 }
 
 function extractTestName(description: string): string {
+  // A file's own result is its label, under the file's heading
+  if (
+    getFileHeadingFromDescription(description) !== null &&
+    !description.includes("›")
+  ) {
+    return description.replace(/^.* > (\[[^\]]+\])$/, "$1");
+  }
+
   // Remove the file heading and first suite separator, keep nested describe structure
   return description.replace(/^.*?›\s*/, "");
 }
@@ -349,6 +373,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
   );
 
   let files = discoverTestFiles(testDir);
+
+  lastTestFiles = new Set(files.map((f) => resolve(f)));
 
   const pattern =
     options.pattern ??
@@ -442,7 +468,22 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     bail,
     grep: options.grep,
     retries: config?.retries,
-    matchers: config?.matchers,
+    // From the config's folder, like testDir. A package too: from unrift's
+    // own folder it wouldn't be found when unrift is linked.
+    matchers:
+      config?.matchers &&
+      (await Promise.all(
+        config.matchers.map(async (spec) =>
+          typeof spec !== "string" || isAbsolute(spec)
+            ? spec
+            : spec.startsWith("file:")
+              ? fileURLToPath(spec)
+              : spec.startsWith(".")
+                ? resolve(configDir, spec)
+                : await resolveMatcherPackage(spec, configDir),
+        ),
+      )),
+    workers: options.workers ?? config?.workers,
     updateSnapshots: options.updateSnapshots ? "all" : undefined,
     coverage: coverageOn
       ? {
@@ -502,8 +543,6 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     ? checkThresholds(coverage.summary.total, coverageConfig?.thresholds)
     : [];
 
-  // Reports inside the test dir would set off watch mode again
-  noteOwnWrites([...snapshots.filesWritten, ...coverageReports]);
   // Obsolete snapshots fail the run until they're removed with -u, and so
   // does a snapshot that couldn't be read or written
   const obsoleteLeft = snapshots.obsolete - snapshots.removed;
@@ -556,7 +595,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
 
     console.log(JSON.stringify(report, null, 2));
 
-    if (!ok) process.exitCode = 1;
+    // From the results only, a test that set it doesn't decide
+    process.exitCode = ok ? 0 : 1;
 
     return;
   }
@@ -650,7 +690,11 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
     console.log(`\n${horizontalRule(colors.boldRed(" FAILURES "))}\n`);
 
     failures.forEach((r, i) => {
-      const testName = extractTestName(r.description);
+      const heading = getFileHeadingFromDescription(r.description);
+      // With its file, two files can have a test of the same name
+      const testName = heading
+        ? `${shortenPath(heading)} › ${extractTestName(r.description)}`
+        : extractTestName(r.description);
 
       console.log(colors.boldRed(`  ${i + 1}) ${testName}`));
 
@@ -748,7 +792,8 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
 
   console.log("");
 
-  if (!ok) process.exitCode = 1;
+  // From the results only, a test that set it doesn't decide
+  process.exitCode = ok ? 0 : 1;
 }
 
 /**
@@ -757,20 +802,23 @@ export async function runTestsCLI(options: RunnerOptions = {}) {
  * platforms (Linux `fs.watch` does not support `recursive: true` before Node 22).
  * Returns a cleanup function to stop watching.
  */
-// What the last run wrote, so the watcher can tell its own writes from user
-// edits. Stamped by mtime and size: an edit after that changes the stamp.
-const ownWrites = new Map<string, string>();
+async function resolveMatcherPackage(spec: string, dir: string) {
+  const found = await resolveImport(spec, dir);
 
-function stamp(path: string): string {
-  try {
-    const st = statSync(path);
-
-    return `${st.mtimeMs}:${st.size}`;
-  } catch {
-    return "missing";
+  if (found === null) {
+    throw new Error(
+      `Unrift: matchers package ${spec} can't be imported from ${dir}: it isn't installed there, or it has no export for import`,
+    );
   }
+
+  return found;
 }
 
+// The test files the last run found, for watch mode
+let lastTestFiles = new Set<string>();
+
+// Watch mode tells its own writes from the user's by what's in ownWrites.ts,
+// stamped as they're written, by a worker too
 function modifiedSince(path: string, time: number): boolean {
   try {
     return statSync(resolve(path)).mtimeMs >= time;
@@ -779,20 +827,21 @@ function modifiedSince(path: string, time: number): boolean {
   }
 }
 
-function noteOwnWrites(paths: string[]) {
-  ownWrites.clear();
+// When a watched folder was first seen to have each path, for a file a test
+// makes and removes. Kept past the event, its delete can be reported late.
+const appeared = new Map<string, number>();
 
-  for (const path of paths) {
-    ownWrites.set(resolve(path), stamp(path));
-    // Creating or removing the .snap also shows up as a change to its folder
-    ownWrites.set(dirname(resolve(path)), stamp(dirname(path)));
+/** Whether `path`, or a folder it's in, showed up at `time` or later. */
+function appearedSince(path: string, time: number): boolean {
+  for (let p = resolve(path); ; p = dirname(p)) {
+    if ((appeared.get(p) ?? -1) >= time) return true;
+    if (dirname(p) === p) return false;
   }
 }
 
-function isOwnWrite(path: string): boolean {
-  const own = ownWrites.get(resolve(path));
-
-  return own !== undefined && own === stamp(path);
+/** Drops what showed up before `time`, it's no longer asked about. */
+function forgetAppearedBefore(time: number) {
+  for (const [path, at] of appeared) if (at < time) appeared.delete(path);
 }
 
 function watchRecursive(
@@ -801,14 +850,28 @@ function watchRecursive(
   debounceMs = 150,
 ): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let lastFile = "";
-  let lastPath = "";
+  // Every path changed within the debounce, one may be a run's own write
+  let changed = new Map<string, string>();
+  // What each watched folder has, to tell a new file from one that was there
+  const listing = new Map<string, Set<string>>();
+
+  const list = (d: string) => {
+    try {
+      listing.set(d, new Set(readdirSync(d)));
+    } catch {
+      listing.delete(d);
+    }
+  };
 
   function trigger(filename: string, path: string) {
-    lastFile = filename;
-    lastPath = path;
+    changed.set(path, filename);
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => onChange(lastFile, lastPath), debounceMs);
+    timer = setTimeout(() => {
+      const paths = changed;
+
+      changed = new Map();
+      for (const [path, filename] of paths) onChange(filename, path);
+    }, debounceMs);
   }
 
   // A folder deleted and made again at the same path (like __snapshots__)
@@ -866,6 +929,22 @@ function watchRecursive(
 
     try {
       const watcher = fsWatch(d, (_event, filename) => {
+        const before = listing.get(d);
+
+        list(d);
+
+        // Not there before: made since, by a test say. Its name may be gone
+        // already, the files made with it may not have had their event yet.
+        if (before) {
+          const names = new Set(listing.get(d));
+          const now = Date.now();
+
+          if (filename) names.add(filename);
+          for (const name of names) {
+            if (!before.has(name)) appeared.set(join(d, name), now);
+          }
+        }
+
         if (filename) watchIfNewDir(join(d, filename));
 
         // Our own snapshot writes shouldn't trigger another run, edits by
@@ -878,12 +957,20 @@ function watchRecursive(
         ) {
           return;
         }
-        trigger(filename ?? d, filename ? join(d, filename) : d);
+        // macOS reports a change to the watched folder by its own name
+        const path =
+          !filename ||
+          (filename === basename(d) && !existsSync(join(d, filename)))
+            ? d
+            : join(d, filename);
+
+        trigger(filename ?? d, path);
       });
 
       // Deleting a watched folder can emit an error on some platforms
       watcher.on("error", () => {});
       watched.set(d, { watcher, ino });
+      list(d);
 
       if (process.env.UNRIFT_DEBUG === "1")
         console.log(`[unrift] watching ${d}`);
@@ -967,8 +1054,12 @@ function waitForDir(dir: string, onCreated: () => void): () => void {
  * is watched, not the file: an editor that saves by renaming a new file over
  * the old one would leave a watcher on the file looking at nothing.
  */
-function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
+function watchFiles(
+  onChange: (filename: string, path: string) => void,
+  debounceMs = 150,
+) {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let changed = new Set<string>();
   let files = new Set<string>();
   const watched = new Map<string, { watcher: FSWatcher; ino: number }>();
   // Folders that are gone, watched for when they're made again
@@ -979,8 +1070,14 @@ function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
   const renamed = new Set<string>();
 
   function trigger(path: string) {
+    changed.add(path);
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => onChange(path), debounceMs);
+    timer = setTimeout(() => {
+      const paths = changed;
+
+      changed = new Set();
+      for (const path of paths) onChange(path, path);
+    }, debounceMs);
   }
 
   function unwatch(d: string) {
@@ -1070,7 +1167,35 @@ function watchFiles(onChange: (filename: string) => void, debounceMs = 150) {
   };
 }
 
+// Every watcher, so a run can stop them from keeping the process alive:
+// with nothing else left, Node says a file is stuck (settles in run.ts)
+const watchers = new Set<FSWatcher>();
+let holding = true;
+
+function fsWatch(
+  path: string,
+  listener: (event: string, filename: string | null) => void,
+): FSWatcher {
+  const watcher = nodeWatch(path, listener);
+
+  watchers.add(watcher);
+  if (!holding) watcher.unref();
+
+  return watcher;
+}
+
+function holdOpen(on: boolean) {
+  holding = on;
+
+  for (const watcher of watchers) {
+    if (on) watcher.ref();
+    else watcher.unref();
+  }
+}
+
 function closeWatcher(watcher: FSWatcher) {
+  watchers.delete(watcher);
+
   try {
     watcher.close();
   } catch {
@@ -1108,16 +1233,19 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
 
   let { testDir, configDir, configPath } = await resolveDirs(options);
 
-  logWatching(testDir);
-
   let running = false;
-  let runStart = 0;
-  // A change saved during a run, run again for it after
-  let changedDuring: string | null = null;
+  // Set while a run starts: the rest of the changes that started it, the
+  // run already sees them
+  let starting = false;
+  // What was there from before watching isn't new
+  let runStart = Date.now();
+  // Paths changed during a run. A worker writes its snapshots mid-run, which
+  // ones the run wrote itself is only known once it's done.
+  const changedDuring = new Map<string, { filename: string; early: boolean }>();
 
   // Source files and the config live outside the test dir. Watch the ones
   // the last run bundled, the test dir is already watched as a whole.
-  const imports = watchFiles((filename) => rerun(filename));
+  const imports = watchFiles((filename, path) => rerun(filename, path));
   // A build that failed doesn't say what it imports, so until it builds
   // anything under the config's folder reruns
   let stopFallback: (() => void) | null = null;
@@ -1143,15 +1271,48 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
     }
   };
 
+  // What the last run used, and the config. One of them gone, or a folder
+  // with one in it, is always a change. Snapshots deleted by hand are too.
+  const usedFiles = () => [
+    ...lastTestFiles,
+    ...bundledFiles().files.map((f) => resolve(f)),
+    ...(configPath ? [resolve(configPath)] : []),
+  ];
+  const wasUsed = (path: string, used: string[]) => {
+    const full = resolve(path);
+
+    return (
+      full.endsWith(".snap") ||
+      basename(full) === "__snapshots__" ||
+      used.some((f) => f === full || f.startsWith(full + sep))
+    );
+  };
+  // New at its first change and gone now: made and removed, like a test's
+  // temp file. One that was there before is a delete.
+  const madeAndRemoved = (path: string, used: string[]) =>
+    !existsSync(path) && appearedSince(path, runStart) && !wasUsed(path, used);
+
   const rerun = async (filename: string, path = filename) => {
     if (running) {
-      // One save can be reported again after the debounce. Only a file
-      // written since the run started is a new change.
-      if (modifiedSince(path, runStart)) changedDuring = filename;
+      changedDuring.set(path, {
+        filename,
+        early: starting && (changedDuring.get(path)?.early ?? true),
+      });
       return;
     }
+
+    // Seen during the last run, written by it, or a file a test made and
+    // removed
+    if (isOwnWrite(path) || madeAndRemoved(path, usedFiles())) return;
+
     running = true;
     runStart = Date.now();
+    forgetAppearedBefore(runStart);
+    starting = true;
+    queueMicrotask(() => (starting = false));
+    // What the last run used, before this one changes it
+    const used = usedFiles();
+    holdOpen(false);
 
     const shortFile = shortenPath(filename);
     console.log(
@@ -1190,15 +1351,29 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
       process.exitCode = 1;
     } finally {
       watchImports();
+      holdOpen(true);
       running = false;
     }
 
-    if (changedDuring) {
-      const next = changedDuring;
+    // One save can be reported again after the debounce. Only a file
+    // written since the run started, and not by it, is a new change. A move
+    // keeps its time: one that showed up during the run is a change, one
+    // that's gone a delete, unless it showed up during the run too. What
+    // came in with the change that started the run, the run already saw.
+    const next = [...changedDuring].find(([path, { early }]) => {
+      if (isOwnWrite(path)) return false;
+      if (modifiedSince(path, runStart)) return true;
+      if (early) return false;
 
-      changedDuring = null;
-      void rerun(next, next);
-    } else if (moved) logWatching(testDir);
+      return existsSync(path)
+        ? appearedSince(path, runStart)
+        : !madeAndRemoved(path, used);
+    });
+
+    changedDuring.clear();
+
+    if (next) void rerun(next[1].filename, next[0]);
+    else if (moved) logWatching(testDir);
     else {
       console.log(
         ` ${colors.dim("↺")} ${colors.dim("Watching for changes…  Ctrl+C to quit")}\n`,
@@ -1209,6 +1384,10 @@ export async function watchTestsCLI(options: RunnerOptions = {}) {
   let stop = watchRecursive(testDir, rerun);
 
   watchImports();
+
+  // Once it is: a pipe to stdout is written synchronously on Linux, a test
+  // or script reading it could save a file before the watchers are set up
+  logWatching(testDir);
 
   // Keep process alive and clean up on exit
   process.on("SIGINT", () => {

@@ -1,5 +1,7 @@
-import { unriftGlobalContext } from "./context";
+import { inAbandonedFile, unriftGlobalContext } from "./context";
 import { resetMatchers } from "./matchers";
+import { threadId } from "node:worker_threads";
+
 import { createSnapshotTest } from "./snapshot/state";
 import { Test } from "./test";
 
@@ -16,6 +18,17 @@ interface RunOptions {
 
 interface SuiteRunState {
   bailed: boolean;
+  /** Given up on, stalled: nothing more of it runs, even if it resumes. */
+  abandoned?: boolean;
+  /** The test being run, its hooks included. A stall fails it. */
+  current?: Test | null;
+}
+
+// Goes up as each hook and test finishes, a stalled file shows none
+let progress = 0;
+
+export function runProgress(): number {
+  return progress;
 }
 
 function appendHookFailure(
@@ -39,6 +52,8 @@ function appendHookFailure(
 }
 
 export interface TestResult {
+  /** Unique in the run, unlike the description. Not set for hook errors. */
+  id?: string;
   description: string;
   status: TaskStatus;
   error?: Error;
@@ -79,7 +94,8 @@ export class Suite {
 
   public markSubtreeSkipped() {
     for (const test of this.tests) {
-      if (test.status === TaskStatus.Pending) test.status = TaskStatus.Skipped;
+      if (test.status !== TaskStatus.Pending) continue;
+      test.status = TaskStatus.Skipped;
       test.durationMs = 0;
     }
 
@@ -92,7 +108,7 @@ export class Suite {
    * skipped.
    */
   private markSubtreeFilteredOut(
-    grep: RegExp,
+    grep: RegExp | undefined,
     isOnly: boolean,
     inOnlyContext: boolean,
   ) {
@@ -115,6 +131,8 @@ export class Suite {
         (isOnly && !suite.subtreeHasOnly && !childOnly)
       ) {
         suite.markSubtreeSkipped();
+      } else if (suite.mode === TaskMode.Todo && !grep) {
+        suite.markSubtreeTodo();
       } else {
         suite.markSubtreeFilteredOut(grep, isOnly, childOnly);
       }
@@ -202,12 +220,10 @@ export class Suite {
       return;
     }
 
-    // Same for --grep: nothing below can run, so don't run hooks either
-    if (
-      options?.grep &&
-      !this.hasRunnableMatch(options.grep, isOnly, inOnlyContext)
-    ) {
-      this.markSubtreeFilteredOut(options.grep, isOnly, inOnlyContext);
+    // Same when nothing below can run, all skipped or left out by --grep:
+    // no hooks either, like Jest and Vitest
+    if (!this.hasRunnableMatch(options?.grep, isOnly, inOnlyContext)) {
+      this.markSubtreeFilteredOut(options?.grep, isOnly, inOnlyContext);
 
       return;
     }
@@ -218,10 +234,14 @@ export class Suite {
       // beforeAll
       try {
         for (const hook of this.beforeAllHooks) {
+          if (state.abandoned) return;
           await hook();
+          if (!state.abandoned) progress++;
         }
       } catch (error) {
         this.beforeAllError = toError(error);
+        // A failure under --bail, other files and workers stop too
+        if (options?.bail) state.bailed = true;
 
         // Prevent "pending" tests from showing up if beforeAll fails
         this.markSubtreeSkipped();
@@ -237,7 +257,16 @@ export class Suite {
       for (let i = 0; i < this.tests.length; i++) {
         const test = this.tests[i];
 
-        if (state.bailed) break;
+        // Another worker bailed while this suite was running
+        if (state.bailed || state.abandoned) {
+          for (let j = i; j < this.tests.length; j++) {
+            const t = this.tests[j];
+            if (t.status === TaskStatus.Pending) t.status = TaskStatus.Skipped;
+            t.durationMs = 0;
+          }
+
+          break;
+        }
 
         // Checked before skip/todo so a non-matching todo reports as skipped
         if (options?.grep && !this.testMatchesGrep(test, options.grep)) {
@@ -272,7 +301,11 @@ export class Suite {
         let totalMs = 0;
         const filePath = this.getFilePath();
         const snapshots = filePath
-          ? createSnapshotTest(filePath, this.getSnapshotName(test))
+          ? createSnapshotTest(
+              filePath,
+              this.getSnapshotName(test),
+              this.testId(test),
+            )
           : undefined;
 
         const runAttempt = async () => {
@@ -283,8 +316,11 @@ export class Suite {
 
           try {
             for (const hook of beforeEachHooks) {
+              if (state.abandoned) return;
+
               try {
                 await hook();
+                if (!state.abandoned) progress++;
               } catch (error) {
                 throw appendHookFailure(
                   undefined,
@@ -294,14 +330,19 @@ export class Suite {
               }
             }
 
+            if (state.abandoned) return;
             await test.run(options?.timeoutMs);
+            if (!state.abandoned) progress++;
           } catch (error) {
             test.status = TaskStatus.Fail;
             test.error = toError(error);
           } finally {
             for (const hook of afterEachHooks) {
+              if (state.abandoned) break;
+
               try {
                 await hook();
+                if (!state.abandoned) progress++;
               } catch (error) {
                 test.status = TaskStatus.Fail;
                 test.error = appendHookFailure(
@@ -313,6 +354,8 @@ export class Suite {
             }
           }
         };
+
+        state.current = test;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           test.attempts = attempt;
@@ -341,6 +384,10 @@ export class Suite {
           }
         }
 
+        // What it did after it was given up on doesn't count, nor is written
+        if (state.abandoned) return;
+
+        state.current = null;
         test.durationMs = totalMs;
         snapshots?.finish();
 
@@ -366,7 +413,7 @@ export class Suite {
       for (let i = 0; i < this.suites.length; i++) {
         const childSuite = this.suites[i];
 
-        if (state.bailed) {
+        if (state.bailed || state.abandoned) {
           // Current and remaining suites won't run
           for (let j = i; j < this.suites.length; j++) {
             this.suites[j].markSubtreeSkipped();
@@ -381,20 +428,27 @@ export class Suite {
       // but it should not run for suites we haven't entered.
       if (entered) {
         for (const afterAllHook of this.afterAllHooks) {
+          if (state.abandoned) break;
+
           try {
             await afterAllHook();
+            if (!state.abandoned) progress++;
           } catch (error) {
             // Record once; keep running remaining afterAll hooks
             if (!this.afterAllError) {
               this.afterAllError = toError(error);
             }
+
+            if (options?.bail) state.bailed = true;
           }
         }
       }
     }
   }
 
-  private testMatchesGrep(test: Test, grep: RegExp): boolean {
+  private testMatchesGrep(test: Test, grep: RegExp | undefined): boolean {
+    if (!grep) return true;
+
     return regexTest(
       grep,
       `${this.getFullDescription()} › ${test.description}`,
@@ -407,7 +461,7 @@ export class Suite {
    * shouldn't cause this suite's hooks to fire.
    */
   private hasRunnableMatch(
-    grep: RegExp,
+    grep: RegExp | undefined,
     isOnly: boolean,
     inOnlyContext: boolean,
   ): boolean {
@@ -451,6 +505,11 @@ export class Suite {
     }
 
     return names.join(" ");
+  }
+
+  /** Unique across workers too, the same file can run in two of them. */
+  testId(test: Test): string {
+    return `${threadId}:${this.getFilePath() ?? ""}#${test.id}`;
   }
 
   getFullDescription(): string {
@@ -503,6 +562,7 @@ export class Suite {
 
     for (const test of this.tests) {
       results.push({
+        id: this.testId(test),
         description: `${this.getFullDescription()} › ${test.description}`,
         status: test.status,
         error: test.error,
@@ -538,13 +598,14 @@ export function computeOnlyFlags(suite: Suite): boolean {
   return subtreeHasOnly;
 }
 
-// KNOWN LIMITATION: rootSuite is a global singleton. This means parallel test
-// execution in the same process is not supported. A future DI/context-container
-// pattern would be needed to support worker-based parallelism.
+// One per thread, a worker thread has its own (see workers.ts)
 export const rootSuite = new Suite("root");
 rootSuite.root = true;
 
 export function getCurrentSuite() {
+  // Not part of the run
+  if (inAbandonedFile()) return new Suite("abandoned");
+
   return unriftGlobalContext.currentSuite || rootSuite;
 }
 

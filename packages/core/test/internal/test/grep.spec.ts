@@ -59,6 +59,14 @@ describe("--grep", () => {
       expect(proc.status).toBe(0);
       expect(report.skipped).toBe(report.total);
     }
+
+    // Nor without --grep, when every test is skipped or todo
+    const { proc, statusOf } = run("all-skipped-fixture");
+
+    expect(proc.status).toBe(0);
+    expect(
+      ["skipped", "todo", "in skipped suite"].map((name) => statusOf(name)),
+    ).toEqual(["skipped", "todo", "skipped"]);
   });
 
   it("keeps matching todos as todo and skips the rest", () => {

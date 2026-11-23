@@ -1,30 +1,59 @@
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { isAbsolute, resolve as resolvePath, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   clearContext,
   computeOnlyFlags,
   rootSuite,
+  runProgress,
   Suite,
   type TestResult,
 } from "./suite";
 import { ensureInternalMatchers } from "./matchers";
-import { RunState, unriftGlobalContext } from "./context";
+import { fileScope, RunState, unriftGlobalContext } from "./context";
 import { normalizePath } from "./utils/normalizePath";
+import type { Test } from "./test";
 import { TaskMode, TaskStatus } from "./types";
 import { toError } from "./utils/toError";
-import { toImportUrl } from "./utils/transform";
+import {
+  addBundledFiles,
+  inBuildCache,
+  importGraph,
+  isSharedCode,
+  toImportUrl,
+} from "./utils/transform";
+import { takeWrites } from "./utils/ownWrites";
 import { assertValidRetries } from "./utils/helpers";
 import {
+  dropSnapshotScope,
   finishSnapshots,
+  removeEmptyDirs,
+  writeInline,
   resetSnapshots,
   type SnapshotSummary,
   type SnapshotUpdateMode,
 } from "./snapshot/state";
-import { startCoverage, stopCoverage, takeCoverage } from "./coverage/collect";
+import {
+  startCoverage,
+  stopCoverage,
+  takeCoverage,
+  type V8ScriptCoverage,
+} from "./coverage/collect";
 import { toFileCoverage, type FileCoverage } from "./coverage/convert";
+import type { InlineSource } from "./snapshot/inline";
 import { summarize, type CoverageSummary } from "./coverage/report";
+import { runInWorkers } from "./workers";
+import { registerModuleLoader } from "./mock/register-loader";
+import {
+  loadedAsCommonJs,
+  noteLoads,
+  takeLoads,
+  setMatcherCopy,
+  setRunGeneration,
+} from "./mock/module-loader";
+import { useRealTimers } from "./mock/timers";
 
 export type RunEngineCoverageOptions = {
   /** Files outside it aren't reported. Defaults to the working directory. */
@@ -39,7 +68,7 @@ export type RunEngineCoverage = {
   summary: CoverageSummary;
 };
 
-type RunEngineOptions = {
+export type RunEngineOptions = {
   files: string[];
   timeoutMs?: number;
   bail?: boolean;
@@ -50,6 +79,8 @@ type RunEngineOptions = {
   updateSnapshots?: SnapshotUpdateMode;
   /** Collect coverage of the files the tests ran. */
   coverage?: boolean | RunEngineCoverageOptions;
+  /** Run the files in this many worker threads. Defaults to 1, no workers. */
+  workers?: number;
 };
 
 export type RunEngineResult = {
@@ -64,11 +95,13 @@ export type RunEngineResult = {
 
 // Node caches a module by URL, so a file that didn't change would come back
 // from the cache and register no tests on a second run (watch mode). Every
-// run after the first gets its own URL so the file runs again.
+// run after the first gets its own URL so the file runs again. The same one
+// the module hooks give the project files it imports: a helper that
+// imports the test back gets this module, not a second copy.
 let runCount = 0;
 
 function freshImportUrl(url: string): string {
-  return runCount > 1 ? `${url}?run=${runCount}` : url;
+  return runCount > 1 ? `${url}?unrift-run=${runCount}` : url;
 }
 
 // The query string only reloads ESM. A CommonJS file (.cjs, or .js in a
@@ -77,6 +110,18 @@ const requireCache = createRequire(import.meta.url).cache;
 
 function forgetCommonJs(file: string) {
   for (const key of [file, safeRealpath(file)]) delete requireCache[key];
+}
+
+// Project files a test required, so a later run loads them again like the
+// ESM ones (see module-loader.ts). Packages and unrift stay.
+const OWN_DIR = fileURLToPath(new URL("../", import.meta.url));
+
+function forgetProjectCommonJs() {
+  for (const key of Object.keys(requireCache)) {
+    if (!key.includes(`${sep}node_modules${sep}`) && !key.startsWith(OWN_DIR)) {
+      delete requireCache[key];
+    }
+  }
 }
 
 function safeRealpath(file: string): string {
@@ -105,21 +150,128 @@ function unpassedTestNames(suite: Suite, names: string[] = []): string[] {
   return names;
 }
 
-async function loadMatcherModules(specifiers?: string[]) {
-  for (const spec of specifiers ?? []) {
-    await import(spec);
+// Before any test can fake them
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+
+/**
+ * How long a file may sit with nothing keeping Node going, by default.
+ * UNRIFT_STALL_MS is for unrift's own tests, which stall on purpose.
+ */
+const STALL_MS = Number(process.env.UNRIFT_STALL_MS) || 5000;
+
+class Stalled extends Error {
+  constructor(ms: number) {
+    super(
+      `Nothing kept Node going for ${ms}ms and it didn't finish: it waits on a promise nothing settles, or only on an unref'd timer or handle. A longer timeoutMs gives that one longer.`,
+    );
+    this.name = "Stalled";
   }
 }
 
-export async function runEngine(
-  options: RunEngineOptions,
-): Promise<RunEngineResult> {
-  const { files } = options;
+/**
+ * The promise, or a Stalled error once it's clear nothing will settle it.
+ * Without this, a hook or test awaiting such a promise would let Node exit
+ * as if the run passed, or keep a worker waiting forever.
+ *
+ * Node says nothing keeps it going with beforeExit (a worker's port is
+ * unref'd while it runs a file). An unref'd timer doesn't, and may still
+ * settle it, so Node is kept going for a while first. Any hook or test that
+ * finishes in that time starts it over.
+ */
+function settles<T>(work: Promise<T>, ms = STALL_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  // The wait ran out with nothing moved. Only if Node is still idle then
+  // (beforeExit again) is it stuck: the timer may have started real work.
+  let elapsed = false;
+  let from = 0;
+  let onExit: () => void = () => {};
+  const stalled = new Promise<never>((_, reject) => {
+    onExit = () => {
+      if (timer) return;
 
-  // Validate before touching global state. A bad value (e.g. "3" from a JSON
-  // config) would otherwise turn into "31" attempts or zero.
-  assertValidRetries(options.retries, "runEngine");
+      if (elapsed && runProgress() === from) {
+        reject(new Stalled(ms));
+        return;
+      }
 
+      elapsed = false;
+      from = runProgress();
+      timer = realSetTimeout(() => {
+        timer = null;
+        // Something moved, it's not stuck. If Node drains again, beforeExit
+        // starts another wait.
+        elapsed = runProgress() === from;
+      }, ms);
+    };
+    process.on("beforeExit", onExit);
+  });
+
+  return Promise.race([work, stalled]).finally(() => {
+    process.off("beforeExit", onExit);
+    if (timer) realClearTimeout(timer);
+  });
+}
+
+/** A matchers module, and the file it is if it's one. */
+type Matcher = { spec: string; url: string; file: string | null };
+
+/**
+ * Resolves the matchers modules. A relative path is from the working
+ * directory, the CLI passes them from the config's folder. Node loads them
+ * like a test file it doesn't bundle, they share its modules.
+ */
+function resolveMatchers(specifiers: string[] | undefined): Matcher[] {
+  // Not through the hooks, which would hand back a run's or a file's copy
+  setMatcherCopy(new Set(), null);
+
+  // A module listed twice is one module, its hooks are added once
+  return [...new Set(specifiers ?? [])].map((spec) => {
+    const url =
+      spec.startsWith(".") || isAbsolute(spec)
+        ? // The real path, what Node resolves an import of it to
+          pathToFileURL(safeRealpath(resolvePath(spec))).href
+        : import.meta.resolve(spec).replace(/[?#].*$/, "");
+
+    return {
+      spec,
+      url,
+      file: url.startsWith("file:") ? fileURLToPath(url) : null,
+    };
+  });
+}
+
+/** The options a worker gets, all of them can be copied to another thread. */
+export type EngineOptions = Omit<RunEngineOptions, "workers">;
+
+export type FileRun = {
+  file: string;
+  results: TestResult[];
+  /** The file has `.only`, so its other tests were skipped. */
+  hasOnly: boolean;
+};
+
+/** What a run's finished files leave besides their results. */
+export type RunPart = {
+  snapshots: SnapshotSummary;
+  /** Inline snapshot edits, not written yet. */
+  inline: InlineSource[];
+  /** Snapshot dirs to remove if they're empty, once every thread is done. */
+  emptied: string[];
+  /** V8 coverage of the run's own code, empty without coverage. */
+  scripts: V8ScriptCoverage[];
+  /** URLs of the test bundles, for coverage. */
+  bundles: string[];
+  /** Files written and their stamps, for watch mode in the main thread. */
+  writes: Array<[string, string]>;
+};
+
+export type RunEnd = RunPart & {
+  /** Results for the top level's beforeAll and afterAll, if they failed. */
+  root: FileRun;
+};
+
+function snapshotMode(options: EngineOptions): SnapshotUpdateMode {
   const updateMode = options.updateSnapshots ?? (isCI() ? "none" : "new");
 
   if (!["all", "new", "none"].includes(updateMode)) {
@@ -128,58 +280,195 @@ export async function runEngine(
     );
   }
 
+  return updateMode;
+}
+
+function workerCount(workers: unknown): number {
+  if (workers === undefined) return 1;
+
+  if (
+    typeof workers !== "number" ||
+    !Number.isInteger(workers) ||
+    workers < 1
+  ) {
+    throw new Error(
+      `workers must be a whole number of 1 or more, got ${JSON.stringify(workers)}`,
+    );
+  }
+
+  return workers;
+}
+
+function coverageOptions(
+  options: EngineOptions,
+): RunEngineCoverageOptions | undefined {
+  return options.coverage === true ? {} : options.coverage || undefined;
+}
+
+/**
+ * A run in this thread: `runFile` for each test file, then `finish` once.
+ * A worker thread starts one and runs the files the main thread sends it.
+ *
+ * `state.bailed` stops the run, a worker sets it when another one bails.
+ */
+export async function startRun(
+  options: EngineOptions,
+  state: { bailed: boolean } = { bailed: false },
+) {
   clearContext();
   runCount++;
+  // A worker thread has them already, the main thread may not without the CLI
+  registerModuleLoader();
+  setRunGeneration(runCount);
+  if (runCount > 1) forgetProjectCommonJs();
 
-  resetSnapshots(updateMode);
+  resetSnapshots(snapshotMode(options));
 
   ensureInternalMatchers();
 
-  const coverage =
-    options.coverage === true ? {} : options.coverage || undefined;
+  const coverage = coverageOptions(options);
 
   // Before any user code loads, code compiled earlier isn't counted
   if (coverage) await startCoverage();
   else await stopCoverage();
 
   const bundles = new Set<string>();
+  // Bundled since the last take
+  let newBundles: string[] = [];
 
-  await loadMatcherModules(options.matchers);
+  const matchers = resolveMatchers(options.matchers);
+  const matcherFiles = matchers.flatMap((m) => (m.file ? [m.file] : []));
+  // The matchers modules and the project files Node loads with them. Test
+  // bundles leave them out, so a bundled test shares them like one Node
+  // loads does, like in Jest and Vitest.
+  // Grows with what Node loads when it imports them, like an awaited
+  // import() at their top level
+  const sharedFiles = new Set([
+    ...matcherFiles,
+    ...(
+      await Promise.all(
+        matchers.flatMap((m) =>
+          m.file && !m.file.includes(`${sep}node_modules${sep}`)
+            ? [importGraph(m.file)]
+            : [],
+        ),
+      )
+    ).flat(),
+  ]);
+  const matcherUrls = new Set(matchers.map((m) => m.url));
 
-  const timeoutMs = options.timeoutMs;
-  const bail = options.bail ?? false;
+  // Watched like a test's imports
+  addBundledFiles({
+    files: [...sharedFiles].filter(
+      (f) => !f.includes(`${sep}node_modules${sep}`),
+    ),
+    failed: false,
+  });
+  // Each file gets its own copy of the matchers modules
+  let fileCount = 0;
 
-  unriftGlobalContext.state = RunState.Register;
+  /** Imports the file, which registers its tests, and runs them. */
+  async function runFile(file: string): Promise<FileRun> {
+    const fileSuite = new Suite(
+      normalizePath(file),
+      rootSuite,
+      TaskMode.Default,
+    );
 
-  try {
-    for (const file of files) {
-      const fileSuite = new Suite(
-        normalizePath(file),
-        rootSuite,
-        TaskMode.Default,
-      );
+    rootSuite.addSuite(fileSuite);
 
-      rootSuite.addSuite(fileSuite);
-      unriftGlobalContext.currentSuite = fileSuite;
+    // A test timeout says how long something may take, otherwise a while
+    const stallMs = options.timeoutMs ?? STALL_MS;
+    // The run's state as this file sees it: a stall gives up on it alone
+    const fileState = {
+      get bailed() {
+        return state.bailed;
+      },
+      set bailed(value: boolean) {
+        state.bailed = value;
+      },
+      abandoned: false,
+      current: null as Test | null,
+    };
 
+    // Its code knows it's this file's, even once it's given up on
+    return fileScope.run(fileState, () =>
+      runFileIn(file, fileSuite, fileState, stallMs),
+    );
+  }
+
+  async function runFileIn(
+    file: string,
+    fileSuite: Suite,
+    fileState: { bailed: boolean; abandoned: boolean; current: Test | null },
+    stallMs: number,
+  ): Promise<FileRun> {
+    unriftGlobalContext.currentSuite = fileSuite;
+    unriftGlobalContext.state = RunState.Register;
+
+    try {
       try {
         forgetCommonJs(file);
 
+        // Imported for each file, like a setup file in Jest and Vitest, so
+        // the hooks it adds at the top level are this file's and run before
+        // its own. A test that imports it gets this same copy.
+        const copy = `unrift-file=${runCount}.${++fileCount}`;
+
+        setMatcherCopy(matcherUrls, copy);
+
+        // A CommonJS one runs again only once it's out of the cache. A
+        // require() of it in the test then gets this copy too.
+        for (const f of matcherFiles) forgetCommonJs(f);
+
+        noteLoads(true);
+
+        try {
+          for (const m of matchers) {
+            await settles(import(`${m.url}?${copy}`), stallMs);
+
+            if (fileSuite.tests.length > 0 || fileSuite.suites.length > 0) {
+              // They aren't the file's, only the error is
+              fileSuite.tests.length = 0;
+              fileSuite.suites.length = 0;
+
+              throw new Error(
+                `Unrift: matchers module ${m.spec} defined tests. It can add matchers and hooks, put tests in a test file.`,
+              );
+            }
+          }
+        } finally {
+          // What Node loaded with them, it can load again for a test
+          for (const url of noteLoads(false)) {
+            const path = fileURLToPath(url);
+
+            if (isSharedCode(path)) sharedFiles.add(path);
+          }
+        }
+
         const built = await toImportUrl(file, "bundle-test", {
           coverage: !!coverage,
+          shared: [...sharedFiles],
+          sharedCommonJs: [...sharedFiles].filter(
+            (f) => loadedAsCommonJs(f) || /\.c(j|t)s$/.test(f),
+          ),
         });
         const url = freshImportUrl(built);
 
-        if (built !== pathToFileURL(file).href) bundles.add(url);
+        if (built !== pathToFileURL(file).href) {
+          bundles.add(url);
+          newBundles.push(url);
+        }
 
-        await import(url);
+        await settles(import(url), stallMs);
       } catch (err) {
-        const error = toError(err);
+        fileSuite.errors.push({ label: "import", error: toError(err) });
 
-        fileSuite.errors.push({
-          label: "import",
-          error,
-        });
+        // What it registers if it resumes goes nowhere
+        if (err instanceof Stalled) fileState.abandoned = true;
+
+        // A failed file, like any other under --bail
+        if (options.bail) state.bailed = true;
 
         // Tests registered before the error mustn't run. The run loop goes by
         // mode, so marking statuses alone wasn't enough.
@@ -188,54 +477,224 @@ export async function runEngine(
       } finally {
         unriftGlobalContext.currentSuite = rootSuite;
       }
-    }
 
-    const isOnly = computeOnlyFlags(rootSuite);
+      // Per file, like Jest and Vitest: `.only` skips the file's other tests
+      const hasOnly = computeOnlyFlags(fileSuite);
+      const runOptions = {
+        timeoutMs: options.timeoutMs,
+        bail: options.bail ?? false,
+        grep: options.grep,
+        retries: options.retries,
+      };
 
-    unriftGlobalContext.state = RunState.Run;
+      unriftGlobalContext.state = RunState.Run;
 
-    await rootSuite.run(
-      { timeoutMs, bail, grep: options.grep, retries: options.retries },
-      { bailed: false },
-      isOnly,
-      false,
-    );
+      try {
+        await settles(
+          fileSuite.run(runOptions, fileState, hasOnly, false),
+          stallMs,
+        );
+      } catch (err) {
+        if (!(err instanceof Stalled)) throw err;
 
-    const results = rootSuite.getResults();
+        // Nothing more of it runs, even if what it waited on settles later
+        // in another file's time
+        fileState.abandoned = true;
 
-    let coverageResult: RunEngineCoverage | undefined;
+        dropSnapshotScope();
 
-    if (coverage) {
-      const covered = toFileCoverage(await takeCoverage(), bundles, {
-        root: coverage.root ?? process.cwd(),
-        include: coverage.include,
-        exclude: coverage.exclude,
-        testFiles: files,
+        // The test it was in fails, even in an afterEach after it passed,
+        // like a throw there. In a suite hook, the file does. The ones it
+        // didn't get to are skipped.
+        const test = fileState.current;
+
+        if (test) {
+          test.status = TaskStatus.Fail;
+          test.error = err;
+        } else {
+          fileSuite.errors.push({ label: "stalled", error: err });
+        }
+
+        fileSuite.markSubtreeSkipped();
+
+        // A failure like any other under --bail
+        if (options.bail) state.bailed = true;
+      }
+
+      return {
+        file: fileSuite.description,
+        results: fileSuite.getResults(),
+        hasOnly,
+      };
+    } finally {
+      unriftGlobalContext.state = RunState.Idle;
+      // Fake timers a test left on are this file's, the next one gets real
+      // ones like in Jest and Vitest
+      useRealTimers();
+      // Watched like what a bundle reads: what Node loaded itself, an
+      // import() or a require() say
+      addBundledFiles({
+        files: takeLoads()
+          .map((url) => fileURLToPath(url))
+          .filter((f) => !inBuildCache(f)),
+        failed: false,
       });
-
-      coverageResult = { files: covered, summary: summarize(covered) };
     }
+  }
+
+  /**
+   * Writes the run's snapshot files and takes its coverage. Inline snapshots
+   * are written by runEngine, once every thread's edits are in.
+   */
+  // How many of rootSuite.suites `take` has handled
+  let taken = 0;
+
+  /**
+   * Writes the snapshot files of the files run since the last take, and
+   * takes their inline edits. A worker takes after each file, so a crash
+   * later on doesn't lose them. Coverage is taken once, in finish.
+   */
+  function take(): RunPart {
+    const suites = rootSuite.suites.slice(taken);
+
+    taken = rootSuite.suites.length;
 
     // A file that failed to import never ran, leave its snapshots alone
-    const snapshots = finishSnapshots(
-      rootSuite.suites
+    const {
+      summary: snapshots,
+      inline,
+      emptied,
+    } = finishSnapshots(
+      suites
         .filter((suite) => !suite.errors.some((e) => e.label === "import"))
         .map((suite) => ({
           file: suite.description,
           keep: unpassedTestNames(suite),
         })),
     );
+    const fresh = newBundles;
 
+    newBundles = [];
+
+    // Synchronous: nothing a test left, like a timer, can run between
+    // writing the snapshot files and the worker sending what it wrote
     return {
-      isOnly,
-      timeoutMs,
-      bail,
-      results,
       snapshots,
-      coverage: coverageResult,
+      inline,
+      emptied,
+      scripts: [],
+      bundles: fresh,
+      writes: takeWrites(),
     };
-  } finally {
-    unriftGlobalContext.state = RunState.Idle;
-    unriftGlobalContext.currentSuite = rootSuite;
   }
+
+  /** Takes what's left, and the coverage. */
+  async function finish(): Promise<RunEnd> {
+    return {
+      // The top level's own errors
+      root: {
+        file: rootSuite.description,
+        results: rootSuite.getResults().slice(0, rootSuite.errors.length),
+        hasOnly: false,
+      },
+      ...take(),
+      // Once at the end, a take per file adds up over many files. Packages
+      // are never reported, leave them out.
+      scripts: coverage
+        ? (await takeCoverage()).filter(
+            (script) =>
+              bundles.has(script.url) ||
+              (script.url.startsWith("file:") &&
+                !script.url.includes("/node_modules/")),
+          )
+        : [],
+    };
+  }
+
+  return { runFile, take, finish };
+}
+
+export async function runEngine(
+  options: RunEngineOptions,
+): Promise<RunEngineResult> {
+  // Before touching global state. A bad value (e.g. "3" from a JSON config)
+  // would otherwise turn into "31" attempts or zero.
+  assertValidRetries(options.retries, "runEngine");
+  snapshotMode(options);
+
+  const workers = workerCount(options.workers);
+
+  let files: FileRun[];
+  let end: RunEnd;
+
+  // Asked for workers, a single matching file still gets one. Running it here
+  // instead would change what isolation and process.exit() do.
+  if (workers > 1 && options.files.length > 0) {
+    // The workers collect their own, a session left on here from an
+    // earlier run would only slow this thread down
+    await stopCoverage();
+
+    ({ files, end } = await runInWorkers(
+      options,
+      Math.min(workers, options.files.length),
+    ));
+  } else {
+    const run = await startRun(options);
+
+    files = [];
+    for (const file of options.files) files.push(await run.runFile(file));
+    end = await run.finish();
+  }
+
+  const coverage = coverageOptions(options);
+  let coverageResult: RunEngineCoverage | undefined;
+
+  if (coverage) {
+    const covered = toFileCoverage(end.scripts, new Set(end.bundles), {
+      root: coverage.root ?? process.cwd(),
+      include: coverage.include,
+      exclude: coverage.exclude,
+      testFiles: options.files,
+    });
+
+    coverageResult = { files: covered, summary: summarize(covered) };
+  }
+
+  // After coverage: it reads plain JS files from disk, and an inline
+  // snapshot written first would move the code it ran
+  const { summary: snapshots, conflicts } = writeInline(
+    end.snapshots,
+    end.inline,
+  );
+
+  // A test that failed for this is a failed snapshot too, like one that
+  // failed inside its worker
+  const byId = new Map(
+    files.flatMap((file) => file.results).map((result) => [result.id, result]),
+  );
+
+  // One per test and spot, like a matcher call that fails in a worker
+  for (const { test, message } of conflicts) {
+    snapshots.failed++;
+
+    const result = byId.get(test);
+
+    if (!result) continue;
+
+    // A test that already failed keeps its own error
+    if (result.status !== TaskStatus.Fail) result.error = new Error(message);
+
+    result.status = TaskStatus.Fail;
+  }
+
+  removeEmptyDirs(end.emptied);
+
+  return {
+    isOnly: files.some((file) => file.hasOnly),
+    timeoutMs: options.timeoutMs,
+    bail: options.bail ?? false,
+    results: [end.root, ...files].flatMap((file) => file.results),
+    snapshots,
+    coverage: coverageResult,
+  };
 }

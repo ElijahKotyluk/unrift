@@ -7,7 +7,7 @@ Modifiers let you focus on specific tests, skip others, or mark tests as planned
 
 ## .only
 
-Run only the marked tests or suites. All other tests are skipped.
+Run only the marked tests or suites. The file's other tests are skipped, other files run as usual, like Jest and Vitest.
 
 ```ts
 describe.only("focused suite", () => {
@@ -36,7 +36,7 @@ describe("math", () => {
 Multiple `.only` markers can coexist - all marked tests run, everything else is skipped.
 
 :::caution
-Remember to remove `.only` before committing. Tests marked with `.only` will cause other tests to be silently skipped.
+Remember to remove `.only` before committing. Tests marked with `.only` cause the file's other tests to be silently skipped.
 :::
 
 ## .skip

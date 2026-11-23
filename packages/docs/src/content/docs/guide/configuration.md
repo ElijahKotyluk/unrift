@@ -28,8 +28,9 @@ Unrift searches upward from your project root for a config file named `unrift.co
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `testDir` | `string` | `"test"` | Directory to search for test files (relative to config file) |
-| `timeoutMs` | `number` | - | Default timeout for each test in milliseconds |
+| `timeoutMs` | `number` | - | Default timeout for each test in milliseconds. A test or hook that waits this long, 5s without one, with nothing keeping Node going (a promise nothing settles, or only an unref'd timer) fails, and the rest of its file is skipped |
 | `bail` | `boolean` | `false` | Stop running tests after the first failure |
+| `workers` | `number` | `1` | Run test files in this many worker threads, see [Workers](/guide/cli/#workers) |
 | `retries` | `number` | `0` | Retry failing tests this many times. Can be overridden per test |
 | `pattern` | `string` | - | Regex pattern to filter test files by path |
 | `includes` | `string[]` | - | Glob or regex patterns - only matching files are included |
@@ -81,6 +82,10 @@ export default defineConfig({
 ```
 
 The module should call `expect.extend()` when imported.
+
+Hooks it adds at the top level are every test file's, like a setup file in Jest (`setupFilesAfterEnv`) or Vitest (`setupFiles`). `beforeAll` and `afterAll` run around each file that has a test to run, after the file is loaded. `beforeEach` and `afterEach` run around each test.
+
+The module is loaded again for each test file, before it, so what it keeps at its top level starts fresh in every file, with workers or without. A test file that imports it gets that same copy, its hooks run once. The project files it imports load once (once in each worker, with `--workers`), and a test file gets the same ones, bundled or not. Code a test file needs when it loads goes at the module's top level, not in a `beforeAll`. A relative path, or a package name, is resolved from the config's folder.
 
 ## CLI overrides
 

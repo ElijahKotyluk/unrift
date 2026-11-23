@@ -9,7 +9,7 @@ import { scanSource, type MockCall } from "../mock/hoist";
 import { MODULE_MOCKS_GLOBAL_KEY } from "../mock/module";
 
 const NAMESPACE = "unrift-mock";
-const PRELUDE = "unrift-mock-prelude";
+export const PRELUDE = "unrift-mock-prelude";
 
 // An import from these gives the hoisted factories `mock` and the rest.
 // Matched where the scanner found an `import`, comments allowed inside.
@@ -410,7 +410,7 @@ async function starNames(
 const STAR_EXPORT = /^export \* from ("[^"\n]*");$/gm;
 
 /** Resolves `spec` from `resolveDir` with Node's import conditions. */
-async function resolveImport(
+export async function resolveImport(
   spec: string,
   resolveDir: string,
 ): Promise<string | null> {
