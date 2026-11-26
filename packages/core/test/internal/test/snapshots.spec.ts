@@ -535,6 +535,20 @@ it("template", () => expect(1).toMatchInlineSnapshot(\`\${two}\`));
     );
   });
 
+  it("reads line breaks in a snapshot file the way JavaScript does", () => {
+    const ws = workspace("line-breaks");
+
+    // A lone CR is read as LF, a // comment ends at U+2028
+    ws.spec(`it("a", () => expect("x\\ny").toMatchSnapshot());\n`);
+    mkdirSync(join(ws.snapPath, ".."));
+    writeFileSync(
+      ws.snapPath,
+      '// header\u2028exports[`a 1`] = `\r"x\ry"\r`;\n',
+    );
+
+    expect(ws.run({ CI: "true" }).status).toBe(0);
+  });
+
   it("fails the run when a snapshot file can't be read or written", () => {
     const ws = workspace("io-errors");
     const errors = (res: ReturnType<typeof ws.run>) =>

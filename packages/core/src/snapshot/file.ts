@@ -15,7 +15,11 @@ export function escapeTemplate(text: string): string {
  * come from anyone who sends a pull request, and node:vm is no sandbox.
  */
 export function readSnapshotFile(path: string): Map<string, string> {
-  const source = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+  // CRLF to LF, then read what's left the way JavaScript does, which
+  // turns CRLF and a lone CR into LF
+  const source = readFileSync(path, "utf8")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r\n?/g, "\n");
   let entries: [string, string][];
 
   try {
@@ -54,8 +58,9 @@ function parseSnapshots(source: string): [string, string][] {
     for (;;) {
       while (i < source.length && /\s/.test(source[i])) i++;
       if (source.startsWith("//", i)) {
-        const end = source.indexOf("\n", i);
-        i = end === -1 ? source.length : end;
+        // Ends at any line terminator, like JavaScript
+        const end = source.slice(i).search(/[\n\u2028\u2029]/);
+        i = end === -1 ? source.length : i + end;
       } else if (source.startsWith("/*", i)) {
         const end = source.indexOf("*/", i + 2);
         if (end === -1) fail("Unclosed comment");
@@ -137,8 +142,15 @@ function parseSnapshots(source: string): [string, string][] {
     expect("]");
     expect("=");
     const value = template();
+    const end = i;
     skip();
+    // Without a `;` the next entry has to start on a new line, like JavaScript
     if (source[i] === ";") i++;
+    else if (
+      i < source.length &&
+      !/[\n\u2028\u2029]/.test(source.slice(end, i))
+    )
+      fail("Expected `;`");
     entries.push([key, value]);
   }
 
