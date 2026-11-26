@@ -6,15 +6,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { parentPort, workerData } from "node:worker_threads";
 
-import { registerModuleLoader } from "./mock/register-loader";
-import { startRun, type EngineOptions } from "./run";
-import { bundledFiles } from "./utils/transform";
+import { registerModuleLoader } from "./mock/register-loader.js";
+import { startRun, type EngineOptions } from "./run.js";
+import { bundledFiles } from "./utils/transform.js";
 import {
   copyError,
   copyFileRun,
   type FromWorker,
   type ToWorker,
-} from "./workers";
+} from "./workers.js";
 
 // Before any test can fake or replace them
 const microtask = globalThis.queueMicrotask;

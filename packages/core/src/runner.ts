@@ -20,19 +20,19 @@ import {
   loadConfig,
   loadConfigFromPath,
   type LoadedConfig,
-} from "./utils/loadConfig";
+} from "./utils/loadConfig.js";
 
 import {
   bundledFiles,
   cleanUnriftCaches,
   isSubpath,
   startBundleRun,
-} from "./utils/transform";
-import { colors } from "./utils/colors";
-import { discoverTestFiles } from "./utils/discoverTestFiles";
-import { runEngine } from "./run";
-import type { TestResult } from "./suite";
-import type { SnapshotSummary } from "./snapshot/state";
+} from "./utils/transform.js";
+import { colors } from "./utils/colors.js";
+import { discoverTestFiles } from "./utils/discoverTestFiles.js";
+import { runEngine } from "./run.js";
+import type { TestResult } from "./suite.js";
+import type { SnapshotSummary } from "./snapshot/state.js";
 import {
   assertValidCoverageConfig,
   checkThresholds,
@@ -40,13 +40,13 @@ import {
   writeCoverageReports,
   type CoverageReporter,
   type CoverageSummary,
-} from "./coverage/report";
+} from "./coverage/report.js";
 
-import { normalizePath } from "./utils/normalizePath";
-import { isOwnWrite } from "./utils/ownWrites";
-import { resolveImport } from "./utils/moduleMockPlugin";
-import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers";
-import { TaskStatus } from "./types";
+import { normalizePath } from "./utils/normalizePath.js";
+import { isOwnWrite } from "./utils/ownWrites.js";
+import { resolveImport } from "./utils/moduleMockPlugin.js";
+import { safeRegExp, isGlobPattern, globToRegex } from "./utils/helpers.js";
+import { TaskStatus } from "./types.js";
 
 /**
  * Captured at module load so the runner's own timing measurements

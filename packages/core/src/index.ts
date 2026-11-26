@@ -1,33 +1,33 @@
-export { beforeEach, afterEach, beforeAll, afterAll } from "./hooks";
+export { beforeEach, afterEach, beforeAll, afterAll } from "./hooks.js";
 export {
   defineConfig,
   type UnriftConfigOptions,
   type UnriftCoverageOptions,
-} from "./utils/defineConfig";
-export { describe, it, test, type TestOptions } from "./interface";
-export { expect, extendMatchers } from "./expect";
+} from "./utils/defineConfig.js";
+export { describe, it, test, type TestOptions } from "./interface.js";
+export { expect, extendMatchers } from "./expect.js";
 
-export type { Matchers, ExpectInterface } from "./expect";
+export type { Matchers, ExpectInterface } from "./expect.js";
 export type {
   MatcherContext,
   MatcherFn,
   MatcherMap,
   Promisable,
-} from "./types";
-export { runEngine } from "./run";
+} from "./types.js";
+export { runEngine } from "./run.js";
 export type {
   RunEngineResult,
   RunEngineCoverage,
   RunEngineCoverageOptions,
-} from "./run";
-export type { FileCoverage } from "./coverage/convert";
+} from "./run.js";
+export type { FileCoverage } from "./coverage/convert.js";
 export type {
   CoverageMetric,
   CoverageReporter,
   CoverageSummary,
   CoverageThresholds,
-} from "./coverage/report";
-export type { SnapshotSummary, SnapshotUpdateMode } from "./snapshot/state";
+} from "./coverage/report.js";
+export type { SnapshotSummary, SnapshotUpdateMode } from "./snapshot/state.js";
 
 // Mocking suite
 export {
@@ -60,7 +60,7 @@ export {
   clearAllMocks,
   resetAllMocks,
   restoreAllMocks,
-} from "./mock/index";
+} from "./mock/index.js";
 export type {
   Spy,
   MockState,
@@ -73,4 +73,4 @@ export type {
   FakeableApi,
   FakeFsHandle,
   FakeFsState,
-} from "./mock/index";
+} from "./mock/index.js";

@@ -3,9 +3,9 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { registerModuleLoader } from "./mock/register-loader";
-import { runTestsCLI, watchTestsCLI } from "./runner";
-import { safeRegExp } from "./utils/helpers";
+import { registerModuleLoader } from "./mock/register-loader.js";
+import { runTestsCLI, watchTestsCLI } from "./runner.js";
+import { safeRegExp } from "./utils/helpers.js";
 
 // Install the module-mock loader before any test file is imported. Both the
 // core bin and the unrift wrapper bin run this CLI, so this is the single

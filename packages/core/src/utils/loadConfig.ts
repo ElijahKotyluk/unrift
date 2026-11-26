@@ -1,5 +1,5 @@
-import { toImportUrl } from "./transform";
-import { toError } from "./toError";
+import { toImportUrl } from "./transform.js";
+import { toError } from "./toError.js";
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { UnriftConfigOptions } from "./defineConfig";
+import type { UnriftConfigOptions } from "./defineConfig.js";
 
 /**
  * Regex to match valid Unrift config file names.

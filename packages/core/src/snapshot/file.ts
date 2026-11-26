@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { colors } from "../utils/colors";
+import { colors } from "../utils/colors.js";
 
 const HEADER = "// Unrift Snapshot v1";
 

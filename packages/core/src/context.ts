@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { Suite } from "./suite";
+import { Suite } from "./suite.js";
 
 /**
  * The file whose code is running, by async context. A file given up on

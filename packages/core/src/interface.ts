@@ -1,9 +1,9 @@
-import { assertRegisterState, unriftGlobalContext } from "./context";
-import { getCurrentSuite, Suite } from "./suite";
-import { Test } from "./test";
+import { assertRegisterState, unriftGlobalContext } from "./context.js";
+import { getCurrentSuite, Suite } from "./suite.js";
+import { Test } from "./test.js";
 
-import { type PromisableFn, TaskMode } from "./types";
-import { assertValidRetries } from "./utils/helpers";
+import { type PromisableFn, TaskMode } from "./types.js";
+import { assertValidRetries } from "./utils/helpers.js";
 
 /**
  * @TODO expose test and suite aliases

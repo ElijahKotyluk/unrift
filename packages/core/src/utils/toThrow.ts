@@ -1,4 +1,4 @@
-import { isErrorLike, regexTest, safeString } from "./helpers";
+import { isErrorLike, regexTest, safeString } from "./helpers.js";
 
 export type ToThrowExpected =
   | undefined

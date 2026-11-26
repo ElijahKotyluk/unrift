@@ -15,8 +15,8 @@
 
 import { Volume, createFsFromVolume } from "memfs";
 
-import { doMock, unmock } from "./module";
-import { activeRestorers } from "./spy";
+import { doMock, unmock } from "./module.js";
+import { activeRestorers } from "./spy.js";
 
 /**
  * `Volume.fromJSON()` accepts a path-to-content map. `null` represents an

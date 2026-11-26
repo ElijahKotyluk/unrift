@@ -8,14 +8,14 @@
 import { relative } from "node:path";
 import { Worker } from "node:worker_threads";
 
-import type { EngineOptions, FileRun, RunEnd, RunPart } from "./run";
-import type { SnapshotSummary } from "./snapshot/state";
-import type { TestResult } from "./suite";
-import { TaskStatus } from "./types";
-import { colors } from "./utils/colors";
-import { normalizePath } from "./utils/normalizePath";
-import { addBundledFiles } from "./utils/transform";
-import { addWrites } from "./utils/ownWrites";
+import type { EngineOptions, FileRun, RunEnd, RunPart } from "./run.js";
+import type { SnapshotSummary } from "./snapshot/state.js";
+import type { TestResult } from "./suite.js";
+import { TaskStatus } from "./types.js";
+import { colors } from "./utils/colors.js";
+import { normalizePath } from "./utils/normalizePath.js";
+import { addBundledFiles } from "./utils/transform.js";
+import { addWrites } from "./utils/ownWrites.js";
 
 /** A write to stdout or stderr while a file ran. */
 type Output = { stream: "stdout" | "stderr"; bytes: Uint8Array };

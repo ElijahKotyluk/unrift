@@ -1,13 +1,13 @@
-import { inAbandonedFile, unriftGlobalContext } from "./context";
-import { resetMatchers } from "./matchers";
+import { inAbandonedFile, unriftGlobalContext } from "./context.js";
+import { resetMatchers } from "./matchers.js";
 import { threadId } from "node:worker_threads";
 
-import { createSnapshotTest } from "./snapshot/state";
-import { Test } from "./test";
+import { createSnapshotTest } from "./snapshot/state.js";
+import { Test } from "./test.js";
 
-import { type PromisableFn, TaskMode, TaskStatus } from "./types";
-import { regexTest } from "./utils/helpers";
-import { toError } from "./utils/toError";
+import { type PromisableFn, TaskMode, TaskStatus } from "./types.js";
+import { regexTest } from "./utils/helpers.js";
+import { toError } from "./utils/toError.js";
 
 interface RunOptions {
   timeoutMs?: number;

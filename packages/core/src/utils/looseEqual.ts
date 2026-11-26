@@ -1,5 +1,5 @@
-import { isObjectLike, isPrimitive, sameValue } from "./helpers";
-import { compareInternal } from "./compareEngine";
+import { isObjectLike, isPrimitive, sameValue } from "./helpers.js";
+import { compareInternal } from "./compareEngine.js";
 
 /**
  * Loose structural equality with:

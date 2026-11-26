@@ -34,10 +34,8 @@
     "unrift": "./bin/unrift.mjs"
   },
   "scripts": {
-    "build": "pnpm build:esm && node scripts/write-cjs-shim.js",
-    "build:esm": "tsc -p tsconfig.build.esm.json && node scripts/patch-esm-extensions.js",
+    "build": "tsc -p tsconfig.build.esm.json && node scripts/write-cjs-shim.js",
     "clean": "rm -rf ./dist",
-    "compile": "tsc -p tsconfig.build.json && node scripts/patch-esm-extensions.js",
     "prepublishOnly": "pnpm run build",
     "test": "pnpm test:internal && pnpm test:fail && pnpm test:bail && pnpm test:only && pnpm test:todo && pnpm test:hooks",
     "test:bail": "node bin/unrift.mjs --config ./test/bail/unrift.outer.config.ts",

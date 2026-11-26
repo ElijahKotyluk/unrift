@@ -11,7 +11,7 @@
 import type { LoadHookSync, ResolveHookSync } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { MOCKS_GLOBAL_KEY, MOCK_URL_PREFIX, registrations } from "./module";
+import { MOCKS_GLOBAL_KEY, MOCK_URL_PREFIX, registrations } from "./module.js";
 
 /**
  * ESM source for a mocked spec. It reads the factory's exports from

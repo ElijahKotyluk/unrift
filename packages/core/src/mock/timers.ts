@@ -11,7 +11,7 @@
  *   - `mock.restoreAll()` does the same as part of bulk cleanup
  */
 
-import { activeRestorers } from "./spy";
+import { activeRestorers } from "./spy.js";
 
 // Task model
 
