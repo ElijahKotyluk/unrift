@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
 
 import { colors } from "../utils/colors";
 
@@ -11,13 +10,20 @@ export function escapeTemplate(text: string): string {
   return text.replace(/\\|`|\$\{/g, "\\$&").replace(/\r/g, "\\r");
 }
 
-/** Parse a .snap file into key -> value. */
+/**
+ * Parse a .snap file into key -> value. The file is read, never run: it can
+ * come from anyone who sends a pull request, and node:vm is no sandbox.
+ */
 export function readSnapshotFile(path: string): Map<string, string> {
-  const source = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
-  const data: Record<string, unknown> = Object.create(null);
+  // CRLF to LF, then read what's left the way JavaScript does, which
+  // turns CRLF and a lone CR into LF
+  const source = readFileSync(path, "utf8")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r\n?/g, "\n");
+  let entries: [string, string][];
 
   try {
-    runInNewContext(source, { exports: data }, { filename: path });
+    entries = parseSnapshots(source);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`Couldn't read snapshot file ${path}: ${reason}`);
@@ -25,11 +31,7 @@ export function readSnapshotFile(path: string): Map<string, string> {
 
   const snapshots = new Map<string, string>();
 
-  for (const key of Object.keys(data)) {
-    const value = data[key];
-
-    if (typeof value !== "string") continue;
-
+  for (const [key, value] of entries) {
     // Multi-line values are stored with a newline on each side, see write
     snapshots.set(
       key,
@@ -40,6 +42,119 @@ export function readSnapshotFile(path: string): Map<string, string> {
   }
 
   return snapshots;
+}
+
+/** Reads `exports[`key`] = `value`;` entries, comments and whitespace. */
+function parseSnapshots(source: string): [string, string][] {
+  const entries: [string, string][] = [];
+  let i = 0;
+
+  const fail = (what: string): never => {
+    const line = source.slice(0, i).split("\n").length;
+    throw new Error(`${what} on line ${line}`);
+  };
+
+  const skip = () => {
+    for (;;) {
+      while (i < source.length && /\s/.test(source[i])) i++;
+      if (source.startsWith("//", i)) {
+        // Ends at any line terminator, like JavaScript
+        const end = source.slice(i).search(/[\n\u2028\u2029]/);
+        i = end === -1 ? source.length : i + end;
+      } else if (source.startsWith("/*", i)) {
+        const end = source.indexOf("*/", i + 2);
+        if (end === -1) fail("Unclosed comment");
+        i = end + 2;
+      } else return;
+    }
+  };
+
+  const expect = (text: string) => {
+    skip();
+    if (!source.startsWith(text, i)) fail(`Expected \`${text}\``);
+    i += text.length;
+  };
+
+  const template = (): string => {
+    skip();
+    if (source[i] !== "`") fail("Expected a template literal");
+    i++;
+    let out = "";
+
+    for (;;) {
+      if (i >= source.length) fail("Unclosed template literal");
+      const ch = source[i];
+      if (ch === "`") {
+        i++;
+        return out;
+      }
+      if (ch === "$" && source[i + 1] === "{") fail("Unexpected `${`");
+      if (ch !== "\\") {
+        out += ch;
+        i++;
+        continue;
+      }
+      i++;
+      out += escape();
+    }
+  };
+
+  // Template literal escapes, as JavaScript reads them
+  const escape = (): string => {
+    const ch = source[i++];
+    const simple: Record<string, string> = {
+      n: "\n",
+      t: "\t",
+      r: "\r",
+      b: "\b",
+      f: "\f",
+      v: "\v",
+    };
+    if (ch === undefined) fail("Unclosed template literal");
+    if (ch in simple) return simple[ch];
+    if (ch === "\n" || ch === "\u2028" || ch === "\u2029") return "";
+    if (ch === "0" && !/[0-9]/.test(source[i] ?? "")) return "\0";
+    if (/[0-9]/.test(ch)) fail("Invalid escape");
+    if (ch === "x") return code(/^[0-9a-fA-F]{2}/);
+    if (ch === "u") {
+      if (source[i] !== "{") return code(/^[0-9a-fA-F]{4}/);
+      const end = source.indexOf("}", i);
+      const hex = end === -1 ? "" : source.slice(i + 1, end);
+      if (!/^[0-9a-fA-F]+$/.test(hex) || parseInt(hex, 16) > 0x10ffff)
+        fail("Invalid escape");
+      i = end + 1;
+      return String.fromCodePoint(parseInt(hex, 16));
+    }
+    return ch;
+  };
+
+  const code = (pattern: RegExp): string => {
+    const hex = pattern.exec(source.slice(i))?.[0];
+    if (!hex) return fail("Invalid escape");
+    i += hex.length;
+    return String.fromCodePoint(parseInt(hex, 16));
+  };
+
+  for (skip(); i < source.length; skip()) {
+    expect("exports");
+    expect("[");
+    const key = template();
+    expect("]");
+    expect("=");
+    const value = template();
+    const end = i;
+    skip();
+    // Without a `;` the next entry has to start on a new line, like JavaScript
+    if (source[i] === ";") i++;
+    else if (
+      i < source.length &&
+      !/[\n\u2028\u2029]/.test(source.slice(end, i))
+    )
+      fail("Expected `;`");
+    entries.push([key, value]);
+  }
+
+  return entries;
 }
 
 export function formatSnapshotFile(snapshots: Map<string, string>): string {
