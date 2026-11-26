@@ -24,6 +24,7 @@ Versions are `@unrift/core` / `unrift`.
 - Watch mode watches the files Node loads for a test outside the test dir too: a `.js` test's imports, an `import()` and a `require()`. Before, only what a bundle read was watched
 - Watch mode reruns for a `.snap` deleted by hand after `-u` removed it once and it was put back
 - The CommonJS entry is a plain `require()` of the ESM build, no `node:module` or `Proxy`. Socket flagged the old one as debug access
+- A `.snap` file is parsed, not run with `node:vm`, which is no sandbox. A `.snap` in a pull request could run code. Anything but `` exports[`key`] = `value`; `` entries and comments fails as unreadable
 
 ## 0.10.0 / 0.11.0 - 2026-11-21
 

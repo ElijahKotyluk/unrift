@@ -515,6 +515,26 @@ it("template", () => expect(1).toMatchInlineSnapshot(\`\${two}\`));
     expect(ws.source()).toContain("toMatchInlineSnapshot(`${two}`)");
   });
 
+  it("reads a snapshot file without running it", () => {
+    const ws = workspace("no-run");
+    const marker = join(ws.dir, "ran");
+
+    // node:vm is no sandbox, this escapes it to the real process
+    ws.spec(`it("a", () => {});\n`);
+    mkdirSync(join(ws.snapPath, ".."));
+    writeFileSync(
+      ws.snapPath,
+      `exports[\`a\`] = this.constructor.constructor("return process")().getBuiltinModule("node:fs").writeFileSync(${JSON.stringify(marker)}, "");\n`,
+    );
+    const res = ws.run();
+
+    expect(existsSync(marker)).toBe(false);
+    expect(res.status).toBe(1);
+    expect(res.report.snapshots.errors[0].message).toContain(
+      "Couldn't read snapshot file",
+    );
+  });
+
   it("fails the run when a snapshot file can't be read or written", () => {
     const ws = workspace("io-errors");
     const errors = (res: ReturnType<typeof ws.run>) =>
