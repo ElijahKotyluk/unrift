@@ -1,6 +1,6 @@
-import type { MatcherContext, MatcherMap } from "./types";
-import { formatDiff } from "./utils/diff";
-import { isErrorLike, safeString } from "./utils/helpers";
+import type { MatcherContext, MatcherMap } from "./types.js";
+import { formatDiff } from "./utils/diff.js";
+import { isErrorLike, safeString } from "./utils/helpers.js";
 
 const matcherRegistry: MatcherMap = Object.create(null);
 

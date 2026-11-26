@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import { diffLines, formatSnapshotFile, readSnapshotFile } from "./file";
+import { diffLines, formatSnapshotFile, readSnapshotFile } from "./file.js";
 import {
   commitInlineEdits,
   matchInlineSnapshot,
@@ -18,9 +18,9 @@ import {
   writeInlineSnapshots,
   type InlineSource,
   type InlineEdits,
-} from "./inline";
-import { serialize } from "./serialize";
-import { noteWrite } from "../utils/ownWrites";
+} from "./inline.js";
+import { serialize } from "./serialize.js";
+import { noteWrite } from "../utils/ownWrites.js";
 
 /**
  * - "all": write new snapshots and overwrite mismatches (`-u`)

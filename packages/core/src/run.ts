@@ -10,22 +10,22 @@ import {
   runProgress,
   Suite,
   type TestResult,
-} from "./suite";
-import { ensureInternalMatchers } from "./matchers";
-import { fileScope, RunState, unriftGlobalContext } from "./context";
-import { normalizePath } from "./utils/normalizePath";
-import type { Test } from "./test";
-import { TaskMode, TaskStatus } from "./types";
-import { toError } from "./utils/toError";
+} from "./suite.js";
+import { ensureInternalMatchers } from "./matchers.js";
+import { fileScope, RunState, unriftGlobalContext } from "./context.js";
+import { normalizePath } from "./utils/normalizePath.js";
+import type { Test } from "./test.js";
+import { TaskMode, TaskStatus } from "./types.js";
+import { toError } from "./utils/toError.js";
 import {
   addBundledFiles,
   inBuildCache,
   importGraph,
   isSharedCode,
   toImportUrl,
-} from "./utils/transform";
-import { takeWrites } from "./utils/ownWrites";
-import { assertValidRetries } from "./utils/helpers";
+} from "./utils/transform.js";
+import { takeWrites } from "./utils/ownWrites.js";
+import { assertValidRetries } from "./utils/helpers.js";
 import {
   dropSnapshotScope,
   finishSnapshots,
@@ -34,26 +34,26 @@ import {
   resetSnapshots,
   type SnapshotSummary,
   type SnapshotUpdateMode,
-} from "./snapshot/state";
+} from "./snapshot/state.js";
 import {
   startCoverage,
   stopCoverage,
   takeCoverage,
   type V8ScriptCoverage,
-} from "./coverage/collect";
-import { toFileCoverage, type FileCoverage } from "./coverage/convert";
-import type { InlineSource } from "./snapshot/inline";
-import { summarize, type CoverageSummary } from "./coverage/report";
-import { runInWorkers } from "./workers";
-import { registerModuleLoader } from "./mock/register-loader";
+} from "./coverage/collect.js";
+import { toFileCoverage, type FileCoverage } from "./coverage/convert.js";
+import type { InlineSource } from "./snapshot/inline.js";
+import { summarize, type CoverageSummary } from "./coverage/report.js";
+import { runInWorkers } from "./workers.js";
+import { registerModuleLoader } from "./mock/register-loader.js";
 import {
   loadedAsCommonJs,
   noteLoads,
   takeLoads,
   setMatcherCopy,
   setRunGeneration,
-} from "./mock/module-loader";
-import { useRealTimers } from "./mock/timers";
+} from "./mock/module-loader.js";
+import { useRealTimers } from "./mock/timers.js";
 
 export type RunEngineCoverageOptions = {
   /** Files outside it aren't reported. Defaults to the working directory. */

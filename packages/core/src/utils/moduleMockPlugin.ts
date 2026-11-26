@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import { createRequire, isBuiltin } from "node:module";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 
-import { scanSource, type MockCall } from "../mock/hoist";
-import { MODULE_MOCKS_GLOBAL_KEY } from "../mock/module";
+import { scanSource, type MockCall } from "../mock/hoist.js";
+import { MODULE_MOCKS_GLOBAL_KEY } from "../mock/module.js";
 
 const NAMESPACE = "unrift-mock";
 export const PRELUDE = "unrift-mock-prelude";

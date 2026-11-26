@@ -1,18 +1,18 @@
-import { expect } from "./expect";
-import { isSpy, type Spy } from "./mock/spy";
-import { isFetchMock, type MockFetch } from "./mock/fetch";
+import { expect } from "./expect.js";
+import { isSpy, type Spy } from "./mock/spy.js";
+import { isFetchMock, type MockFetch } from "./mock/fetch.js";
 
-import { deepEqual } from "./utils/deepEqual";
-import { looseEqual } from "./utils/looseEqual";
-import { regexTest } from "./utils/helpers";
-import { matchInline, matchSnapshot } from "./snapshot/state";
+import { deepEqual } from "./utils/deepEqual.js";
+import { looseEqual } from "./utils/looseEqual.js";
+import { regexTest } from "./utils/helpers.js";
+import { matchInline, matchSnapshot } from "./snapshot/state.js";
 import {
   toThrow,
   toThrowFromPromise,
   type ToThrowExpected,
-} from "./utils/toThrow";
+} from "./utils/toThrow.js";
 
-import type { MatcherContext } from "./types";
+import type { MatcherContext } from "./types.js";
 
 let matchersRegistered = false;
 

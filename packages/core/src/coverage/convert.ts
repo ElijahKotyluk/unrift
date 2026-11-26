@@ -3,15 +3,15 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { V8Range, V8ScriptCoverage } from "./collect";
+import type { V8Range, V8ScriptCoverage } from "./collect.js";
 import {
   decodeMappings,
   lineStarts,
   readInlineSourceMap,
   type Mapping,
-} from "./sourcemap";
-import { globToRegex, isGlobPattern, safeRegExp } from "../utils/helpers";
-import { normalizePath } from "../utils/normalizePath";
+} from "./sourcemap.js";
+import { globToRegex, isGlobPattern, safeRegExp } from "../utils/helpers.js";
+import { normalizePath } from "../utils/normalizePath.js";
 
 export type FileCoverage = {
   file: string;

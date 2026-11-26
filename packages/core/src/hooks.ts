@@ -1,6 +1,6 @@
-import { assertRegisterState } from "./context";
-import { getCurrentSuite } from "./suite";
-import { type PromisableFn } from "./types";
+import { assertRegisterState } from "./context.js";
+import { getCurrentSuite } from "./suite.js";
+import { type PromisableFn } from "./types.js";
 
 type HookFn = PromisableFn<void>;
 

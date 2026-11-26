@@ -8,8 +8,8 @@
 
 import { registerHooks } from "node:module";
 
-import { load, resolve } from "./module-loader";
-import { setHooksInstalled } from "./module";
+import { load, resolve } from "./module-loader.js";
+import { setHooksInstalled } from "./module.js";
 
 let done = false;
 

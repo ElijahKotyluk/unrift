@@ -1,6 +1,6 @@
 import { types } from "node:util";
 
-import { isErrorLike } from "../utils/helpers";
+import { isErrorLike } from "../utils/helpers.js";
 
 /**
  * Turns a value into the text stored in a snapshot. Follows Jest's format

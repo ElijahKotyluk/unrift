@@ -10,8 +10,8 @@
  *   - `mock.restoreAll()` does the same as part of bulk cleanup
  */
 
-import { activeRestorers } from "./spy";
-import { regexTest } from "../utils/helpers";
+import { activeRestorers } from "./spy.js";
+import { regexTest } from "../utils/helpers.js";
 
 /** Brand applied to `mock.fetch` so matchers can verify their received value. */
 export const FETCH_MOCK_BRAND: unique symbol = Symbol.for("unrift.fetchMock");

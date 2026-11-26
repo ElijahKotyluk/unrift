@@ -6,7 +6,7 @@
  * want to swap in a fixed value or non-function replacement.
  */
 
-import { activeRestorers } from "./spy";
+import { activeRestorers } from "./spy.js";
 
 /**
  * Tracks live stubs per target so a repeat `stub()` on the same (target, key)

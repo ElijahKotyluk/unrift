@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
-import type { FileCoverage } from "./convert";
-import { normalizePath } from "../utils/normalizePath";
-import { noteWrite } from "../utils/ownWrites";
+import type { FileCoverage } from "./convert.js";
+import { normalizePath } from "../utils/normalizePath.js";
+import { noteWrite } from "../utils/ownWrites.js";
 
 export type CoverageMetric = { covered: number; total: number; pct: number };
 

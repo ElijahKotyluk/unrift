@@ -16,7 +16,11 @@ import os from "node:os";
 import { join, basename, extname, resolve, dirname, sep } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
-import { moduleMockCalls, moduleMockPlugin, PRELUDE } from "./moduleMockPlugin";
+import {
+  moduleMockCalls,
+  moduleMockPlugin,
+  PRELUDE,
+} from "./moduleMockPlugin.js";
 
 const injectedFilename = fileURLToPath(import.meta.url);
 const injectedDirname = dirname(injectedFilename);

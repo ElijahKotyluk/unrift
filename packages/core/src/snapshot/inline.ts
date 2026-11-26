@@ -4,10 +4,10 @@ import { SourceMap } from "node:module";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { diffLines, escapeTemplate } from "./file";
-import { serialize } from "./serialize";
-import { noteWrite } from "../utils/ownWrites";
-import type { SnapshotUpdateMode } from "./state";
+import { diffLines, escapeTemplate } from "./file.js";
+import { serialize } from "./serialize.js";
+import { noteWrite } from "../utils/ownWrites.js";
+import type { SnapshotUpdateMode } from "./state.js";
 
 // Frames from Unrift itself are skipped when looking for the call site
 const coreDir = resolve(dirname(fileURLToPath(import.meta.url)), "..") + sep;

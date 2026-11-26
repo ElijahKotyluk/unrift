@@ -16,7 +16,7 @@
  *     reads back from `globalThis.__unriftMocks`.
  */
 
-import { activeRestorers, spy } from "./spy";
+import { activeRestorers, spy } from "./spy.js";
 
 // The registries below are per thread, a worker thread installs its own hooks
 // and has its own mocks.

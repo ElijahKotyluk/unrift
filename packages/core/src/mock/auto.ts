@@ -6,7 +6,7 @@
  * cleans up auto mocks too.
  */
 
-import { spy, spyOn, type AnyFn } from "./spy";
+import { spy, spyOn, type AnyFn } from "./spy.js";
 
 /**
  * Walks the chain from `target` up to (but not including) the built in

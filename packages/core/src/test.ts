@@ -1,5 +1,5 @@
-import { TaskMode, TaskStatus, type PromisableFn } from "./types";
-import { toError } from "./utils/toError";
+import { TaskMode, TaskStatus, type PromisableFn } from "./types.js";
+import { toError } from "./utils/toError.js";
 
 /**
  * Captured at module load so the runner's own timing measurements are

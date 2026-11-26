@@ -4,7 +4,7 @@ import {
   isTypedArray,
   sameValue,
   type TypedArray,
-} from "./helpers";
+} from "./helpers.js";
 
 export interface CompareOptions {
   /** true for deepEqual (prototype-sensitive), false for looseEqual */

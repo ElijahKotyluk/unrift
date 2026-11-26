@@ -1,4 +1,4 @@
-import { colors } from "./colors";
+import { colors } from "./colors.js";
 
 function formatValue(value: unknown, indent: number = 2): string {
   if (value === undefined) return "undefined";

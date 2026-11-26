@@ -1,4 +1,7 @@
-import type { CoverageReporter, CoverageThresholds } from "../coverage/report";
+import type {
+  CoverageReporter,
+  CoverageThresholds,
+} from "../coverage/report.js";
 
 export interface UnriftCoverageOptions {
   /** Same as --coverage. */

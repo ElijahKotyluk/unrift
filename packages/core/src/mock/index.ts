@@ -19,10 +19,10 @@ import {
   clearAllMocks,
   resetAllMocks,
   restoreAllMocks,
-} from "./spy";
-import { mockObject, mockClass } from "./auto";
-import { stub, mockGlobal } from "./stub";
-import { mockFetch, mockFetchOnce } from "./fetch";
+} from "./spy.js";
+import { mockObject, mockClass } from "./auto.js";
+import { stub, mockGlobal } from "./stub.js";
+import { mockFetch, mockFetchOnce } from "./fetch.js";
 import {
   useFakeTimers,
   useRealTimers,
@@ -35,15 +35,15 @@ import {
   getTimerCount,
   setSystemTime,
   getRealSystemTime,
-} from "./timers";
+} from "./timers.js";
 import {
   doMock,
   unmock,
   listMockedSpecs,
   fromModule,
   mockModule,
-} from "./module";
-import { fs as mockFs } from "./fs";
+} from "./module.js";
+import { fs as mockFs } from "./fs.js";
 
 export {
   spy,
@@ -76,15 +76,15 @@ export {
   restoreAllMocks,
 };
 
-export type { Spy, MockState, MockResult, AnyFn } from "./spy";
+export type { Spy, MockState, MockResult, AnyFn } from "./spy.js";
 export type {
   MockFetch,
   FetchMatcher,
   MockResponseInit,
   MockFetchResponse,
-} from "./fetch";
-export type { UseFakeTimersOptions, FakeableApi } from "./timers";
-export type { FakeFsHandle, FakeFsState } from "./fs";
+} from "./fetch.js";
+export type { UseFakeTimersOptions, FakeableApi } from "./timers.js";
+export type { FakeFsHandle, FakeFsState } from "./fs.js";
 
 /**
  * Unified mock namespace. Mirrors Jest / Vitest naming so existing test
