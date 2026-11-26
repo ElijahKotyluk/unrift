@@ -7,37 +7,12 @@ const CJS_DIST = resolve(__dirname, "../dist/cjs");
 
 const outputPath = resolve(CJS_DIST, "index.cjs");
 
+// Node 22.12+ can require() an ES module, so the CommonJS entry is a plain
+// require of the ESM build. No node:module or Proxy, which supply chain
+// scanners flag as debug access.
 const shim = `'use strict';
 
-let esm;
-
-function load() {
-  if (!esm) {
-    esm = require('node:module')
-      .createRequire(__filename)('../esm/index.js');
-  }
-  return esm;
-}
-
-module.exports = new Proxy({}, {
-  get(_t, p) {
-    return load()[p];
-  },
-  has(_t, p) {
-    return p in load();
-  },
-  ownKeys() {
-    return Reflect.ownKeys(load());
-  },
-  getOwnPropertyDescriptor(_t, p) {
-    return {
-      configurable: true,
-      enumerable: true,
-      writable: false,
-      value: load()[p],
-    };
-  }
-});
+module.exports = require('../esm/index.js');
 `;
 
 mkdirSync(dirname(outputPath), { recursive: true });
