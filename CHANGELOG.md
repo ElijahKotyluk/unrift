@@ -4,6 +4,17 @@ Versions are `@unrift/core` / `unrift`.
 
 ## Unreleased
 
+## 0.11.2 / 0.12.2 - 2026-11-26
+
+- Types work with `moduleResolution` `node16` and `nodenext`. The `.d.ts` files imported each other without `.js`, so TypeScript errored or, with `skipLibCheck`, found no types
+
+## 0.11.1 / 0.12.1 - 2026-11-26
+
+- The CommonJS entry is a plain `require()` of the ESM build, no `node:module` or `Proxy`. Socket flagged the old one as debug access
+- A `.snap` file is parsed, not run with `node:vm`, which is no sandbox. A `.snap` in a pull request could run code. Anything but `` exports[`key`] = `value`; `` entries and comments fails as unreadable
+
+## 0.11.0 / 0.12.0 - 2026-11-23
+
 - `--workers <n>` and the `workers` option run test files in worker threads. Each worker takes the next file when it's done, results are reported in file order. `--bail` stops the other workers too. A worker still running a second after its last file, from a timer or socket a test left, is stopped with a note
 - With workers, each file's stdout and stderr is printed once the file is done, in file order, so output from two files doesn't mix. Output a file writes after it was printed, from a timer, goes out as it's written, after a note on stderr that says which file it's from
 - Breaking: `.only` skips the other tests in its own file, not other files, like Jest and Vitest
@@ -23,9 +34,6 @@ Versions are `@unrift/core` / `unrift`.
 - Watch mode loads `.js` files a test imports and `matchers` modules again on each rerun, an edit no longer runs the old code or writes an inline snapshot into the wrong call. A `matchers` module is watched
 - Watch mode watches the files Node loads for a test outside the test dir too: a `.js` test's imports, an `import()` and a `require()`. Before, only what a bundle read was watched
 - Watch mode reruns for a `.snap` deleted by hand after `-u` removed it once and it was put back
-- The CommonJS entry is a plain `require()` of the ESM build, no `node:module` or `Proxy`. Socket flagged the old one as debug access
-- A `.snap` file is parsed, not run with `node:vm`, which is no sandbox. A `.snap` in a pull request could run code. Anything but `` exports[`key`] = `value`; `` entries and comments fails as unreadable
-- Types work with `moduleResolution` `node16` and `nodenext`. The `.d.ts` files imported each other without `.js`, so TypeScript errored or, with `skipLibCheck`, found no types
 
 ## 0.10.0 / 0.11.0 - 2026-11-21
 
